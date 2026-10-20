@@ -79,3 +79,25 @@ iter_2 : 8.6  [M] rouille absente du dos de la lame        -> band [0.10, 0.72],
               [V] garde trop plate vue de profil           -> side : 3 lignes -> 4
 iter_3 : 9.6  --deliver -> LIVRAISON (log complet conservé)
 ```
+
+## Workflow D — autocritique par partie ET sur l'assemblage
+
+Pour les générations multi-parties (`assemble.py`), la boucle notée s'applique
+à DEUX niveaux :
+
+1. **Par partie** : chaque partie a son dossier `out/<objet>/parts/<id>/`
+   (rendus + report.json). Quand l'IoU d'une partie est le point faible du
+   barème S, ouvre SES rendus, diagnostique, corrige SA spec, puis régénère
+   uniquement cette partie :
+   `python3 scripts/assemble.py manifest.json --out out/<objet> --part <id>`
+   (les autres parties viennent du cache — itérer est rapide).
+2. **Sur l'assemblage** : photos des 6 faces + turntable de l'objet complet,
+   checklist des détails Stage 0, et vérifications propres au D :
+   - les parties sont-elles ALIGNÉES (axes coaxiaux, pas de flottement) ;
+   - les CHEVAUCHEMENTS sont-ils invisibles sur les photos ;
+   - l'union STL est-elle étanche (`report.validation.watertight_union`) ;
+   - les textures changent-elles proprement d'une partie à l'autre (pas de
+     glissement de matériau à la jonction).
+
+Le barème S (silhouette) s'évalue sur l'assemblage entier ; un défaut localisé
+à une seule partie doit apparaître comme issue `S|...` pointant cette partie.

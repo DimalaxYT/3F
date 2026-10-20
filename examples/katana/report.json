@@ -1,0 +1,113 @@
+{
+  "pipeline": "assemble v1 (Workflow D multi-parties, meshgen parallèle)",
+  "prompt": "katana forgé — lame courbée polie, tsuba de fer, tsuka wrappée ito noir, habaki laiton, kashira laqué (0.97 m)",
+  "manifest_parts": 5,
+  "stats": {
+    "parts": 5,
+    "triangles": 27000,
+    "triangles_union": 25654
+  },
+  "validation": {
+    "watertight_union": true,
+    "watertight_parts": true,
+    "volume_m3": 0.00037785783448576917,
+    "triangles": 27000
+  },
+  "coherence": {
+    "method": "IoU moyen par partie (chacune vs ses 3 vues)",
+    "per_view": {
+      "kashira": 0.6278,
+      "tsuka": 0.8399,
+      "tsuba": 0.9098,
+      "habaki": 0.9444,
+      "lame": 0.5937
+    },
+    "mean": 0.7831
+  },
+  "parts": [
+    {
+      "id": "kashira",
+      "triangles": 2000,
+      "watertight": true,
+      "iou_mean": 0.6278,
+      "cached": true
+    },
+    {
+      "id": "tsuka",
+      "triangles": 4000,
+      "watertight": true,
+      "iou_mean": 0.8399,
+      "cached": true
+    },
+    {
+      "id": "tsuba",
+      "triangles": 6000,
+      "watertight": true,
+      "iou_mean": 0.9098,
+      "cached": true
+    },
+    {
+      "id": "habaki",
+      "triangles": 6000,
+      "watertight": true,
+      "iou_mean": 0.9444,
+      "cached": false
+    },
+    {
+      "id": "lame",
+      "triangles": 9000,
+      "watertight": true,
+      "iou_mean": 0.5937,
+      "cached": true
+    }
+  ],
+  "parallel_jobs": 1,
+  "files": {
+    "glb": {
+      "path": "../../3d-forge-examples/katana/katana/katana.glb",
+      "bytes": 981380
+    },
+    "stl": {
+      "path": "../../3d-forge-examples/katana/katana/katana.stl",
+      "bytes": 1282784
+    },
+    "obj": {
+      "path": "../../3d-forge-examples/katana/katana/katana.obj",
+      "bytes": 1190768
+    },
+    "usdz": {
+      "path": "../../3d-forge-examples/katana/katana/katana.usdz",
+      "bytes": 2204864
+    }
+  },
+  "renders": [
+    "../../3d-forge-examples/katana/katana/katana_face.png",
+    "../../3d-forge-examples/katana/katana/katana_profil.png",
+    "../../3d-forge-examples/katana/katana/katana_trois_quarts.png",
+    "../../3d-forge-examples/katana/katana/katana_dessus.png"
+  ],
+  "output_dir": "/home/z/my-project/download/3d-forge-examples/katana/katana",
+  "duration_s": 98.72,
+  "photos": {
+    "faces": [
+      "../../3d-forge-examples/katana/katana/katana_face_face.png",
+      "../../3d-forge-examples/katana/katana/katana_face_dos.png",
+      "../../3d-forge-examples/katana/katana/katana_face_gauche.png",
+      "../../3d-forge-examples/katana/katana/katana_face_droite.png",
+      "../../3d-forge-examples/katana/katana/katana_face_dessus.png",
+      "../../3d-forge-examples/katana/katana/katana_face_dessous.png"
+    ],
+    "all_faces": "../../3d-forge-examples/katana/katana/katana_all_faces.png",
+    "turn_images": [
+      "../../3d-forge-examples/katana/katana/katana_turn_00.png",
+      "../../3d-forge-examples/katana/katana/katana_turn_01.png",
+      "../../3d-forge-examples/katana/katana/katana_turn_02.png",
+      "../../3d-forge-examples/katana/katana/katana_turn_03.png",
+      "../../3d-forge-examples/katana/katana/katana_turn_04.png",
+      "../../3d-forge-examples/katana/katana/katana_turn_05.png",
+      "../../3d-forge-examples/katana/katana/katana_turn_06.png",
+      "../../3d-forge-examples/katana/katana/katana_turn_07.png"
+    ],
+    "turntable": "../../3d-forge-examples/katana/katana/katana_turntable.png"
+  }
+}

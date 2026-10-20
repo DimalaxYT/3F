@@ -257,19 +257,23 @@ def mesh_from_volumes(occ, zone, spec):
     scale = size_m / max(1e-9, ext[2])
     mesh.apply_scale(scale)
 
-    # décimation vers le budget triangles (annulée si elle perce le mesh)
+    # décimation vers le budget triangles (essais à budgets croissants ;
+    # si tout perce le mesh, on garde le mesh MC intégral)
     budget = int(spec.get("budget_tris", 15000))
     if len(mesh.faces) > budget:
         keep = mesh.copy()
         keep_labels = v_labels
-        mesh = mesh.simplify_quadric_decimation(face_count=budget)
-        trimesh.repair.fill_holes(mesh)
-        trimesh.repair.fix_normals(mesh)
-        if mesh.is_watertight:
-            v_labels = _sample_labels(
-                zone_up,
-                np.rint(mesh.vertices / scale).astype(np.int64))
-        else:
+        for b in (budget, budget * 2, budget * 4):
+            cand = mesh.simplify_quadric_decimation(face_count=b)
+            trimesh.repair.fill_holes(cand)
+            trimesh.repair.fix_normals(cand)
+            if cand.is_watertight:
+                mesh = cand
+                v_labels = _sample_labels(
+                    zone_up,
+                    np.rint(mesh.vertices / scale).astype(np.int64))
+                break
+        if not mesh.is_watertight:
             mesh, v_labels = keep, keep_labels
 
     return mesh, v_labels
@@ -392,6 +396,8 @@ def make_material_fn(spec, vertices, labels, z_bounds):
 
 def _rasterize_tri(uv_px, S):
     """Pixels couverts par un triangle UV -> (xs, ys, w0, w1, w2) vectorisé."""
+    if not np.isfinite(uv_px).all():
+        return None          # triangle dégénéré (UV NaN/inf d'xatlas)
     x0 = max(int(np.floor(uv_px[:, 0].min())), 0)
     x1 = min(int(np.ceil(uv_px[:, 0].max())), S - 1)
     y0 = max(int(np.floor(uv_px[:, 1].min())), 0)
@@ -603,6 +609,10 @@ def generate(spec, outdir, res_override=None, budget_override=None,
     mesh, v_labels = mesh_from_volumes(occ, zone, spec)
     # 5 : UV
     mesh, labels, uv = unwrap(mesh, v_labels)
+    bad = ~np.isfinite(uv).all(axis=1)
+    if bad.any():
+        # coutures/ triangles dégénérés d'xatlas -> milieu d'atlas (jamais NaN)
+        uv[bad] = 0.5
     # 6 : textures
     albedo_img, mr_img, normal_img, _ = bake_textures(mesh, labels, uv, spec)
     attach_visual(mesh, uv, albedo_img, mr_img, normal_img)
@@ -742,6 +752,8 @@ def main():
     ap.add_argument("--references", default=None,
                     help="references.json (research.py) : planche des détails "
                          "à respecter, copiée + checklist dans le rapport")
+    ap.add_argument("--no-preview", action="store_true",
+                    help="ne pas générer la preview.html interactive")
     args = ap.parse_args()
     with open(args.spec) as fh:
         spec = json.load(fh)
@@ -754,6 +766,16 @@ def main():
           f"({report['duration_s']}s)")
     for view, i in v["iou_views"].items():
         print(f"   IoU {view}: {i}")
+    if not args.no_preview:
+        try:
+            import preview
+            p = preview.build_preview(
+                args.out, title=spec.get("prompt") or spec.get("name"),
+                glb=report["files"]["glb"]["path"], report=report)
+            if p:
+                print(f"   preview → {p}")
+        except Exception as e:
+            print(f"[preview] échec ({e}) — génération conservée", file=sys.stderr)
 
 
 if __name__ == "__main__":

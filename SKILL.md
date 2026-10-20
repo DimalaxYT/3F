@@ -10,10 +10,13 @@ description: >-
   printable STL files, 3D product visuals, turntable renders, text-to-3D,
   image-to-3D, photo-to-3D, "make me a 3D X", "model this photo", "match this
   picture", "model a chair/vase/rocket/motocross", AR-ready models, or any
-  mention of GLB/OBJ/STL/USDZ export — even casually or in French. Every
-  delivery ships photos of all 6 faces + a turntable (Meshy-style preview
-  gallery) and starts with a mandatory web-reference stage (research.py)
-  that produces a details-to-respect sheet and measured palette hints.
+  mention of GLB/OBJ/STL/USDZ export — even casually or in French. Multi-part
+  composite objects (katana, lamps, vehicles) get part-by-part parallel
+  generation via assemble.py; every full delivery also ships an interactive
+  self-contained preview.html (GLB embedded, opens in any browser), photos
+  of all 6 faces + a turntable (Meshy-style preview gallery) and starts with
+  a mandatory web-reference stage (research.py) that produces a
+  details-to-respect sheet and measured palette hints.
 ---
 
 # 3d-forge — procedural 3D generation (no API, no GPU)
@@ -62,7 +65,9 @@ python3 scripts/detect_env.py
 Each generation writes an `out/<recipe>/` folder: model files, `*_front.png`,
 `*_three_quarter.png`, `*_top.png`, and a `report.json` (params, triangle
 count, watertight status, volumes, file sizes). Read `report.json` — it is
-your QA record.
+your QA record. It also writes an interactive **`preview.html`** (GLB
+embedded, opens in any browser — share it or double-click it; disable with
+`--no-preview`).
 
 ## Conventions (memorize these)
 
@@ -101,7 +106,8 @@ your QA record.
    broken preview is not.
 5. **Rate yourself (Stage 3 — MANDATORY for full deliveries).** Run the
    scored self-critique loop (`critique.py`, see below): note /10, threshold
-   9.5 — below it you refine, at or above it you deliver.
+   9.5 — below it you refine, at or above it you deliver. For Workflow D,
+   critique the assembly AND the weakest part (`parts/<id>/`).
 6. **Validate** (automatic in generate.py, but run `validate.py` standalone
    for printing workflows) and **deliver**: report the output folder, file
    paths, triangle count, dimensions, watertight status, and the final
@@ -216,7 +222,7 @@ two views, exactly like multi-view synthesis.
 | 1. Internal representation | spec JSON: palette PBR + 3 ASCII views |
 | 2. Multi-view synthesis | you draw front/side/top consistently |
 | 3. Volume reconstruction | visual hull (intersection of extrusions) |
-| 4. Remesh / retopology | marching cubes → Taubin smoothing → quadric decimation to triangle budget |
+| 4. Remesh / retopology | marching cubes → Taubin smoothing → quadric decimation to triangle budget (retry at larger budgets before keeping the raw mesh) |
 | 5. UV unwrap | xatlas (automatic seams + atlas packing) |
 | 6. PBR textures | procedural bake reprojected from the 3 views: albedo + metallicRoughness + normal map, overlays (rust / wrap / edge wear) |
 | 7. Consistency check | silhouette IoU of the final mesh re-projected against your 3 views + watertight + budget |
@@ -290,8 +296,68 @@ assets. Two to three iterations are normal. The sword reference run:
 
 When to use which workflow: **A (recipes)** parametric families; **B
 (img2mesh)** a photo exists; **C (meshgen)** anything else — organic shapes,
-props, "Meshy-style" generation. You can also combine: draw views guided by
-measurements from `img2mesh analyze`.
+props, "Meshy-style" generation; **D (assemble)** composite objects worth
+generating part by part (katana, moto multi-organes, lampadaire…). You can
+also combine: draw views guided by measurements from `img2mesh analyze`.
+
+## Workflow D — Multi-part assembly (`assemble.py`, the "katana mode")
+
+Composite objects deserve **sub-generations**: decompose the object into
+parts, give each part its own spec (its own resolution, palette, overlays,
+own scored refinement loop), then place and assemble. This is the
+Meshy-style pipeline applied per part — finer detail per region (a small
+part spends its voxels on ITS details), and part generation runs **in
+parallel** (one meshgen process per part).
+
+Manifest format (Z-up, meters — `at` = position of the part CENTER):
+
+```json
+{
+  "name": "katana",
+  "prompt": "katana forgé, lame courbée, tsuka wrappée",
+  "parallel": true,
+  "parts": [
+    {"id": "tsuka", "spec": "specs/parts/tsuka.json", "at": [0, 0, 0.17]},
+    {"id": "tsuba", "spec": "specs/parts/tsuba.json", "at": [0, 0, 0.30],
+     "rot_deg": [90, 0, 0]}
+  ]
+}
+```
+
+Each part is generated standing (meshgen convention: base z=0, +Z up), then
+centered on its bbox and transformed scale → rot_deg (about its center) →
+`at`. Tricks of the trade:
+- **Model thin flat parts on edge** (a tsuba is drawn as a vertical disc in
+  its own frame, then laid flat with `rot_deg: [90,0,0]`) — an extreme
+  aspect ratio drawn flat explodes the voxel grid (OOM).
+- **Overlap consecutive parts by 2–3 mm** — exact face-to-face contact makes
+  fragile boolean unions; interpenetration is robust.
+- Keep view grids mutually consistent per part (front.cols = top.cols,
+  front.rows = side.rows, side.cols = top.rows) — same rules as Workflow C.
+- Per-part budgets: the sum of part budgets is your total; the per-part
+  refinement loop (critique.py on `parts/<id>/`) only regenerates THAT part.
+
+```bash
+python3 scripts/assemble.py manifest.json --out out/katana --faces all
+#    → <name>.glb (grouped scene, per-part PBR textures), <name>.stl
+#      (watertight boolean union, print-ready), OBJ, USDZ, renders,
+#      photos of all faces + turntable, preview.html, report.json
+#    → report.parts[] = per-part triangles/watertight/IoU (QA checklist)
+
+# ITERATION (the whole point): only one part is wrong?
+# edit specs/parts/lame.json, then:
+python3 scripts/assemble.py manifest.json --out out/katana --faces all \
+    --part lame
+#    → only the blade regenerates (others come from cache), assembly reruns
+
+python3 scripts/assemble.py manifest.json --out out/katana --force  # all parts
+# --jobs N : parallel processes (default 4, capped by part count)
+```
+
+Delivery rule (same as Workflow C): `--faces all` + the scored self-critique
+loop (Stage 3) on the ASSEMBLY — plus a glance at each part's own renders in
+`parts/<id>/` when its IoU is the weakest. Assembly coherence is measured as
+the mean per-part IoU in `report.coherence`.
 
 ## Stage 3 — Scored self-critique (`critique.py`, the 9.5 loop, MANDATORY)
 

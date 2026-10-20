@@ -187,6 +187,8 @@ def main(argv=None):
     ap.add_argument("--faces", choices=["all"], default=None,
                     help="all = photos des 6 faces + turntable en plus des vues")
     ap.add_argument("--quiet", action="store_true")
+    ap.add_argument("--no-preview", action="store_true",
+                    help="ne pas générer la preview.html interactive")
     ap.add_argument("--list", action="store_true", help="lister les recettes")
     args = ap.parse_args(argv)
 
@@ -202,9 +204,23 @@ def main(argv=None):
         return 0
 
     params = coerce_params(args.recipe, args.set, args.json)
-    return run(args.recipe, params, args.formats, args.out, args.views,
-               args.size, args.quality, render=not args.no_render,
-               quiet=args.quiet, faces_all=(args.faces == "all")) and 0 or 0
+    report = run(args.recipe, params, args.formats, args.out, args.views,
+                 args.size, args.quality, render=not args.no_render,
+                 quiet=args.quiet, faces_all=(args.faces == "all"))
+    if report and not args.no_preview:
+        try:
+            import preview
+            glb = (report.get("files") or {}).get("glb")
+            glb_path = glb["path"] if isinstance(glb, dict) else glb
+            p = preview.build_preview(report["output_dir"],
+                                      title=str(args.recipe),
+                                      glb=glb_path, report=report)
+            if p and not args.quiet:
+                print(f"  preview → {p}")
+        except Exception as e:
+            if not args.quiet:
+                print(f"[preview] échec ({e}) — génération conservée", file=sys.stderr)
+    return 0
 
 
 if __name__ == "__main__":

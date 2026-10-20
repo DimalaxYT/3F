@@ -96,6 +96,7 @@ retomber sur ses connaissances internes — sauter l'étape en silence est inter
 | **A — Recettes** | l'objet existe dans le catalogue (18 familles paramétriques) | `generate.py` |
 | **B — Image → 3D** | l'utilisateur fournit une photo de référence | `img2mesh.py` + `compare.py` |
 | **C — Génération multi-vues** (« Meshy mode ») | tout le reste : formes organiques, props composites, objets sans recette ni photo | `meshgen.py` + spec JSON |
+| **D — Multi-parties** (« katana mode ») | objets composites à générer partie par partie, avec itération bout par bout et parties générées **en parallèle** | `assemble.py` + manifest |
 
 Les trois se combinent : on peut dessiner les vues du workflow C **guidé par les
 mesures** du workflow B (`img2mesh analyze` donne le profil de largeur, l'aspect,
@@ -245,9 +246,12 @@ python3 scripts/validate.py out/vase/vase.stl     # exit 1 si non imprimable
 ```
 
 Chaque génération écrit un dossier `out/<objet>/` : les 4 formats, les rendus
-PNG, les photos de faces, et un `report.json` (paramètres, triangles,
-étanchéité, IoU par vue, checklist des détails, photos) — **le rapport QA
-officiel à lire avant de livrer**.
+PNG, les photos de faces, une **`preview.html` interactive autoportante**
+(viewer 3D + GLB embarqué en base64 : double-clic, ça s'ouvre dans n'importe
+quel navigateur, matériaux PBR compris — c'est le « lightweight preview » à
+partager ou à ouvrir pour voir ce que l'IA a fait), et un `report.json`
+(paramètres, triangles, étanchéité, IoU par vue, checklist des détails,
+photos) — **le rapport QA officiel à lire avant de livrer**.
 
 ### 2. Comme skill d'agent (Claude, GPT, …)
 
@@ -305,6 +309,12 @@ b.export_glb("table_basse.glb")
 │   │                            matériaux PBR (8 métaux physiques), Builder, OBJ+MTL
 │   ├── meshgen.py            ← WORKFLOW C : vues ASCII → hull → marching cubes
 │   │                            → Taubin → décimation → UV xatlas → bake PBR
+│   ├── assemble.py           ← WORKFLOW D : manifest multi-parties → meshgen
+│   │                            PARALLÈLE par partie → assemblage (GLB groupé,
+│   │                            STL union étanche) — cache par partie pour
+│   │                            itérer « bout par bout »
+│   ├── preview.py            ← preview.html autoportante (model-viewer + GLB
+│   │                            base64 + photos) — un fichier, double-clic
 │   ├── img2mesh.py           ← WORKFLOW B : photo → segmentation → profil → mesh
 │   ├── compare.py            ← IoU silhouette mesh vs photo + overlay par zones
 │   ├── research.py           ← STAGE 0 : fetch images web → planche « détails
@@ -337,6 +347,7 @@ Des modèles finis, prêts à télécharger, vivent dans [`examples/`](examples/
 
 | Exemple | Workflow | Points forts |
 |---|---|---|
+| [`examples/katana/`](examples/katana/) | D — multi-parties | 5 parties générées **en parallèle** puis assemblées (habaki laiton, tsuka wrappée, lame courbée), STL union étanche, specs incluses |
 | [`examples/epee_rouillee/`](examples/epee_rouillee/) | C — multi-vues | GLB **texturé PBR** (rouille fBm, usure d'arêtes), 6 faces + turntable, `critique_log.json` (la boucle 9.5 en trace réelle : 5.0 → 8.6) |
 | [`examples/motocross/`](examples/motocross/) | B — image → 3D | recalée photo KTM : overlay silhouette, `score.json` IoU 0.55 → 0.74, STL étanche |
 | [`examples/chaise_scandinave/`](examples/chaise_scandinave/) · [`vase/`](examples/vase/) · [`rocket/`](examples/rocket/) | A — recettes | paramétrique, STL prêts impression |
