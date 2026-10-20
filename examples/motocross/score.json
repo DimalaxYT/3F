@@ -1,0 +1,13 @@
+{
+ "iou": 0.7359,
+ "iou_zones": {
+  "haut": 0.6044,
+  "milieu": 0.8541,
+  "bas": 0.6709
+ },
+ "ref_aspect": 1.5997,
+ "mesh_aspect": 1.632,
+ "ref": "moto_photo.jpg",
+ "candidate": "motocross.glb",
+ "axes": "xz"
+}

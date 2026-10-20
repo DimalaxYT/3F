@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      - name: Smoke test (build all recipes, check watertight)
+        run: python tests/test_smoke.py
+      - name: E2E generation (vase, 4 formats + render)
+        run: |
+          cd scripts
+          python generate.py vase --formats glb obj stl usdz --out /tmp/ci-out --size 256
+          python validate.py /tmp/ci-out/vase/vase.stl
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-outputs
+          path: /tmp/ci-out
+          retention-days: 7

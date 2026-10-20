@@ -1,0 +1,29 @@
+{
+  "skill_name": "3d-forge",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Génère-moi un vase amphore en terracotta de 35 cm de haut, je veux l'imprimer en 3D donc il me faut un STL étanche, et une image pour voir à quoi ça ressemble.",
+      "expected_output": "Un dossier contenant vase.stl (watertight, volume>0), vase.glb, 2-3 rendus PNG montrant une amphore terracotta (~35 cm), report.json avec is_printable=true",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I need a 3D model of a brass table lamp with a warm glowing shade for a Three.js product page. GLB format please, around 45cm tall, and show me a preview render.",
+      "expected_output": "lamp GLB with brass metal + emissive shade materials, height ≈ 0.45 m, three_quarter PNG render checked by the agent, report.json",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "fais moi une petite maison low poly avec un toit rouge et des fenêtres bleues, exporte tout ce que tu peux (glb, obj, stl, usdz)",
+      "expected_output": "house dans les 4 formats, toit rouge/terracotta, fenêtres verre bleuté, toit à pignon correctement posé (pas de panneau vertical), rendu de contrôle",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Je voudrais un pion d'échecs de 8 cm mais dans un style plus moderne, disons noir mat. Tu sais faire ?",
+      "expected_output": "Soit chess_pawn height=0.08 color noir mat (roughness élevée), soit une géométrie custom reformulée avec meshkit ; STL/GLB + rendu + validation étanche",
+      "files": []
+    }
+  ]
+}

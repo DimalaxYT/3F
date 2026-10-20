@@ -1,0 +1,65 @@
+{
+  "recipe": "motocross",
+  "params": {
+    "length": 2.2,
+    "body_color": "#e8641b",
+    "plate_color": "#f2f1ec",
+    "seat_color": "#1a1a1a"
+  },
+  "stats": {
+    "parts": 143,
+    "triangles": 4764,
+    "vertices": 2668,
+    "dims_m": [
+      2.2948,
+      0.7745,
+      1.2317
+    ]
+  },
+  "validation": {
+    "watertight": true,
+    "winding_consistent": true,
+    "volume_m3": 0.18481554,
+    "volume_liters": 184.816,
+    "dims_m": [
+      2.2948,
+      0.7745,
+      1.2317
+    ],
+    "triangles": 7268,
+    "vertices": 3624,
+    "components": 4,
+    "degenerate_faces": 0,
+    "duplicate_faces": 0,
+    "over_budget": false,
+    "is_printable": true,
+    "hard_fail": false
+  },
+  "files": {
+    "glb": {
+      "path": "/home/z/my-project/download/3d-forge-examples/motocross/motocross.glb",
+      "bytes": 125588
+    },
+    "obj": {
+      "path": "/home/z/my-project/download/3d-forge-examples/motocross/motocross.obj",
+      "bytes": 307149
+    },
+    "stl": {
+      "path": "/home/z/my-project/download/3d-forge-examples/motocross/motocross.stl",
+      "bytes": 363484
+    },
+    "usdz": {
+      "path": "/home/z/my-project/download/3d-forge-examples/motocross/motocross.usdz",
+      "bytes": 79840
+    }
+  },
+  "renders": [
+    "/home/z/my-project/download/3d-forge-examples/motocross/motocross_front.png",
+    "/home/z/my-project/download/3d-forge-examples/motocross/motocross_three_quarter.png",
+    "/home/z/my-project/download/3d-forge-examples/motocross/motocross_side.png",
+    "/home/z/my-project/download/3d-forge-examples/motocross/motocross_back.png",
+    "/home/z/my-project/download/3d-forge-examples/motocross/motocross_top.png"
+  ],
+  "output_dir": "/home/z/my-project/download/3d-forge-examples/motocross",
+  "duration_s": 11.37
+}

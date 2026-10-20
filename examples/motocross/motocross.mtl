@@ -1,0 +1,41 @@
+# généré par 3d-forge (meshkit)
+newmtl rubber
+Kd 0.1098 0.1098 0.1098
+Ka 0.10 0.10 0.10
+Ks 0.080 0.080 0.080
+Ns 2.8
+Ni 1.45
+d 1.000
+illum 2
+newmtl aluminum
+Kd 0.9137 0.9216 0.9255
+Ka 0.10 0.10 0.10
+Ks 0.800 0.800 0.800
+Ns 132.4
+Ni 1.45
+d 1.000
+illum 2
+newmtl steel
+Kd 0.5608 0.5686 0.5804
+Ka 0.10 0.10 0.10
+Ks 0.800 0.800 0.800
+Ns 77.8
+Ni 1.45
+d 1.000
+illum 2
+newmtl plastic
+Kd 0.9098 0.3922 0.1059
+Ka 0.10 0.10 0.10
+Ks 0.080 0.080 0.080
+Ns 188.9
+Ni 1.45
+d 1.000
+illum 2
+newmtl fabric
+Kd 0.1020 0.1020 0.1020
+Ka 0.10 0.10 0.10
+Ks 0.080 0.080 0.080
+Ns 3.0
+Ni 1.45
+d 1.000
+illum 2

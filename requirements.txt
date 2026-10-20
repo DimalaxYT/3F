@@ -1,0 +1,11 @@
+numpy>=1.26
+trimesh>=4.2
+manifold3d>=3.0
+shapely>=2.0
+pillow>=10.0
+scipy>=1.11
+scikit-image>=0.22
+xatlas>=0.0.8
+fast-simplification>=0.1.7
+matplotlib>=3.8
+usd-core>=24.0 ; python_version >= "3.9"
