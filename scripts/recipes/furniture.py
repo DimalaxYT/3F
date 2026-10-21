@@ -16,11 +16,11 @@ def build_chair(style="scandinavian", wood_color="#b08850", seat_color="#c8a878"
     wood = mk.mat.wood(wood_color)
     seat_m = mk.mat.fabric(seat_color)
     if style == "scandinavian":
-        seat = mk.box(0.42, 0.42, 0.045)
+        seat = mk.rounded_box(0.42, 0.42, 0.048, r=0.012)
         b.add(seat, seat_m, name="seat", at=(0, 0, 0.44))
         for i, (sx, sy) in enumerate([(-0.17, -0.17), (0.17, -0.17),
                                       (-0.17, 0.17), (0.17, 0.17)]):
-            leg = mk.frustum(0.024, 0.016, 0.44)
+            leg = mk.frustum(0.024, 0.016, 0.445)
             if sy > 0:  # pieds arrière prolongés = montants du dossier
                 leg = mk.frustum(0.024, 0.014, 0.88)
                 leg = mk.rot_x(leg, -6.0)
@@ -28,18 +28,18 @@ def build_chair(style="scandinavian", wood_color="#b08850", seat_color="#c8a878"
             else:
                 b.add(leg, wood, name=f"leg{i}", at=(sx, sy, 0))
         for k, z in enumerate((0.62, 0.74, 0.86)):
-            slat = mk.box(0.34, 0.025, 0.06)
+            slat = mk.rounded_box(0.35, 0.024, 0.058, r=0.006)
             b.add(slat, wood, name=f"slat{k}", at=(0, 0.175, z))
     else:  # classic
-        seat = mk.box(0.44, 0.44, 0.05)
+        seat = mk.rounded_box(0.44, 0.44, 0.05, r=0.010)
         b.add(seat, seat_m, name="seat", at=(0, 0, 0.44))
         for i, (sx, sy) in enumerate([(-0.18, -0.18), (0.18, -0.18),
                                       (-0.18, 0.18), (0.18, 0.18)]):
-            leg = mk.box(0.045, 0.045, 0.88 if sy > 0 else 0.44)
+            leg = mk.box(0.045, 0.045, 0.88 if sy > 0 else 0.445)
             b.add(leg, wood, name=f"leg{i}", at=(sx, sy, 0))
-        panel = mk.box(0.40, 0.03, 0.32)
+        panel = mk.rounded_box(0.40, 0.03, 0.32, r=0.006)
         b.add(panel, wood, name="back_panel", at=(0, 0.18, 0.68))
-        rail = mk.box(0.40, 0.045, 0.05)
+        rail = mk.rounded_box(0.41, 0.045, 0.05, r=0.008)
         b.add(rail, wood, name="back_rail", at=(0, 0.18, 0.86))
     if scale != 1.0:
         for m, mm, name in list(b._parts):
@@ -64,10 +64,10 @@ def build_table(style="rect", width=1.2, height=0.75, wood_color="#9a6b3f"):
         foot = mk.frustum(0.26, 0.20, 0.05)
         b.add(foot, wood, name="foot")
     else:
-        top = mk.box(width, width * 0.62, 0.04)
-        b.add(top, wood, name="top", at=(0, 0, height - 0.04))
+        top = mk.rounded_box(width, width * 0.62, 0.042, r=0.010)
+        b.add(top, wood, name="top", at=(0, 0, height - 0.042))
         for i, (sx, sy) in enumerate([(-1, -1), (1, -1), (-1, 1), (1, 1)]):
-            leg = mk.box(0.055, 0.055, height - 0.04)
+            leg = mk.rounded_box(0.055, 0.055, height - 0.035, r=0.007)
             b.add(leg, wood, name=f"leg{i}",
                   at=(sx * (width / 2 - 0.10), sy * (width * 0.62 / 2 - 0.10), 0))
     return b

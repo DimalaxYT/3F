@@ -1,29 +1,27 @@
 #!/usr/bin/env python3
 """
-meshgen — génération 3D type Meshy, 100% déterministe, zéro API.
+meshgen — génération 3D type Meshy v2 (SDF continu + vues ASCII ou vectorielles 2D),
+100% déterministe, zéro API, zéro GPU.
 
-Le LLM ne "code" plus l'objet : il l'IMAGINE sous forme de vues ASCII
-(face / profil / dessus) peintes avec des lettres de matériaux, exactement
-comme Meshy synthétise des vues plausibles puis les re-projette.
+Deux formats de vues supportés de façon transparente dans `spec["views"]` :
+  * Vues ASCII classiques : liste de chaînes `["  s  ", " sss ", ...]`
+  * Vues vectorielles 2D continues (zéro marche d'escalier) :
+    `{"w": 120, "h": 400, "shapes": [{"kind": "spline"|"poly"|"rect"|"ellipse"|"capsule", ...}]}`
 
-Pipeline (équivalent déterministe des 7 étapes Meshy) :
-  1. Représentation interne : silhouettes multi-vues ASCII + palette PBR.
-  2. Synthèse multi-vues : les 3 vues servent de contraintes mutuelles
-     (une forme doit être cohérente face/profil/dessus pour exister).
-  3. Volume : visual hull (intersection des extrusions) -> grille voxels,
-     votes de matériaux multi-vues -> volume d'étiquettes.
-  4. Géométrie : marching cubes -> lissage Taubin -> décimation quadrique
-     (budget triangles) -> réparation (watertight).
-  5. UV : unwrap xatlas (coutures auto, atlas compact).
-  6. Textures PBR : peinture procédurale 3D->2D re-projetée dans l'atlas
-     (albedo / roughness / metallic / normal) : rouille, grain bois,
-     cuir brisé, usure des arêtes, micro-variations.
-  7. Cohérence : IoU des silhouettes re-projetées vs vues d'entrée,
-     watertight, budget, composants. Exports GLB/OBJ/STL/USDZ + PNG.
-
-Usage :
-    python meshgen.py spec.json --out output/mon_objet
-Format du spec : voir SKILL.md section "Workflow B — Génération multi-vues".
+Pipeline :
+  1. Représentation interne : silhouettes multi-vues (ASCII ou vectorielles 2D) + palette PBR.
+  2. Alignement physique strict : Z-up (`ligne 0` = sommet `+Z`, bas = `z=0`),
+     avant = `-Y` (`dernière col` de `side`, `dernière ligne` de `top`).
+  3. Volume continu : champs de distance signée (SDF) 2D -> intersection CSG 3D
+     `min(sdf_front, sdf_side, sdf_top)` + votes de matériaux multi-vues.
+  4. Géométrie : marching cubes sur SDF lissé -> Taubin -> décimation quadrique
+     (budget triangles) -> centrage XY & pose exacte à `z=0`.
+  5. UV : unwrap xatlas (`pbr.unwrap`).
+  6. Textures PBR : bake multi-cartes glTF 2.0 (`albedo` + `metallicRoughness` +
+     `normal`) via `pbr.bake_textures` (`rust`, `wrap`, `edge_wear`, `wood_grain`,
+     `brushed_metal`, `hamon`, `patina`, `speckle`).
+  7. Cohérence & rendus : IoU 3 vues cohérent avec le repère + rendu PBR direct
+     par pixel UV + normal map via `renderer.py`.
 """
 from __future__ import annotations
 
@@ -36,88 +34,193 @@ import sys
 import time
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 from scipy import ndimage
+from scipy.interpolate import PchipInterpolator
 from skimage import measure
-
 import trimesh
 
-import renderer
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+import pbr       # noqa: E402
+import renderer  # noqa: E402
+
+# Ré-export des primitives bruit/PBR pour rétro-compatibilité éventuelle
+value_noise = pbr.value_noise
+fbm = pbr.fbm
+unwrap = pbr.unwrap
+bake_textures = pbr.bake_textures
+attach_visual = pbr.attach_visual
 
 EMPTY = {".", " ", ""}
 
-
-# --------------------------------------------------------------------------
-# Bruit 3D déterministe (value noise + fBm) — aucune dépendance externe
-# --------------------------------------------------------------------------
-
-def _hash3(ix, iy, iz, seed):
-    h = (ix.astype(np.int64) * 374761393
-         + iy.astype(np.int64) * 668265263
-         + iz.astype(np.int64) * 1442695041
-         + np.int64(seed) * 2654435761) & 0x7FFFFFFF
-    h = ((h ^ (h >> 13)) * 1274126177) & 0x7FFFFFFF
-    return ((h ^ (h >> 16)).astype(np.float64)) / 2147483647.0
-
-
-def value_noise(x, y, z, seed=0):
-    """Value noise 3D lisse (smoothstep entre 8 coins de la grille)."""
-    ix, iy, iz = np.floor(x), np.floor(y), np.floor(z)
-    fx, fy, fz = x - ix, y - iy, z - iz
-    ux = fx * fx * (3 - 2 * fx)
-    uy = fy * fy * (3 - 2 * fy)
-    uz = fz * fz * (3 - 2 * fz)
-    c000 = _hash3(ix, iy, iz, seed)
-    c100 = _hash3(ix + 1, iy, iz, seed)
-    c010 = _hash3(ix, iy + 1, iz, seed)
-    c110 = _hash3(ix + 1, iy + 1, iz, seed)
-    c001 = _hash3(ix, iy, iz + 1, seed)
-    c101 = _hash3(ix + 1, iy, iz + 1, seed)
-    c011 = _hash3(ix, iy + 1, iz + 1, seed)
-    c111 = _hash3(ix + 1, iy + 1, iz + 1, seed)
-    x00 = c000 + (c100 - c000) * ux
-    x10 = c010 + (c110 - c010) * ux
-    x01 = c001 + (c101 - c001) * ux
-    x11 = c011 + (c111 - c011) * ux
-    y0 = x00 + (x10 - x00) * uy
-    y1 = x01 + (x11 - x01) * uy
-    return y0 + (y1 - y0) * uz
-
-
-def fbm(x, y, z, octaves=4, lacunarity=2.0, gain=0.5, seed=0):
-    """Fractional Brownian motion : bruit multi-octaves, borné ~[0,1]."""
-    total = np.zeros_like(x, dtype=np.float64)
-    amp, freq, norm = 1.0, 1.0, 0.0
-    for o in range(octaves):
-        total += amp * value_noise(x * freq, y * freq, z * freq, seed + o * 101)
-        norm += amp
-        amp *= gain
-        freq *= lacunarity
-    return total / norm
-
-
-def _smoothstep(e0, e1, x):
-    t = np.clip((x - e0) / max(1e-9, (e1 - e0)), 0.0, 1.0)
-    return t * t * (3 - 2 * t)
-
-
-def _frac(x):
-    return x - np.floor(x)
-
-
-# --------------------------------------------------------------------------
-# 1. Représentation interne : parsing des vues ASCII
-# --------------------------------------------------------------------------
 
 class SpecError(ValueError):
     pass
 
 
+# --------------------------------------------------------------------------
+# 1. Parsing des vues : ASCII classique OU canevas vectoriel 2D continu
+# --------------------------------------------------------------------------
+
+def _resolve_mat_index(mat_id: str, palette_ids: list[str], ctx: str) -> int:
+    if mat_id in EMPTY or mat_id == "void":
+        return -1
+    if mat_id == "#":
+        return 0
+    if mat_id in palette_ids:
+        return palette_ids.index(mat_id)
+    raise SpecError(
+        f"{ctx} : matériau '{mat_id}' absent de la palette "
+        f"{'/'.join(palette_ids)} ('.' ou espace = vide)")
+
+
+def _normalize_spec(spec: dict) -> dict:
+    """Normalise les alias de schéma pour accepter aussi bien les specs
+    concises (`materials`, `dims`, `grid`, `size`, `op`, `center/half_width`)
+    que le schéma canonique (`palette`, `size_m`, `res`, `w/h/kind`)."""
+    spec = dict(spec)
+    if "palette" not in spec and isinstance(spec.get("materials"), dict):
+        pal = []
+        for mid, mdef in spec["materials"].items():
+            pal.append({
+                "id": str(mid),
+                "name": str(mdef.get("name", mid)),
+                "color": mdef.get("color", mdef.get("base", "#b0b4ba")),
+                "metallic": float(mdef.get("metallic", 0.0)),
+                "roughness": float(mdef.get("roughness", 0.55)),
+            })
+        spec["palette"] = pal
+    if "dims" in spec and "size_m" not in spec:
+        spec["size_m"] = float(max(spec["dims"]))
+    return spec
+
+
+def _spline_ribbon_polygon(ctrl_pts: list, n_samples: int = 128) -> list[tuple[float, float]]:
+    """Convertit `[[x, y, half_w], ...]` en polygone ruban lisse sans overshoot."""
+    arr = np.asarray(ctrl_pts, dtype=float)
+    if arr.ndim != 2 or arr.shape[1] < 3 or len(arr) < 2:
+        raise SpecError("shape 'spline' attend pts=[[x, y, half_w], ...] (N>=2)")
+    seg = np.hypot(np.diff(arr[:, 0]), np.diff(arr[:, 1]))
+    t = np.concatenate([[0.0], np.cumsum(np.maximum(seg, 1e-6))])
+    t /= t[-1]
+    ts = np.linspace(0.0, 1.0, n_samples)
+    xs = PchipInterpolator(t, arr[:, 0])(ts)
+    ys = PchipInterpolator(t, arr[:, 1])(ts)
+    ws = np.maximum(PchipInterpolator(t, arr[:, 2])(ts), 0.0)
+    dx = np.gradient(xs)
+    dy = np.gradient(ys)
+    ln = np.hypot(dx, dy)
+    ln = np.where(ln < 1e-9, 1.0, ln)
+    nx, ny = -dy / ln, dx / ln
+    # Adoucit les extrémités fines pour éviter toute moustache d'interpolation PCHIP
+    ws = ndimage.gaussian_filter1d(ws, sigma=1.2, mode="nearest")
+    left = list(zip((xs + nx * ws).tolist(), (ys + ny * ws).tolist()))
+    right = list(zip((xs - nx * ws)[::-1].tolist(), (ys - ny * ws)[::-1].tolist()))
+    return left + right
+
+
+def _capsule_polygon(p0, p1, r: float, n_arc: int = 16) -> list[tuple[float, float]]:
+    x0, y0 = float(p0[0]), float(p0[1])
+    x1, y1 = float(p1[0]), float(p1[1])
+    ang = math.atan2(y1 - y0, x1 - x0)
+    pts = []
+    for a in np.linspace(ang + math.pi * 0.5, ang + math.pi * 1.5, n_arc):
+        pts.append((x0 + r * math.cos(a), y0 + r * math.sin(a)))
+    for a in np.linspace(ang - math.pi * 0.5, ang + math.pi * 0.5, n_arc):
+        pts.append((x1 + r * math.cos(a), y1 + r * math.sin(a)))
+    return pts
+
+
+def parse_vector_view(vspec: dict, palette_ids: list[str], view_name: str,
+                      super_res: int = 384):
+    """Rastérise un canevas vectoriel 2D `{"w": W, "h": H, "shapes": [...]}`
+    (ou `{"size": [W, H], "shapes": [...]}`) en haute résolution sans escalier."""
+    if "size" in vspec and isinstance(vspec["size"], (list, tuple)) and len(vspec["size"]) >= 2:
+        w_log, h_log = float(vspec["size"][0]), float(vspec["size"][1])
+    else:
+        w_log = float(vspec.get("w", 100.0))
+        h_log = float(vspec.get("h", 100.0))
+    if w_log <= 0 or h_log <= 0:
+        raise SpecError(f"vue vectorielle '{view_name}' : w et h doivent être > 0")
+    shapes = vspec.get("shapes")
+    if not isinstance(shapes, list) or not shapes:
+        raise SpecError(f"vue vectorielle '{view_name}' : liste 'shapes' requise")
+
+    scale = super_res / max(w_log, h_log)
+    W_px = max(8, int(round(w_log * scale)))
+    H_px = max(8, int(round(h_log * scale)))
+    sx = (W_px - 1) / w_log
+    sy = (H_px - 1) / h_log
+
+    # Image d'indices de palette décalés de +1 (0 = vide, k+1 = palette[k])
+    canvas = Image.new("I", (W_px, H_px), 0)
+    dr = ImageDraw.Draw(canvas)
+
+    for si, sh in enumerate(shapes):
+        kind = sh.get("kind", sh.get("op", "poly"))
+        mat_idx = _resolve_mat_index(str(sh.get("mat", "#")), palette_ids,
+                                     f"vue '{view_name}' shape[{si}]")
+        fill_val = 0 if sh.get("erase", False) or mat_idx < 0 else (mat_idx + 1)
+
+        if kind == "rect":
+            if "x0" in sh:
+                x = float(sh["x0"]) * sx
+                y = float(sh["y0"]) * sy
+                w = (float(sh["x1"]) - float(sh["x0"])) * sx
+                h = (float(sh["y1"]) - float(sh["y0"])) * sy
+            else:
+                x, y = float(sh["x"]) * sx, float(sh["y"]) * sy
+                w, h = float(sh["w"]) * sx, float(sh["h"]) * sy
+            rad = float(sh.get("r", 0.0)) * min(sx, sy)
+            if rad > 0.5:
+                dr.rounded_rectangle([x, y, x + w, y + h], radius=rad, fill=fill_val)
+            else:
+                dr.rectangle([x, y, x + w, y + h], fill=fill_val)
+        elif kind in ("ellipse", "circle"):
+            cx, cy = float(sh["cx"]) * sx, float(sh["cy"]) * sy
+            rx = float(sh.get("rx", sh.get("r", 1.0))) * sx
+            ry = float(sh.get("ry", sh.get("r", 1.0))) * sy
+            dr.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=fill_val)
+        elif kind == "poly":
+            pts = [(float(p[0]) * sx, float(p[1]) * sy) for p in sh["pts"]]
+            if len(pts) >= 3:
+                dr.polygon(pts, fill=fill_val)
+        elif kind == "capsule":
+            p0 = sh.get("p0", sh.get("a"))
+            p1 = sh.get("p1", sh.get("b"))
+            pts = _capsule_polygon(p0, p1, float(sh["r"]))
+            dr.polygon([(p[0] * sx, p[1] * sy) for p in pts], fill=fill_val)
+        elif kind == "spline":
+            if "pts" in sh:
+                ctrl = sh["pts"]
+            else:
+                # Syntaxe profil vertical : center=[[y, x], ...], half_width=[[y, hw], ...]
+                c_arr = np.asarray(sh["center"], dtype=float)
+                hw_arr = np.asarray(sh["half_width"], dtype=float)
+                ys = np.unique(np.concatenate([c_arr[:, 0], hw_arr[:, 0]]))
+                ys.sort()
+                xs_i = PchipInterpolator(c_arr[:, 0], c_arr[:, 1])(ys)
+                hw_i = PchipInterpolator(hw_arr[:, 0], hw_arr[:, 1])(ys)
+                ctrl = np.column_stack([xs_i, ys, hw_i]).tolist()
+            pts = _spline_ribbon_polygon(ctrl, n_samples=int(sh.get("samples", 128)))
+            dr.polygon([(p[0] * sx, p[1] * sy) for p in pts], fill=fill_val)
+        else:
+            raise SpecError(f"vue '{view_name}' : kind='{kind}' inconnu")
+
+    arr = np.asarray(canvas, dtype=np.int32) - 1
+    return arr >= 0, arr
+
+
 def parse_view(rows, palette_ids, view_name):
-    """Vue ASCII -> (mask H×W bool, zones H×W int).
-    zones : -1 = vide, sinon index palette ('#' = 0 = matériau principal)."""
+    """Vue ASCII ou vectorielle 2D -> `(mask H×W bool, zones H×W int)`.
+    `zones` : `-1` = vide, sinon index palette (`'#'` = `0` = matériau principal)."""
+    if isinstance(rows, dict):
+        return parse_vector_view(rows, palette_ids, view_name)
     if not rows or not isinstance(rows, list):
-        raise SpecError(f"vue '{view_name}' : liste de lignes attendue")
+        raise SpecError(f"vue '{view_name}' : liste de lignes ou dict vectoriel attendu")
     W = max(len(r) for r in rows)
     if W < 2:
         raise SpecError(f"vue '{view_name}' : trop étroite")
@@ -126,77 +229,108 @@ def parse_view(rows, palette_ids, view_name):
         for c, ch in enumerate(line):
             if ch in EMPTY:
                 continue
-            if ch == "#":
-                grid[r, c] = 0
-            elif ch in palette_ids:
-                grid[r, c] = palette_ids.index(ch)
-            else:
-                raise SpecError(
-                    f"vue '{view_name}' ligne {r} col {c} : caractère '{ch}' "
-                    f"absent de la palette {'/'.join(palette_ids)} ('.' ou espace = vide)")
+            grid[r, c] = _resolve_mat_index(
+                ch, palette_ids, f"vue '{view_name}' ligne {r} col {c}")
     return grid != -1, grid
 
 
 def _resize_nearest(arr, shape):
-    im = Image.fromarray(arr)
+    im = Image.fromarray(np.ascontiguousarray(arr))
     im = im.resize((shape[1], shape[0]), Image.NEAREST)
     return np.asarray(im)
 
 
+def _signed_distance_2d(mask: np.ndarray, out_shape: tuple[int, int]) -> np.ndarray:
+    """SDF 2D lisse (positif à l'intérieur, négatif à l'extérieur) ré-échantillonné
+    vers `out_shape = (H_out, W_out)` en interpolation bilinéaire continue."""
+    # Sur-échantillonne les petites grilles ASCII de façon anti-crénelée pour
+    # lisser les diagonales tout en préservant l'épaisseur des traits 1-2 px.
+    m = mask.astype(np.float32)
+    h, w = m.shape
+    if max(h, w) < 128:
+        up = max(2, int(math.ceil(128.0 / max(h, w))))
+        m_hi = ndimage.zoom(m, up, order=1, mode="nearest")
+        m_bool = m_hi >= 0.5
+    else:
+        m_bool = mask
+    d_in = ndimage.distance_transform_edt(m_bool)
+    d_out = ndimage.distance_transform_edt(~m_bool)
+    sdf = (d_in - d_out).astype(np.float32)
+    zh = out_shape[0] / sdf.shape[0]
+    zw = out_shape[1] / sdf.shape[1]
+    scale_norm = 0.5 * (zh + zw)
+    return ndimage.zoom(sdf, (zh, zw), order=1, mode="nearest") * scale_norm
+
+
 # --------------------------------------------------------------------------
-# 2-3. Visual hull + votes de matériaux
+# 2-3. Visual hull SDF continu + votes de matériaux alignés Z-up / -Y avant
 # --------------------------------------------------------------------------
 
 def build_volumes(spec):
-    """Extrude les 3 vues et intersecte -> (occ, zone, dims grille).
-    Axes Z-up (convention skill) : hauteur = Z, volume indexé [x, y, z]."""
+    """Extrude les 3 vues et intersecte -> `(occ, zone, dims_grille, masks_in)`.
+    Axes Z-up stricts :
+      * `front` : col 0..W-1 -> `-X..+X`, ligne 0 = `+Z` (sommet), fin = `z=0` (sol)
+      * `side`  : col 0 = `+Y` (arrière), fin = `-Y` (avant) ; ligne 0 = `+Z`
+      * `top`   : col 0..W-1 -> `-X..+X` ; ligne 0 = `+Y` (arrière), fin = `-Y` (avant)
+    """
+    spec = _normalize_spec(spec)
     pal = [m["id"] for m in spec["palette"]]
     mf, zf = parse_view(spec["views"]["front"], pal, "front")
     ms, zs = parse_view(spec["views"]["side"], pal, "side")
     mt, zt = parse_view(spec["views"]["top"], pal, "top")
 
-    R = int(spec.get("res", 80))
-    gx = max(4, round(R * mf.shape[1] / mf.shape[0]))
-    gz = R
-    gy = max(4, round(R * ms.shape[1] / ms.shape[0]))
+    if "grid" in spec and isinstance(spec["grid"], (list, tuple)) and len(spec["grid"]) == 3:
+        gx, gy, gz = [max(6, int(v)) for v in spec["grid"]]
+    else:
+        R = int(spec.get("res", 80))
+        x_u = float(mf.shape[1])
+        y_u = float(ms.shape[1]) * (float(mf.shape[0]) / max(1.0, float(ms.shape[0])))
+        z_u = float(mf.shape[0])
+        m_u = max(x_u, y_u, z_u)
+        gx = max(6, round(R * x_u / m_u))
+        gy = max(6, round(R * y_u / m_u))
+        gz = max(6, round(R * z_u / m_u))
 
-    # front : colonnes->X, lignes->Z (ligne 0 en haut = +Z)
-    mf_g = _resize_nearest(mf.astype(np.uint8), (gz, gx)).astype(bool)
-    zf_g = _resize_nearest(zf.astype(np.int32), (gz, gx))
-    A_f = np.broadcast_to(mf_g.T[:, None, :], (gx, gy, gz))
-    Z_f = np.broadcast_to(zf_g.T[:, None, :], (gx, gy, gz))
-    # side : colonnes->Y (arrière->avant), lignes->Z
-    ms_g = _resize_nearest(ms.astype(np.uint8), (gz, gy)).astype(bool)
-    zs_g = _resize_nearest(zs.astype(np.int32), (gz, gy))
-    A_s = np.broadcast_to(ms_g.T[None, :, :], (gx, gy, gz))
-    Z_s = np.broadcast_to(zs_g.T[None, :, :], (gx, gy, gz))
-    # top : colonnes->X, lignes->Y (ligne 0 = arrière)
-    mt_g = _resize_nearest(mt.astype(np.uint8), (gy, gx)).astype(bool)
-    zt_g = _resize_nearest(zt.astype(np.int32), (gy, gx))
-    A_t = np.broadcast_to(mt_g.T[:, :, None], (gx, gy, gz))
-    Z_t = np.broadcast_to(zt_g.T[:, :, None], (gx, gy, gz))
+    # Orientation monde : index 0 = (-X, -Y=avant, z=0=sol) — contigu requis par Pillow !
+    mf_w, zf_w = np.ascontiguousarray(mf[::-1, :]), np.ascontiguousarray(zf[::-1, :])
+    ms_w, zs_w = np.ascontiguousarray(ms[::-1, ::-1]), np.ascontiguousarray(zs[::-1, ::-1])
+    mt_w, zt_w = np.ascontiguousarray(mt[::-1, :]), np.ascontiguousarray(zt[::-1, :])
 
-    occ = A_f & A_s & A_t
+    # 1) Grille logique (gx, gy, gz) + SDF 2D continu pour une géométrie lisse
+    sdf_f = _signed_distance_2d(mf_w, (gz, gx)).T[:, None, :]   # (gx, 1, gz)
+    sdf_s = _signed_distance_2d(ms_w, (gz, gy)).T[None, :, :]   # (1, gy, gz)
+    sdf_t = _signed_distance_2d(mt_w, (gy, gx)).T[:, :, None]   # (gx, gy, 1)
+    sdf_3d = np.minimum(np.minimum(sdf_f, sdf_s), sdf_t)
+
+    mf_g = _resize_nearest(mf_w.astype(np.uint8), (gz, gx)).astype(bool)
+    ms_g = _resize_nearest(ms_w.astype(np.uint8), (gz, gy)).astype(bool)
+    mt_g = _resize_nearest(mt_w.astype(np.uint8), (gy, gx)).astype(bool)
+    occ_bin = (np.broadcast_to(mf_g.T[:, None, :], (gx, gy, gz))
+               & np.broadcast_to(ms_g.T[None, :, :], (gx, gy, gz))
+               & np.broadcast_to(mt_g.T[:, :, None], (gx, gy, gz)))
+    occ = (sdf_3d >= 0.0) | occ_bin
     if not occ.any():
         raise SpecError("visual hull vide : les 3 vues ne se recouvrent pas")
 
     occ = _fill_closed_cavities(occ, spec)
 
-    # symmetry_x miroite l'objet en X et fait l'union : utile pour dessiner
-    # une moitié, mais il DUPLIQUE silencieusement tout détail asymétrique
-    # (antenne décentrée, pupille, emblème). On prévient si les vues
-    # décrivent un objet visiblement asymétrique.
+    zf_g = _resize_nearest(zf_w.astype(np.int32), (gz, gx))
+    zs_g = _resize_nearest(zs_w.astype(np.int32), (gz, gy))
+    zt_g = _resize_nearest(zt_w.astype(np.int32), (gy, gx))
+    Z_f = np.broadcast_to(zf_g.T[:, None, :], (gx, gy, gz))
+    Z_s = np.broadcast_to(zs_g.T[None, :, :], (gx, gy, gz))
+    Z_t = np.broadcast_to(zt_g.T[:, :, None], (gx, gy, gz))
+
     if spec.get("symmetry_x", True):
         diff = int((occ ^ occ[::-1, :, :]).sum())
         if diff * 20 > int(occ.sum()):
             print(f"  ⚠ symmetry_x=true mais les vues sont asymétriques "
                   f"({diff} voxels hors miroir) : les détails décentrés "
-                  f"seront dupliqués en miroir — symmetry_x: false si "
-                  f"non voulu")
+                  f"seront dupliqués en miroir — symmetry_x: false si non voulu")
         occ = occ | occ[::-1, :, :]
+        sdf_3d = np.maximum(sdf_3d, sdf_3d[::-1, :, :])
 
-    # votes de matériaux (une vue = un vote, majorité, ex æquo -> palette order)
-    votes = np.stack([Z_f, Z_s, Z_t])          # (3, X, Y, Z)
+    votes = np.stack([Z_f, Z_s, Z_t])
     valid = votes >= 0
     P = len(pal)
     counts = np.zeros((P,) + occ.shape, dtype=np.int16)
@@ -206,26 +340,19 @@ def build_volumes(spec):
     zone[~occ] = -1
 
     if spec.get("symmetry_x", True):
-        occ = occ | occ[::-1, :, :]
         zm = zone[::-1, :, :]
-        zone = np.where(zone >= 0, zone, zm)   # union, on garde le vote existant
+        zone = np.where(zone >= 0, zone, zm)
 
+    spec["_sdf_cache"] = sdf_3d
     return occ, zone, (gx, gy, gz), (mf, ms, mt)
 
 
 # --------------------------------------------------------------------------
-# 4. Géométrie : marching cubes + lissage + décimation
+# 4. Géométrie : marching cubes SDF + lissage + décimation + pose z=0
 # --------------------------------------------------------------------------
 
 def _sample_labels(zone_up, coords):
-    """Labels aux sommets, avec réparation des frontières MC.
-
-    Les sommets de surface tombent souvent sur le VOXEL VIDE juste devant
-    la face (rint de la frontière marching cubes). Sans réparation, ces
-    sommets seraient clippés vers le matériau principal et toute zone
-    peinte au centre d'une face large (fuller, décor) serait perdue.
-    -> label du voxel occupé le plus proche (distance transform 3D).
-    """
+    """Labels aux sommets, avec réparation par transformée en distance 3D."""
     idx = np.clip(coords, 0, np.array(zone_up.shape) - 1)
     lab = zone_up[idx[:, 0], idx[:, 1], idx[:, 2]]
     if (lab < 0).any():
@@ -240,14 +367,7 @@ def _sample_labels(zone_up, coords):
 
 
 def _remove_debris(mesh, spec):
-    """Supprime les îlots de triangles issus du marching cubes sur les
-    objets à plaques fines (tôle, grilles, boîtes creuses) : le lissage
-    Taubin y sectionne la coque et laisse des fragments de 2-20 faces
-    collés au corps. Critère conservateur : un composant est un débris
-    s'il a moins de `debris_min_faces` faces (50 par défaut — une antenne
-    cylindrique, un rivet ou une sangle en gardent toujours plus de 50).
-    Le nombre de débris supprimés est tracé dans mesh.metadata pour le
-    report.json."""
+    """Supprime les îlots résiduels (< `debris_min_faces` faces)."""
     min_faces = int(spec.get("debris_min_faces", 50))
     parts = mesh.split(only_watertight=False)
     if len(parts) < 2:
@@ -263,11 +383,7 @@ def _remove_debris(mesh, spec):
 
 
 def _fill_closed_cavities(occ, spec):
-    """Les vues décrivent l'ENVELOPPE extérieure de l'objet : une cavité
-    FERMÉE ne peut donc être qu'une erreur de dessin (coque dessinée en
-    anneau, pensée comme « creuse »). On comble ces cavités ; les creux
-    ouverts (vase, bol, coque de bateau) restent connectés à l'extérieur
-    et ne sont pas affectés. Désactivable avec fill_cavities: false."""
+    """Comble les cavités internes fermées en préservant les creux ouverts."""
     if not spec.get("fill_cavities", True):
         return occ
     filled = ndimage.binary_fill_holes(occ)
@@ -280,41 +396,53 @@ def _fill_closed_cavities(occ, spec):
 
 
 def mesh_from_volumes(occ, zone, spec):
-    # padding : marching cubes laisse des surfaces ouvertes sur les bords
-    # du tableau si le volume y touche -> on entoure de cellules vides
+    sdf_cached = spec.pop("_sdf_cache", None)
     P = 3
-    occ = np.pad(occ, P, constant_values=False)
-    zone = np.pad(zone, P, constant_values=-1)
+    occ_p = np.pad(occ, P, constant_values=False)
+    zone_p = np.pad(zone, P, constant_values=-1)
 
-    up = int(spec.get("upsample", 2))
-    vol = ndimage.zoom(occ.astype(np.float32), up, order=1)
-    zone_up = np.repeat(np.repeat(np.repeat(zone, up, 0), up, 1), up, 2)
+    up = int(spec.get("upsample", 1 if max(occ.shape) >= 120 else 2))
+    zone_up = np.repeat(np.repeat(np.repeat(zone_p, up, 0), up, 1), up, 2)
 
-    verts, faces, _, _ = measure.marching_cubes(
-        vol, level=float(spec.get("mc_level", 0.5)))
+    if sdf_cached is not None and sdf_cached.shape == occ.shape:
+        # Utilise le champ SDF continu + cavités comblées pour éviter les escaliers
+        sdf_clean = np.where(occ & (sdf_cached < 0.0), 0.35, sdf_cached)
+        sdf_pad = np.pad(sdf_clean, P, constant_values=-3.0)
+        vol = ndimage.zoom(sdf_pad.astype(np.float32), up, order=1, mode="nearest")
+        vol = ndimage.gaussian_filter(vol, sigma=float(spec.get("sdf_sigma", 0.55)))
+        # Convertit mc_level (convention historique [0..1] centrée sur 0.5) en offset SDF
+        iso = (float(spec.get("mc_level", 0.5)) - 0.5) * 1.5
+        verts, faces, _, _ = measure.marching_cubes(vol, level=iso)
+    else:
+        vol = ndimage.zoom(occ_p.astype(np.float32), up, order=1, mode="nearest")
+        verts, faces, _, _ = measure.marching_cubes(
+            vol, level=float(spec.get("mc_level", 0.5)))
+
     mesh = trimesh.Trimesh(vertices=verts, faces=faces, process=True)
     trimesh.repair.fix_normals(mesh)
     trimesh.repair.fill_holes(mesh)
 
-    n_smooth = int(spec.get("smooth", 12))
-    trimesh.smoothing.filter_taubin(mesh, lamb=0.5, nu=-0.53,
-                                    iterations=n_smooth)
+    n_smooth = int(spec.get("smooth", 8))
+    if n_smooth > 0:
+        trimesh.smoothing.filter_taubin(mesh, lamb=0.5, nu=-0.53,
+                                        iterations=n_smooth)
     mesh.process(validate=True)
     _remove_debris(mesh, spec)
 
-    # étiquettes matériaux par sommet (réparation frontières : voir
-    # _sample_labels — sinon les zones peintes au centre des faces
-    # larges sont perdues au profit du matériau principal)
-    v_labels = _sample_labels(zone_up, np.rint(mesh.vertices).astype(np.int64))
+    # Échantillonnage des matériaux AVANT mise à l'échelle et centrage monde
+    vox_coords = mesh.vertices.copy()
+    v_labels = _sample_labels(zone_up, np.rint(vox_coords).astype(np.int64))
 
-    # échelle physique : la hauteur (Z) du bbox vaut size_m
-    size_m = float(spec.get("size_m", 1.0))
     ext = mesh.bounds[1] - mesh.bounds[0]
-    scale = size_m / max(1e-9, ext[2])
-    mesh.apply_scale(scale)
+    if "dims" in spec and isinstance(spec["dims"], (list, tuple)) and len(spec["dims"]) == 3:
+        target = np.asarray(spec["dims"], dtype=float)
+        scale_vec = target / np.maximum(1e-9, ext)
+        mesh.vertices = mesh.vertices * scale_vec
+    else:
+        size_m = float(spec.get("size_m", 1.0))
+        scale_vec = np.full(3, size_m / max(1e-9, float(ext.max())), dtype=float)
+        mesh.vertices = mesh.vertices * scale_vec
 
-    # décimation vers le budget triangles (essais à budgets croissants ;
-    # si tout perce le mesh, on garde le mesh MC intégral)
     budget = int(spec.get("budget_tris", 15000))
     if len(mesh.faces) > budget:
         keep = mesh.copy()
@@ -327,239 +455,17 @@ def mesh_from_volumes(occ, zone, spec):
                 mesh = cand
                 v_labels = _sample_labels(
                     zone_up,
-                    np.rint(mesh.vertices / scale).astype(np.int64))
+                    np.rint(mesh.vertices / scale_vec).astype(np.int64))
                 break
         if not mesh.is_watertight:
             mesh, v_labels = keep, keep_labels
 
+    # Convention 3d-forge : centré en XY, base exactement posée sur le sol z = 0
+    lo, hi = mesh.bounds
+    cx = 0.5 * (lo[0] + hi[0])
+    cy = 0.5 * (lo[1] + hi[1])
+    mesh.apply_translation([-cx, -cy, -lo[2]])
     return mesh, v_labels
-
-
-# --------------------------------------------------------------------------
-# 5. UV unwrap
-# --------------------------------------------------------------------------
-
-def unwrap(mesh, v_labels):
-    import xatlas
-    vm, ft, uv = xatlas.parametrize(
-        mesh.vertices.astype(np.float32), mesh.faces.astype(np.uint32))
-    mesh2 = trimesh.Trimesh(vertices=mesh.vertices[vm], faces=ft, process=False)
-    labels2 = v_labels[vm]
-    return mesh2, labels2, uv.astype(np.float64)
-
-
-# --------------------------------------------------------------------------
-# 6. Textures PBR procédurales (peinture 3D -> re-projection atlas)
-# --------------------------------------------------------------------------
-
-def _hex2rgb(h):
-    h = h.lstrip("#")
-    return np.array([int(h[i:i + 2], 16) for i in (0, 2, 4)], dtype=np.float64) / 255.0
-
-
-def _label_centroid(vertices, labels, lid):
-    pts = vertices[labels == lid]
-    if len(pts) == 0:
-        return np.zeros(3)
-    return pts.mean(0)
-
-
-def make_material_fn(spec, vertices, labels, z_bounds):
-    """Retourne eval(label, pos, wear) -> (rgb, roughness, metallic)."""
-    pal = {m["id"]: m for m in spec["palette"]}
-    ids = [m["id"] for m in spec["palette"]]
-    rgb_of = {i: _hex2rgb(pal[i]["color"]) for i in pal}
-    rough_of = {i: float(pal[i].get("roughness", 0.6)) for i in pal}
-    metal_of = {i: float(pal[i].get("metallic", 0.0)) for i in pal}
-    overlays = spec.get("overlays", [])
-    zmin, zmax = z_bounds
-    cents = {i: _label_centroid(vertices, labels, k)
-             for k, i in enumerate(ids)}
-
-    def eval_mat(lab, pos, wear):
-        lab = np.asarray(lab)
-        n = len(pos)
-        col = np.zeros((n, 3))
-        rough = np.zeros(n)
-        metal = np.zeros(n)
-        for k, i in enumerate(ids):
-            m = lab == k
-            if not m.any():
-                continue
-            col[m] = rgb_of[i]
-            rough[m] = rough_of[i]
-            metal[m] = metal_of[i]
-        znorm = (pos[:, 2] - zmin) / max(1e-9, zmax - zmin)
-
-        # micro-variations sur toutes les surfaces (vie le matériau uni)
-        micro = fbm(pos[:, 0] * 7.0, pos[:, 1] * 7.0, pos[:, 2] * 7.0,
-                    octaves=3, seed=17)
-        col = col * (0.93 + 0.14 * micro)[:, None]
-
-        for ov in overlays:
-            kind = ov.get("type")
-            tgt = ov.get("on")
-            if kind == "rust" and tgt in ids:
-                rust = rgb_of.get(ov.get("with", "r"), np.array([0.45, 0.24, 0.12]))
-                m = lab == ids.index(tgt)
-                band = ov.get("band", [0.0, 1.0])
-                b = (_smoothstep(band[0] - 0.05, band[0] + 0.10, znorm)
-                     * (1.0 - _smoothstep(band[1] - 0.10, band[1] + 0.05, znorm)))
-                nse = fbm(pos[:, 0] * ov.get("scale", 6.0),
-                          pos[:, 1] * ov.get("scale", 6.0),
-                          pos[:, 2] * ov.get("scale", 6.0), octaves=4, seed=7)
-                cov = float(ov.get("coverage", 0.35))
-                t = np.clip((nse - (1.0 - 2.0 * cov))
-                            / max(0.05, ov.get("softness", 0.18)), 0, 1)
-                t = (t * b) * m
-                col = col * (1 - t[:, None]) + rust[None, :] * t[:, None]
-                rough = rough * (1 - t) + 0.88 * t
-                metal = metal * (1 - t) + 0.15 * t
-            elif kind == "wrap" and tgt in ids:
-                m = lab == ids.index(tgt)
-                if not m.any():
-                    continue
-                c = cents.get(tgt, np.zeros(3))
-                theta = np.arctan2(pos[:, 1] - c[1], pos[:, 0] - c[0])
-                u = theta / (2 * math.pi)
-                count = float(ov.get("count", 8))
-                twist = float(ov.get("twist", 0.3))
-                ph = _frac(count * u + twist * znorm * count)
-                bandm = (ph < 0.55).astype(np.float64)
-                grain = fbm(pos[:, 0] * 40, pos[:, 1] * 40, pos[:, 2] * 40,
-                            octaves=2, seed=31)
-                tone = 1.0 - float(ov.get("darken", 0.45)) * bandm * (0.8 + 0.4 * grain)
-                tone = np.where(m, tone, 1.0)
-                col = col * tone[:, None]
-                rough = np.where(m, np.clip(rough + 0.06 * grain, 0, 1), rough)
-            elif kind == "edge_wear" and tgt in ids:
-                m = lab == ids.index(tgt)
-                amt = float(ov.get("amount", 0.5))
-                nse = fbm(pos[:, 0] * ov.get("scale", 18.0),
-                          pos[:, 1] * ov.get("scale", 18.0),
-                          pos[:, 2] * ov.get("scale", 18.0), octaves=3, seed=53)
-                t = np.clip(wear * (0.55 + 0.9 * nse) * amt * 2.2, 0, 1) * m
-                col = col * (1 - t[:, None]) + (col * 1.3 + 0.06) * t[:, None]
-                rough = rough * (1 - t) + (rough * 0.35) * t
-                metal = metal + (0.95 - metal) * t * (metal > 0.4)
-
-        return (np.clip(col, 0, 1),
-                np.clip(rough, 0.04, 1),
-                np.clip(metal, 0, 1))
-
-    return eval_mat
-
-
-def _rasterize_tri(uv_px, S):
-    """Pixels couverts par un triangle UV -> (xs, ys, w0, w1, w2) vectorisé."""
-    if not np.isfinite(uv_px).all():
-        return None          # triangle dégénéré (UV NaN/inf d'xatlas)
-    x0 = max(int(np.floor(uv_px[:, 0].min())), 0)
-    x1 = min(int(np.ceil(uv_px[:, 0].max())), S - 1)
-    y0 = max(int(np.floor(uv_px[:, 1].min())), 0)
-    y1 = min(int(np.ceil(uv_px[:, 1].max())), S - 1)
-    if x1 < x0 or y1 < y0:
-        return None
-    gx, gy = np.meshgrid(np.arange(x0, x1 + 1) + 0.5,
-                         np.arange(y0, y1 + 1) + 0.5)
-    ax, ay = uv_px[0]
-    bx, by = uv_px[1]
-    cx, cy = uv_px[2]
-    den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
-    if abs(den) < 1e-12:
-        return None
-    w0 = ((by - cy) * (gx - cx) + (cx - bx) * (gy - cy)) / den
-    w1 = ((cy - ay) * (gx - cx) + (ax - cx) * (gy - cy)) / den
-    w2 = 1.0 - w0 - w1
-    m = (w0 >= -1e-6) & (w1 >= -1e-6) & (w2 >= -1e-6)
-    if not m.any():
-        return None
-    return gx[m].astype(np.int64), gy[m].astype(np.int64), w0[m], w1[m], w2[m]
-
-
-def bake_textures(mesh, labels, uv, spec):
-    """Peint l'atlas : albedo + metallicRoughness + normal. Retourne 3 PIL + wear."""
-    S = int(spec.get("texture_size", 1024))
-    albedo = np.zeros((S, S, 3), dtype=np.float64)
-    rough_t = np.zeros((S, S), dtype=np.float64)
-    metal_t = np.zeros((S, S), dtype=np.float64)
-    filled = np.zeros((S, S), dtype=bool)
-
-    faces = mesh.faces
-    tri_uv = uv[faces] * S          # convention xatlas : origine en haut-gauche
-    # -> ligne image = v * S directement, sans flip
-
-    # usure des arêtes : défaut d'angle aux sommets (concavité/convexité locale)
-    defects = np.abs(mesh.vertex_defects) if hasattr(mesh, "vertex_defects") \
-        else np.zeros(len(mesh.vertices))
-    wear_v = np.clip(defects / (np.percentile(defects, 95) + 1e-9), 0, 1)
-
-    zmin, zmax = float(mesh.bounds[0][2]), float(mesh.bounds[1][2])
-    eval_mat = make_material_fn(spec, mesh.vertices, labels, (zmin, zmax))
-
-    for f in range(len(faces)):
-        px = tri_uv[f]
-        hit = _rasterize_tri(px, S)
-        if hit is None:
-            continue
-        xs, ys, w0, w1, w2 = hit
-        pos = (w0[:, None] * mesh.vertices[faces[f][0]]
-               + w1[:, None] * mesh.vertices[faces[f][1]]
-               + w2[:, None] * mesh.vertices[faces[f][2]])
-        # étiquette du sommet dominant (au plus proche)
-        w = np.stack([w0, w1, w2], 1)
-        dom = labels[faces[f][w.argmax(1)]]
-        wear = w0 * wear_v[faces[f][0]] + w1 * wear_v[faces[f][1]] \
-            + w2 * wear_v[faces[f][2]]
-        col, rough, metal = eval_mat(dom, pos, wear)
-        albedo[ys, xs] = col
-        rough_t[ys, xs] = rough
-        metal_t[ys, xs] = metal
-        filled[ys, xs] = True
-
-    # dilatation : les texels vides des coutures héritent du voisin rempli
-    if (~filled).any() and filled.any():
-        ind = ndimage.distance_transform_edt(~filled, return_distances=False,
-                                             return_indices=True)
-        albedo = albedo[ind[0], ind[1]]
-        rough_t = rough_t[ind[0], ind[1]]
-        metal_t = metal_t[ind[0], ind[1]]
-
-    albedo8 = (np.clip(albedo, 0, 1) * 255).astype(np.uint8)
-    # normal map dérivée de la luminance (relief procédural gratuit)
-    lum = albedo @ np.array([0.299, 0.587, 0.114])
-    gx = ndimage.sobel(lum, 1) / 8.0
-    gy = ndimage.sobel(lum, 0) / 8.0
-    k = float(spec.get("normal_strength", 2.0))
-    nx, ny = -gx * k, -gy * k
-    nz = np.ones_like(nx)
-    ln = np.sqrt(nx * nx + ny * ny + nz * nz)
-    normal8 = (np.stack([nx / ln, ny / ln, nz / ln], -1) * 0.5 + 0.5) * 255
-    normal8 = normal8.astype(np.uint8)
-    # glTF : G = roughness, B = metallic
-    mr8 = np.stack([255 * np.ones_like(rough_t), rough_t * 255, metal_t * 255],
-                   -1).astype(np.uint8)
-
-    return (Image.fromarray(albedo8),
-            Image.fromarray(mr8),
-            Image.fromarray(normal8),
-            wear_v)
-
-
-def attach_visual(mesh, uv, albedo_img, mr_img, normal_img):
-    mat = trimesh.visual.material.PBRMaterial(
-        name="forge_generated",
-        baseColorFactor=[255, 255, 255, 255],
-        baseColorTexture=albedo_img,
-        metallicFactor=1.0,
-        roughnessFactor=1.0,
-        metallicRoughnessTexture=mr_img,
-        normalTexture=normal_img,
-        normalTextureScale=1.0,
-    )
-    mesh.visual = trimesh.visual.texture.TextureVisuals(
-        uv=uv, image=albedo_img, material=mat)
-    return mesh
 
 
 # --------------------------------------------------------------------------
@@ -567,52 +473,59 @@ def attach_visual(mesh, uv, albedo_img, mr_img, normal_img):
 # --------------------------------------------------------------------------
 
 def silhouette_iou(mesh, views_masks, grid_shape, size_m):
-    """Re-projette le mesh final sur les 3 plans et mesure l'IoU."""
-    from PIL import ImageDraw
+    """Re-projette le mesh final sur les 3 plans (exactement alignés avec
+    `build_volumes`) et mesure l'IoU de silhouette."""
     gx, gy, gz = grid_shape
     lo, hi = mesh.bounds
     ious = {}
     plan = {
-        # (axe_u, axe_v, W, H, mask, flip_v)  flip si ligne 0 = +axe (z en haut)
-        "front": (0, 2, gx, gz, views_masks[0], True),
-        "side": (1, 2, gy, gz, views_masks[1], True),
-        "top": (0, 1, gx, gy, views_masks[2], False),
+        # (axe_u, axe_v, W, H, mask, flip_u, flip_v)
+        "front": (0, 2, max(gx * 4, 64), max(gz * 4, 64), views_masks[0], False, True),
+        "side":  (1, 2, max(gy * 4, 64), max(gz * 4, 64), views_masks[1], True,  True),
+        "top":   (0, 1, max(gx * 4, 64), max(gy * 4, 64), views_masks[2], False, True),
     }
-    for name, (ax_u, ax_v, Wg, Hg, mask_in, flip_v) in plan.items():
+    v = mesh.vertices
+    faces = mesh.faces
+    for name, (ax_u, ax_v, Wg, Hg, mask_in, flip_u, flip_v) in plan.items():
         H_in, W_in = mask_in.shape
         img = Image.new("L", (Wg, Hg), 0)
         d = ImageDraw.Draw(img)
-        su, sv = (Wg - 1) / max(1e-9, hi[ax_u] - lo[ax_u]), \
-                 (Hg - 1) / max(1e-9, hi[ax_v] - lo[ax_v])
-        v = mesh.vertices
-        for f in mesh.faces:
-            pts = []
-            for k in f:
-                pu = (v[k][ax_u] - lo[ax_u]) * su
-                pv_raw = (v[k][ax_v] - lo[ax_v]) * sv
-                pv = (Hg - 1 - pv_raw) if flip_v else pv_raw
-                pts.append((pu, pv))
-            d.polygon(pts, fill=255)
-        sil = np.asarray(img.resize((W_in, H_in), Image.LANCZOS)) > 96
-        inter = (sil & mask_in).sum()
-        union = (sil | mask_in).sum()
+        su = (Wg - 1) / max(1e-9, hi[ax_u] - lo[ax_u])
+        sv = (Hg - 1) / max(1e-9, hi[ax_v] - lo[ax_v])
+        pu = (v[:, ax_u] - lo[ax_u]) * su
+        pv = (v[:, ax_v] - lo[ax_v]) * sv
+        if flip_u:
+            pu = (Wg - 1) - pu
+        if flip_v:
+            pv = (Hg - 1) - pv
+        tri = np.stack([pu[faces], pv[faces]], axis=-1)
+        for pts in tri.tolist():
+            d.polygon([(pts[0][0], pts[0][1]),
+                       (pts[1][0], pts[1][1]),
+                       (pts[2][0], pts[2][1])], fill=255)
+        sil = np.asarray(img.resize((W_in, H_in), Image.BILINEAR)) > 96
+        inter = int((sil & mask_in).sum())
+        union = int((sil | mask_in).sum())
         ious[name] = round(inter / union, 4) if union else 0.0
     return ious
 
 
-def save_view_maps(views, outdir, stem):
-    """Sauvegarde les vues ASCII d'entrée en PNG (représentation interne)."""
+def save_view_maps(views, palette, outdir, stem):
+    """Sauvegarde les 3 vues internes (ASCII ou vectorielles 2D) en PNG colorés."""
+    pal_ids = [m["id"] for m in palette]
+    pal_rgb = [tuple((pbr._hex2rgb(m["color"]) * 255).astype(int).tolist())
+               for m in palette]
     paths = []
-    for name, rows in views.items():
-        H, W = len(rows), max(len(r) for r in rows)
-        im = Image.new("RGB", (W, H), (18, 16, 14))
-        px = im.load()
-        for r, line in enumerate(rows):
-            for c, ch in enumerate(line):
-                if ch not in EMPTY:
-                    px[c, r] = (232, 100, 27) if ch == "#" else (216, 169, 58)
+    for name, raw in views.items():
+        _, zones = parse_view(raw, pal_ids, name)
+        H, W = zones.shape
+        arr = np.full((H, W, 3), (18, 18, 22), dtype=np.uint8)
+        for k, rgb in enumerate(pal_rgb):
+            arr[zones == k] = rgb
+        im = Image.fromarray(arr)
         scale = max(1, 256 // max(H, W))
-        im = im.resize((W * scale, H * scale), Image.NEAREST)
+        if scale > 1:
+            im = im.resize((W * scale, H * scale), Image.NEAREST)
         p = os.path.join(outdir, f"{stem}_view_{name}.png")
         im.save(p)
         paths.append(p)
@@ -624,11 +537,6 @@ def save_view_maps(views, outdir, stem):
 # --------------------------------------------------------------------------
 
 def load_references(ref_path, outdir, stem):
-    """Charge la fiche de références produite par research.py (recherche web).
-
-    Copie la planche « détails à respecter » dans le dossier de sortie et
-    retourne un résumé pour le rapport (checklist de QA). None si absent.
-    """
     if os.path.isdir(ref_path):
         ref_path = os.path.join(ref_path, "references.json")
     if not os.path.isfile(ref_path):
@@ -650,8 +558,11 @@ def load_references(ref_path, outdir, stem):
 
 
 def generate(spec, outdir, res_override=None, budget_override=None,
-             faces_all=False, references_path=None):
+             faces_all=False, references_path=None, name_override=None):
     t0 = time.time()
+    spec = _normalize_spec(spec)
+    if name_override:
+        spec["name"] = name_override
     os.makedirs(outdir, exist_ok=True)
     stem = spec.get("name", "objet")
     if res_override:
@@ -659,23 +570,17 @@ def generate(spec, outdir, res_override=None, budget_override=None,
     if budget_override:
         spec["budget_tris"] = budget_override
 
-    # 1-3 : vues -> volumes
+    # 1-3 : vues -> volumes SDF
     occ, zone, grid_shape, masks = build_volumes(spec)
-    # 4 : géométrie
+    # 4 : géométrie posée à z=0
     mesh, v_labels = mesh_from_volumes(occ, zone, spec)
     # 5 : UV
     mesh, labels, uv = unwrap(mesh, v_labels)
-    bad = ~np.isfinite(uv).all(axis=1)
-    if bad.any():
-        # coutures/ triangles dégénérés d'xatlas -> milieu d'atlas (jamais NaN)
-        uv[bad] = 0.5
-    # 6 : textures
+    # 6 : textures PBR (albedo + metallicRoughness + normal)
     albedo_img, mr_img, normal_img, _ = bake_textures(mesh, labels, uv, spec)
     attach_visual(mesh, uv, albedo_img, mr_img, normal_img)
     trimesh.repair.fix_winding(mesh)
 
-    # validations structurelles (mesh fusionné : xatlas duplique les sommets
-    # de coutures UV -> faux négatif topologique sur le mesh texturé)
     solid = trimesh.Trimesh(vertices=mesh.vertices, faces=mesh.faces, process=True)
     solid.merge_vertices()
     checks = {
@@ -694,22 +599,18 @@ def generate(spec, outdir, res_override=None, budget_override=None,
     checks["iou_views"] = ious
     checks["iou_mean"] = round(sum(ious.values()) / len(ious), 4)
 
-    # exports
+    # Exports
+    scene = trimesh.Scene(mesh)
     files = {}
     glb = os.path.join(outdir, stem + ".glb")
-    trimesh.Scene(mesh).export(glb)
+    scene.export(glb)
     files["glb"] = glb
     obj = os.path.join(outdir, stem + ".obj")
     try:
-        mesh.export(obj, texture=albedo_img)
-        if os.path.exists(obj):
-            mtl = os.path.splitext(obj)[0] + ".mtl"
-            if not os.path.exists(mtl):
-                with open(mtl, "w") as fh:
-                    fh.write(f"newmtl forge_generated\nKd 1 1 1\nmap_Kd {stem}.png\n")
-            files["obj"] = obj
+        import meshkit as mk
+        mk.export_obj_with_mtl(scene, obj)
+        files["obj"] = obj
     except Exception as e:
-        # échec d'export visible : jamais silencieux (bug qualité industrielle)
         print(f"  ⚠ export OBJ a échoué ({type(e).__name__}: {e}) "
               f"— le GLB/STL restent valides", file=sys.stderr)
     stl = os.path.join(outdir, stem + ".stl")
@@ -718,7 +619,7 @@ def generate(spec, outdir, res_override=None, budget_override=None,
     try:
         import usdz_export
         usd = os.path.join(outdir, stem + ".usdz")
-        usdz_export.export_usdz(trimesh.Scene(solid), usd)
+        usdz_export.export_usdz(scene, usd)
         files["usdz"] = usd
     except Exception as e:
         print(f"  ⚠ export USDZ a échoué ({type(e).__name__}: {e}) "
@@ -726,21 +627,7 @@ def generate(spec, outdir, res_override=None, budget_override=None,
     albedo_img.save(os.path.join(outdir, stem + "_albedo.png"))
     files["albedo"] = os.path.join(outdir, stem + "_albedo.png")
 
-    # rendus de contrôle (albedo par sommet = aperçu texture)
-    arr = np.asarray(albedo_img)
-    h, w = arr.shape[:2]
-    cols = np.clip((uv[:, 0] * (w - 1)).astype(int), 0, w - 1)
-    rows = np.clip((uv[:, 1] * (h - 1)).astype(int), 0, h - 1)
-    vcol = arr[rows, cols]
-    # contraste léger : évite le rendu "lavé" sous 3 lumières
-    vcol = np.clip((vcol.astype(np.float64) / 255.0) ** 1.18 * 0.9,
-                   0, 1) * 255.0
-    mesh_prev = mesh.copy()
-    rgba = np.column_stack([vcol,
-                            255 * np.ones((len(vcol), 1))]).astype(np.uint8)
-    mesh_prev.visual = trimesh.visual.ColorVisuals(mesh_prev,
-                                                   vertex_colors=rgba)
-    scene = trimesh.Scene(mesh_prev)
+    # Rendus de contrôle PBR directs (sampling UV + metallicRoughness + normal map par pixel !)
     views_def = [("face", 0, 8), ("profil", 90, 8), ("trois_quarts", 42, 22),
                  ("dessus", 0, 78)]
     renders = []
@@ -751,10 +638,8 @@ def generate(spec, outdir, res_override=None, budget_override=None,
         img.save(p)
         renders.append(p)
 
-    # vues ASCII internes (représentation)
-    view_maps = save_view_maps(spec["views"], outdir, stem)
+    view_maps = save_view_maps(spec["views"], spec["palette"], outdir, stem)
 
-    # photos de TOUTES les faces + turntable (livraison complète)
     photos = {}
     if faces_all:
         face_paths, faces_sheet = renderer.render_all_faces(scene, outdir, stem,
@@ -764,14 +649,16 @@ def generate(spec, outdir, res_override=None, budget_override=None,
         photos = {"faces": face_paths, "all_faces": faces_sheet,
                   "turn_images": turn_paths, "turntable": turn_sheet}
 
-    # références web (détails à respecter) → copie + checklist QA
     refs_summary = None
     ref_src = references_path or spec.get("references")
     if ref_src:
         refs_summary = load_references(ref_src, outdir, stem)
 
+    is_vec = any(isinstance(v, dict) for v in spec["views"].values())
     report = {
-        "pipeline": "meshgen v1 (visual hull multi-vues, type Meshy déterministe)",
+        "pipeline": ("meshgen v2 (visual hull SDF vectoriel multi-vues, PBR complet)"
+                     if is_vec else
+                     "meshgen v2 (visual hull SDF multi-vues, PBR complet)"),
         "prompt": spec.get("prompt", ""),
         "params": {k: spec[k] for k in ("res", "budget_tris", "size_m", "smooth")
                    if k in spec},
@@ -802,13 +689,16 @@ def generate(spec, outdir, res_override=None, budget_override=None,
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Génération 3D multi-vues (zéro API)")
-    ap.add_argument("spec", help="JSON de spec (vues ASCII + palette + overlays)")
+    ap = argparse.ArgumentParser(description="Génération 3D multi-vues SDF + PBR (zéro API)")
+    ap.add_argument("spec", help="JSON de spec (vues ASCII ou vectorielles 2D + palette + overlays)")
     ap.add_argument("--out", required=True, help="répertoire de sortie")
+    ap.add_argument("--name", default=None, help="préfixe des fichiers générés")
     ap.add_argument("--res", type=int, default=None, help="résolution grille")
     ap.add_argument("--budget", type=int, default=None, help="budget triangles")
     ap.add_argument("--faces", choices=["all"], default=None,
                     help="all = photos des 6 faces + turntable (livraison Meshy)")
+    ap.add_argument("--usdz", action="store_true",
+                    help="accepté pour compatibilité CLI (USDZ exporté d'office)")
     ap.add_argument("--references", default=None,
                     help="references.json (research.py) : planche des détails "
                          "à respecter, copiée + checklist dans le rapport")
@@ -819,7 +709,8 @@ def main():
         spec = json.load(fh)
     report = generate(spec, args.out, args.res, args.budget,
                       faces_all=(args.faces == "all"),
-                      references_path=args.references)
+                      references_path=args.references,
+                      name_override=args.name)
     v = report["validation"]
     print(f"OK {report['params'].get('res', '?')} -> {v['triangles']} tris, "
           f"watertight={v['watertight']}, IoU={report['coherence']['mean']} "

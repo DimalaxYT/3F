@@ -1,0 +1,76 @@
+{
+  "name": "katana_gpu_pbr_v3",
+  "texture_size": 1024,
+  "normal_strength": 1.6,
+  "regions": [
+    {
+      "name": "kashira",
+      "z": [
+        0.0,
+        0.022
+      ],
+      "tile": "assets/ai_materials/antique_bronze.png",
+      "scale": 4.0,
+      "tint": "#2f2a24",
+      "metallic": 0.88,
+      "roughness": 0.32,
+      "edge_polish": 0.45,
+      "edge_color": "#c9a456"
+    },
+    {
+      "name": "tsuka",
+      "z": [
+        0.022,
+        0.258
+      ],
+      "tile": "assets/ai_materials/black_tsuka_wrap.png",
+      "scale": 14.0,
+      "tint": "#26272b",
+      "metallic": 0.02,
+      "roughness": 0.84,
+      "edge_polish": 0.0
+    },
+    {
+      "name": "tsuba",
+      "z": [
+        0.258,
+        0.274
+      ],
+      "tile": "assets/ai_materials/antique_bronze.png",
+      "scale": 3.2,
+      "tint": "#59452c",
+      "metallic": 0.9,
+      "roughness": 0.3,
+      "edge_polish": 0.6,
+      "edge_color": "#dbb660"
+    },
+    {
+      "name": "habaki",
+      "z": [
+        0.274,
+        0.304
+      ],
+      "tile": "assets/ai_materials/antique_bronze.png",
+      "scale": 5.0,
+      "tint": "#d6ab4b",
+      "metallic": 0.97,
+      "roughness": 0.16,
+      "edge_polish": 0.4,
+      "edge_color": "#f7df94"
+    },
+    {
+      "name": "blade",
+      "z": [
+        0.304,
+        1.0
+      ],
+      "tile": "assets/ai_materials/tamahagane_steel.png",
+      "scale": 4.5,
+      "tint": "#dce2ea",
+      "metallic": 0.98,
+      "roughness": 0.11,
+      "edge_polish": 0.55,
+      "edge_color": "#f6f9fc"
+    }
+  ]
+}

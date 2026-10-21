@@ -1,152 +1,97 @@
 {
-  "pipeline": "meshgen v1 (visual hull multi-vues, type Meshy déterministe)",
+  "pipeline": "meshgen v2 (visual hull SDF vectoriel multi-vues, PBR complet)",
   "prompt": "épée médiévale rouillée avec pommeau en or",
   "params": {
-    "res": 96,
-    "budget_tris": 16000,
-    "size_m": 1.05,
-    "smooth": 7
+    "budget_tris": 15000,
+    "size_m": 0.96,
+    "smooth": 5
   },
   "stats": {
     "parts": 1,
-    "triangles": 16000,
-    "vertices": 9023
+    "triangles": 15000,
+    "vertices": 8824
   },
   "validation": {
     "watertight": true,
     "winding_consistent": true,
-    "volume_m3": 0.0021329450127766784,
-    "triangles": 16000,
-    "vertices": 9023,
+    "volume_m3": 0.0010871194013124502,
+    "triangles": 15000,
+    "vertices": 8824,
     "components": 1,
+    "debris_removed": 0,
     "degenerate_faces": 0,
     "over_budget": false,
     "iou_views": {
-      "front": 0.5884,
-      "side": 0.3512,
-      "top": 0.4699
+      "front": 0.9283,
+      "side": 0.8725,
+      "top": 0.9449
     },
-    "iou_mean": 0.4698
+    "iou_mean": 0.9152
   },
   "coherence": {
     "method": "IoU silhouettes re-projetées vs vues d'entrée",
     "per_view": {
-      "front": 0.5884,
-      "side": 0.3512,
-      "top": 0.4699
+      "front": 0.9283,
+      "side": 0.8725,
+      "top": 0.9449
     },
-    "mean": 0.4698
+    "mean": 0.9152
   },
   "files": {
     "glb": {
-      "path": "iter_6/epee_rouillee.glb",
-      "bytes": 702120
+      "path": "examples/epee_rouillee/epee_rouillee.glb",
+      "bytes": 1887600
+    },
+    "obj": {
+      "path": "examples/epee_rouillee/epee_rouillee.obj",
+      "bytes": 1357504
     },
     "stl": {
-      "path": "iter_6/epee_rouillee.stl",
-      "bytes": 800084
+      "path": "examples/epee_rouillee/epee_rouillee.stl",
+      "bytes": 750084
     },
     "usdz": {
-      "path": "iter_6/epee_rouillee.usdz",
-      "bytes": 1355776
+      "path": "examples/epee_rouillee/epee_rouillee.usdz",
+      "bytes": 1418176
     },
     "albedo": {
-      "path": "iter_6/epee_rouillee_albedo.png",
-      "bytes": 115917
+      "path": "examples/epee_rouillee/epee_rouillee_albedo.png",
+      "bytes": 614698
     }
   },
   "renders": [
-    "iter_6/epee_rouillee_face.png",
-    "iter_6/epee_rouillee_profil.png",
-    "iter_6/epee_rouillee_trois_quarts.png",
-    "iter_6/epee_rouillee_dessus.png"
+    "examples/epee_rouillee/epee_rouillee_face.png",
+    "examples/epee_rouillee/epee_rouillee_profil.png",
+    "examples/epee_rouillee/epee_rouillee_trois_quarts.png",
+    "examples/epee_rouillee/epee_rouillee_dessus.png"
   ],
   "internal_views": [
-    "iter_6/epee_rouillee_view_front.png",
-    "iter_6/epee_rouillee_view_side.png",
-    "iter_6/epee_rouillee_view_top.png"
+    "examples/epee_rouillee/epee_rouillee_view_front.png",
+    "examples/epee_rouillee/epee_rouillee_view_side.png",
+    "examples/epee_rouillee/epee_rouillee_view_top.png"
   ],
-  "output_dir": "/home/z/my-project/download/3d-forge-examples/epee_v2/iter_6",
-  "duration_s": 93.32,
+  "output_dir": "examples/epee_rouillee",
+  "duration_s": 91.09,
   "photos": {
-    "all_faces": "iter_6/epee_rouillee_all_faces.png",
+    "all_faces": "examples/epee_rouillee/epee_rouillee_all_faces.png",
     "faces": [
-      "iter_6/epee_rouillee_face_face.png",
-      "iter_6/epee_rouillee_face_dos.png",
-      "iter_6/epee_rouillee_face_gauche.png",
-      "iter_6/epee_rouillee_face_droite.png",
-      "iter_6/epee_rouillee_face_dessus.png",
-      "iter_6/epee_rouillee_face_dessous.png"
+      "examples/epee_rouillee/epee_rouillee_face_face.png",
+      "examples/epee_rouillee/epee_rouillee_face_dos.png",
+      "examples/epee_rouillee/epee_rouillee_face_gauche.png",
+      "examples/epee_rouillee/epee_rouillee_face_droite.png",
+      "examples/epee_rouillee/epee_rouillee_face_dessus.png",
+      "examples/epee_rouillee/epee_rouillee_face_dessous.png"
     ],
-    "turntable": "iter_6/epee_rouillee_turntable.png",
+    "turntable": "examples/epee_rouillee/epee_rouillee_turntable.png",
     "turn_images": [
-      "iter_6/epee_rouillee_turn_00.png",
-      "iter_6/epee_rouillee_turn_01.png",
-      "iter_6/epee_rouillee_turn_02.png",
-      "iter_6/epee_rouillee_turn_03.png",
-      "iter_6/epee_rouillee_turn_04.png",
-      "iter_6/epee_rouillee_turn_05.png",
-      "iter_6/epee_rouillee_turn_06.png",
-      "iter_6/epee_rouillee_turn_07.png"
+      "examples/epee_rouillee/epee_rouillee_turn_00.png",
+      "examples/epee_rouillee/epee_rouillee_turn_01.png",
+      "examples/epee_rouillee/epee_rouillee_turn_02.png",
+      "examples/epee_rouillee/epee_rouillee_turn_03.png",
+      "examples/epee_rouillee/epee_rouillee_turn_04.png",
+      "examples/epee_rouillee/epee_rouillee_turn_05.png",
+      "examples/epee_rouillee/epee_rouillee_turn_06.png",
+      "examples/epee_rouillee/epee_rouillee_turn_07.png"
     ]
-  },
-  "references": {
-    "n_images": 5,
-    "queries": [
-      "medieval arming sword museum photo full view blade fuller",
-      "sword gold pommel close up medieval (FindID 546271, CC-BY)",
-      "sword pommel Petersen Type S close up (FindID 787756, CC-BY)",
-      "rust on iron texture (Commons quality image)"
-    ],
-    "details_to_respect": [
-      "pommeau disque doré (Type H) au sommet",
-      "gouttière (fuller) centrale sur la moitié haute de la lame",
-      "garde (crossguard) droite et étroite",
-      "poignée cuir enroulé marron",
-      "rouille orangée par plaques sur l'acier"
-    ],
-    "palette_hints": [
-      {
-        "role": "principal",
-        "hex": "#ffffff",
-        "share": 1.244,
-        "material_hint": "metal",
-        "metallic": 0.9,
-        "roughness": 0.38
-      },
-      {
-        "role": "secondaire",
-        "hex": "#77583c",
-        "share": 0.766,
-        "material_hint": "rouille",
-        "metallic": 0.15,
-        "roughness": 0.85
-      },
-      {
-        "role": "tertiaire",
-        "hex": "#cfccd0",
-        "share": 0.499,
-        "material_hint": "metal",
-        "metallic": 0.9,
-        "roughness": 0.38
-      },
-      {
-        "role": "accent",
-        "hex": "#000000",
-        "share": 0.16,
-        "material_hint": "ombre_metal",
-        "metallic": 0.6,
-        "roughness": 0.5
-      },
-      {
-        "role": "sombre",
-        "hex": "#482520",
-        "share": 0.099,
-        "material_hint": "peinture",
-        "metallic": 0.05,
-        "roughness": 0.5
-      }
-    ],
-    "sheet": "/home/z/my-project/download/3d-forge-examples/epee_v2/iter_6/epee_rouillee_references.png"
   }
 }

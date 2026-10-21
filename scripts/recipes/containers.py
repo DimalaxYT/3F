@@ -124,20 +124,24 @@ def build_plate(radius=0.12, color="#e9e6de"):
           info=[{"name": "height", "type": "float"},
                 {"name": "color", "type": "color", "help": "Teinte du verre"}])
 def build_wine_glass(height=0.20, color="#d5e8ee"):
-    foot_r, stem_r = height * 0.185, height * 0.022
-    profile = [
-        (0, 0), (foot_r, 0), (foot_r * 1.05, 0.005), (foot_r * 0.5, 0.012),
-        (stem_r, 0.02), (stem_r, height * 0.48),
-        (stem_r * 1.4, height * 0.55), (height * 0.20, height * 0.62),
-        (height * 0.235, height * 0.82), (height * 0.225, height * 0.98),
-        (height * 0.215, height),
-        (height * 0.205, height * 0.97), (height * 0.205, height * 0.65),
-        (stem_r * 1.2, height * 0.56), (stem_r, height * 0.50),
-        (stem_r, 0.024), (0, 0.022),
-    ]
+    # Profil PCHIP dense (quads quasi carrés -> zéro strie d'ondulation Taubin)
+    ext = _spline_profile(
+        [0.000, 0.018, 0.045, 0.095, 0.480, 0.560, 0.650, 0.800, 0.930, 1.000],
+        [0.185, 0.190, 0.085, 0.022, 0.021, 0.036, 0.145, 0.215, 0.212, 0.198],
+        n=42,
+    )
+    cav = _spline_profile(
+        [0.585, 0.655, 0.800, 0.930, 1.000],
+        [0.012, 0.132, 0.201, 0.199, 0.186],
+        n=26,
+    )
+    profile = ([(0.0, 0.0)]
+               + [(r * height, z * height) for r, z in ext]
+               + [(r * height, z * height) for r, z in reversed(cav)]
+               + [(0.0, 0.580 * height)])
     b = mk.Builder("wine_glass", {})
-    b.add(mk.lathe(profile, sections=64), mk.mat.glass("#a9cdd8", 0.45, 0.04),
-          name="body")
+    b.add(mk.lathe(profile, sections=64, smooth=False),
+          mk.mat.glass(color, 0.42, 0.04), name="body")
     return b
 
 

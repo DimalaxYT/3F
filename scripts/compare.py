@@ -6,10 +6,12 @@ compare.py — boucle qualité image → 3D : silhouette du mesh vs photo de ré
     python compare.py --mesh out/obj/obj.glb --ref photo.png --axes xz --out out/cmp
     python compare.py --render render.png --ref photo.png --out out/cmp
 
-Principe : les deux silhouettes sont mises à l'échelle sur la même hauteur,
-alignées par centre de bbox, puis comparées (IoU global + IoU par tiers
-vertical). Trous rebouchés des deux côtés : on compare l'enveloppe
-(proportions globales), pas les détails internes.
+Améliorations clés :
+  * Filtrage automatique de l'ombre portée au sol (`strip_ground_shadow`) sur les
+    photos studio (plus d'énorme bloc rouge fictif sous un véhicule à roues !).
+  * Comparaison fidèle des creux/ajours (`--no-fill-holes` disponible, et les
+    arches ouvertes en bas comme le garde-au-sol d'une moto/chaise ne sont plus
+    bouchées artificiellement).
 
 Overlay : ROUGE = référence seule, VERT = mesh seul, JAUNE = accord.
 """
@@ -26,7 +28,7 @@ from scipy import ndimage
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-import img2mesh as i2m                                 # noqa: E402  (segmentation)
+import img2mesh as i2m                                 # noqa: E402
 import trimesh                                         # noqa: E402
 
 CANVAS = 720
@@ -35,9 +37,55 @@ CANVAS = 720
 def _to_mesh(m):
     if isinstance(m, trimesh.Trimesh):
         return m
+    if hasattr(m, "to_geometry"):
+        return m.to_geometry()
     if hasattr(m, "dump"):
         return m.dump(concatenate=True)
     raise ValueError("objet trimesh inattendu : %r" % type(m))
+
+
+def strip_ground_shadow(rgba: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Supprime l'ombre douce projetée sur fond studio clair en bas de l'objet.
+
+    Sur une photo studio à fond clair, l'ombre au sol est achromatique (faible
+    saturation), floue (faible gradient local) et d'intensité intermédiaire
+    (plus sombre que le blanc du fond mais nettement plus claire qu'un pneu noir).
+    """
+    ys, xs = np.where(mask)
+    if len(ys) < 64:
+        return mask
+    rgb = rgba[..., :3] / 255.0
+    alpha = rgba[..., 3] / 255.0
+    ba = np.concatenate([alpha[0], alpha[-1], alpha[:, 0], alpha[:, -1]])
+    if ba.mean() < 0.6:
+        return mask  # PNG détouré en alpha : ombre déjà absente ou voulue
+    br = np.concatenate([rgb[0], rgb[-1], rgb[:, 0], rgb[:, -1]], axis=0)
+    bg = np.median(br, axis=0)
+    bg_lum = float(0.2126 * bg[0] + 0.7152 * bg[1] + 0.0722 * bg[2])
+    if bg_lum < 0.65:
+        return mask
+
+    lum = 0.2126 * rgb[..., 0] + 0.7152 * rgb[..., 1] + 0.0722 * rgb[..., 2]
+    mx = rgb.max(-1)
+    sat = np.where(mx > 1e-6, (mx - rgb.min(-1)) / np.maximum(mx, 1e-6), 0.0)
+    grad = np.hypot(ndimage.sobel(lum, 0), ndimage.sobel(lum, 1))
+
+    y0, y1 = int(ys.min()), int(ys.max())
+    band_top = y1 - max(4, int(0.14 * (y1 - y0 + 1)))
+    in_bottom = np.zeros_like(mask)
+    in_bottom[band_top:y1 + 1, :] = True
+
+    # Ombre typique : grise (sat faible), sans contour net (grad faible), et
+    # atténuation modérée par rapport au fond blanc (pas un pneu noir dense < 0.22)
+    shadow_px = (in_bottom & mask & (sat < 0.14)
+                 & (lum > 0.24 * bg_lum) & (grad < 0.42))
+    cleaned = mask & ~shadow_px
+    # Garde la composante principale pour éliminer les résidus d'ombre isolés
+    lab, n = ndimage.label(cleaned)
+    if n > 1:
+        sizes = ndimage.sum(cleaned, lab, range(1, n + 1))
+        cleaned = lab == (1 + int(np.argmax(sizes)))
+    return cleaned if cleaned.sum() > 0.5 * mask.sum() else mask
 
 
 def mesh_silhouette(mesh_or_path, axes="xz", canvas=CANVAS):
@@ -53,11 +101,14 @@ def mesh_silhouette(mesh_or_path, axes="xz", canvas=CANVAS):
     W = int(round(size[0] * s)) + 8
     Q = (P - lo) * s
     Q[:, 0] += 4.0
-    Q[:, 1] = (H - 4.0) - Q[:, 1]                      # y image vers le bas
+    Q[:, 1] = (H - 4.0) - Q[:, 1]
     im = Image.new("L", (int(W), int(H)), 0)
     dr = ImageDraw.Draw(im)
-    for f in np.asarray(m.faces):
-        dr.polygon([tuple(Q[k]) for k in f], fill=255)
+    tri = Q[np.asarray(m.faces)]
+    for pts in tri.tolist():
+        dr.polygon([(pts[0][0], pts[0][1]),
+                    (pts[1][0], pts[1][1]),
+                    (pts[2][0], pts[2][1])], fill=255)
     return np.asarray(im) > 127
 
 
@@ -105,8 +156,8 @@ def score_masks(ref_mask, mesh_mask, fill_holes=True, thirds=3):
 
 def overlay(A, B, path):
     ov = np.zeros((A.shape[0], A.shape[1], 3), np.uint8)
-    ov[..., 0] = np.where(A & ~B, 255, np.where(A & B, 190, 0))   # ref → rouge
-    ov[..., 1] = np.where(B & ~A, 255, np.where(A & B, 190, 0))   # mesh → vert
+    ov[..., 0] = np.where(A & ~B, 255, np.where(A & B, 190, 0))
+    ov[..., 1] = np.where(B & ~A, 255, np.where(A & B, 190, 0))
     Image.fromarray(ov).save(path)
 
 
@@ -118,6 +169,10 @@ def main(argv=None):
     ap.add_argument("--axes", default="xz", choices=["xz", "yz", "xy"],
                     help="projection vue du mesh : xz=profil, yz=face, xy=dessus")
     ap.add_argument("--tol", type=float, default=0.14)
+    ap.add_argument("--keep-shadow", action="store_true",
+                    help="ne pas filtrer l'ombre portée au sol de la photo")
+    ap.add_argument("--no-fill-holes", action="store_true",
+                    help="évaluer aussi les ajours internes sans les boucher")
     ap.add_argument("--out", default="out/compare")
     args = ap.parse_args(argv)
     if not (args.mesh or args.render):
@@ -125,18 +180,25 @@ def main(argv=None):
 
     ref_a = i2m.load_rgba(args.ref)
     ref_mask, _ = i2m.segment(ref_a, tol=args.tol)
+    if not args.keep_shadow:
+        ref_mask = strip_ground_shadow(ref_a, ref_mask)
 
     if args.mesh:
         mesh_mask = mesh_silhouette(args.mesh, axes=args.axes)
     else:
-        mesh_mask, _ = i2m.segment(i2m.load_rgba(args.render), tol=args.tol)
+        r_a = i2m.load_rgba(args.render)
+        mesh_mask, _ = i2m.segment(r_a, tol=args.tol)
+        if not args.keep_shadow:
+            mesh_mask = strip_ground_shadow(r_a, mesh_mask)
 
-    sc, A, B = score_masks(ref_mask, mesh_mask)
+    sc, A, B = score_masks(ref_mask, mesh_mask, fill_holes=not args.no_fill_holes)
     os.makedirs(args.out, exist_ok=True)
     overlay(A, B, os.path.join(args.out, "overlay.png"))
+    overlay(A, B, os.path.join(args.out, "silhouette_overlay.png"))
     sc.update({"ref": os.path.basename(args.ref),
                "candidate": os.path.basename(args.mesh or args.render),
-               "axes": args.axes if args.mesh else "render"})
+               "axes": args.axes if args.mesh else "render",
+               "shadow_filtered": not args.keep_shadow})
     with open(os.path.join(args.out, "score.json"), "w") as f:
         json.dump(sc, f, indent=1)
     print(json.dumps(sc, ensure_ascii=False, indent=1))

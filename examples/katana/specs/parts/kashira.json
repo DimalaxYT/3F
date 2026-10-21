@@ -1,51 +1,101 @@
 {
   "name": "kashira",
-  "prompt": "kashira (capuchon) de katana, laque noire",
-  "size_m": 0.033,
-  "res": 48,
-  "upsample": 2,
-  "smooth": 8,
-  "budget_tris": 2000,
-  "symmetry_x": true,
-  "mc_level": 0.5,
+  "dims": [
+    0.039,
+    0.025,
+    0.026
+  ],
+  "grid": [
+    72,
+    56,
+    56
+  ],
+  "smooth": 4,
+  "budget_tris": 4000,
   "texture_size": 512,
-  "palette": [
+  "normal_strength": 1.5,
+  "materials": {
+    "horn": {
+      "base": "#231f22",
+      "roughness": 0.28,
+      "metallic": 0.86
+    },
+    "cord": {
+      "base": "#c89b3c",
+      "roughness": 0.3,
+      "metallic": 0.92
+    }
+  },
+  "overlays": [
     {
-      "id": "#",
-      "name": "laque",
-      "color": "#1c1c20",
-      "metallic": 0.15,
-      "roughness": 0.35
+      "type": "edge_wear",
+      "on": [
+        "horn",
+        "cord"
+      ],
+      "amount": 0.55,
+      "scale": 26.0,
+      "seed": 23
     }
   ],
   "views": {
-    "front": [
-      "...###...",
-      "..#####..",
-      "..#####..",
-      "..#####..",
-      "..#####..",
-      "..#####..",
-      "..#####..",
-      "...###..."
-    ],
-    "side": [
-      "..##..",
-      ".#####",
-      ".#####",
-      ".#####",
-      ".#####",
-      ".#####",
-      ".#####",
-      "..##.."
-    ],
-    "top": [
-      "...###...",
-      "..#####..",
-      "..#####..",
-      "..#####..",
-      "..#####..",
-      "...###..."
-    ]
+    "front": {
+      "size": [
+        192,
+        160
+      ],
+      "shapes": [
+        {
+          "op": "rect",
+          "mat": "horn",
+          "x0": 12,
+          "y0": 8,
+          "x1": 180,
+          "y1": 148,
+          "r": 34
+        },
+        {
+          "op": "ellipse",
+          "mat": "cord",
+          "cx": 96,
+          "cy": 72,
+          "rx": 24,
+          "ry": 14
+        }
+      ]
+    },
+    "side": {
+      "size": [
+        192,
+        160
+      ],
+      "shapes": [
+        {
+          "op": "rect",
+          "mat": "horn",
+          "x0": 14,
+          "y0": 8,
+          "x1": 178,
+          "y1": 148,
+          "r": 34
+        }
+      ]
+    },
+    "top": {
+      "size": [
+        192,
+        192
+      ],
+      "shapes": [
+        {
+          "op": "ellipse",
+          "mat": "horn",
+          "cx": 96,
+          "cy": 96,
+          "rx": 86,
+          "ry": 84
+        }
+      ]
+    }
   }
 }

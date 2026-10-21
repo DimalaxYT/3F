@@ -3,32 +3,32 @@
   "params": {
     "length": 2.2,
     "body_color": "#e8641b",
-    "plate_color": "#f2f1ec",
+    "plate_color": "#e8641b",
     "seat_color": "#1a1a1a"
   },
   "stats": {
-    "parts": 143,
-    "triangles": 4764,
-    "vertices": 2668,
+    "parts": 179,
+    "triangles": 22156,
+    "vertices": 11362,
     "dims_m": [
-      2.2948,
-      0.7745,
-      1.2317
+      2.3313,
+      0.7924,
+      1.3777
     ]
   },
   "validation": {
     "watertight": true,
     "winding_consistent": true,
-    "volume_m3": 0.18481554,
-    "volume_liters": 184.816,
+    "volume_m3": 0.243585006,
+    "volume_liters": 243.585,
     "dims_m": [
-      2.2948,
-      0.7745,
-      1.2317
+      2.3313,
+      0.7924,
+      1.3777
     ],
-    "triangles": 7268,
-    "vertices": 3624,
-    "components": 4,
+    "triangles": 23686,
+    "vertices": 11683,
+    "components": 7,
     "degenerate_faces": 0,
     "duplicate_faces": 0,
     "over_budget": false,
@@ -37,29 +37,41 @@
   },
   "files": {
     "glb": {
-      "path": "/home/z/my-project/download/3d-forge-examples/motocross/motocross.glb",
-      "bytes": 125588
-    },
-    "obj": {
-      "path": "/home/z/my-project/download/3d-forge-examples/motocross/motocross.obj",
-      "bytes": 307149
+      "path": "/home/user/3F/examples/motocross/motocross/motocross.glb",
+      "bytes": 347336
     },
     "stl": {
-      "path": "/home/z/my-project/download/3d-forge-examples/motocross/motocross.stl",
-      "bytes": 363484
-    },
-    "usdz": {
-      "path": "/home/z/my-project/download/3d-forge-examples/motocross/motocross.usdz",
-      "bytes": 79840
+      "path": "/home/user/3F/examples/motocross/motocross/motocross.stl",
+      "bytes": 1184384
     }
   },
   "renders": [
-    "/home/z/my-project/download/3d-forge-examples/motocross/motocross_front.png",
-    "/home/z/my-project/download/3d-forge-examples/motocross/motocross_three_quarter.png",
-    "/home/z/my-project/download/3d-forge-examples/motocross/motocross_side.png",
-    "/home/z/my-project/download/3d-forge-examples/motocross/motocross_back.png",
-    "/home/z/my-project/download/3d-forge-examples/motocross/motocross_top.png"
+    "/home/user/3F/examples/motocross/motocross/motocross_front.png",
+    "/home/user/3F/examples/motocross/motocross/motocross_three_quarter.png",
+    "/home/user/3F/examples/motocross/motocross/motocross_top.png"
   ],
-  "output_dir": "/home/z/my-project/download/3d-forge-examples/motocross",
-  "duration_s": 11.37
+  "output_dir": "/home/user/3F/examples/motocross/motocross",
+  "duration_s": 51.41,
+  "photos": {
+    "all_faces": "/home/user/3F/examples/motocross/motocross/motocross_all_faces.png",
+    "faces": [
+      "/home/user/3F/examples/motocross/motocross/motocross_face_face.png",
+      "/home/user/3F/examples/motocross/motocross/motocross_face_dos.png",
+      "/home/user/3F/examples/motocross/motocross/motocross_face_gauche.png",
+      "/home/user/3F/examples/motocross/motocross/motocross_face_droite.png",
+      "/home/user/3F/examples/motocross/motocross/motocross_face_dessus.png",
+      "/home/user/3F/examples/motocross/motocross/motocross_face_dessous.png"
+    ],
+    "turntable": "/home/user/3F/examples/motocross/motocross/motocross_turntable.png",
+    "turn_images": [
+      "/home/user/3F/examples/motocross/motocross/motocross_turn_00.png",
+      "/home/user/3F/examples/motocross/motocross/motocross_turn_01.png",
+      "/home/user/3F/examples/motocross/motocross/motocross_turn_02.png",
+      "/home/user/3F/examples/motocross/motocross/motocross_turn_03.png",
+      "/home/user/3F/examples/motocross/motocross/motocross_turn_04.png",
+      "/home/user/3F/examples/motocross/motocross/motocross_turn_05.png",
+      "/home/user/3F/examples/motocross/motocross/motocross_turn_06.png",
+      "/home/user/3F/examples/motocross/motocross/motocross_turn_07.png"
+    ]
+  }
 }

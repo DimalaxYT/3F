@@ -15,14 +15,17 @@ jobs:
           python-version: "3.11"
       - name: Install dependencies
         run: |
-          pip install -r requirements.txt
-      - name: Smoke test (build all recipes, check watertight)
-        run: python tests/test_smoke.py
-      - name: E2E generation (vase, 4 formats + render)
+          pip install -r requirements.txt pytest
+      - name: Verify 3D environment stack
+        run: python scripts/detect_env.py
+      - name: Run full pytest suite (recipes, meshkit, PBR, meshgen v2, renderer, compare, offline preview)
+        run: pytest -v
+      - name: E2E generation (vase & katana, 4 formats + validate)
         run: |
-          cd scripts
-          python generate.py vase --formats glb obj stl usdz --out /tmp/ci-out --size 256
-          python validate.py /tmp/ci-out/vase/vase.stl
+          python scripts/generate.py vase --formats glb obj stl usdz --out /tmp/ci-out --size 256
+          python scripts/validate.py /tmp/ci-out/vase/vase.stl
+          python scripts/generate.py katana --formats glb obj stl usdz --out /tmp/ci-out --size 256
+          python scripts/validate.py /tmp/ci-out/katana/katana.stl
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:

@@ -1,210 +1,424 @@
 {
   "name": "epee_rouillee",
   "prompt": "épée médiévale rouillée avec pommeau en or",
-  "size_m": 1.05,
-  "res": 96,
-  "upsample": 2,
-  "smooth": 7,
-  "budget_tris": 16000,
-  "symmetry_x": true,
-  "texture_size": 1024,
-  "normal_strength": 2.6,
-  "mc_level": 0.49,
-  "turntable": 8,
-  "palette": [
-    {
-      "id": "s",
-      "name": "acier",
-      "color": "#6b7178",
-      "metallic": 0.9,
-      "roughness": 0.38
-    },
-    {
-      "id": "g",
-      "name": "or",
-      "color": "#d8a93a",
-      "metallic": 1.0,
-      "roughness": 0.28
-    },
-    {
-      "id": "L",
-      "name": "cuir",
-      "color": "#6b4a32",
-      "metallic": 0.0,
-      "roughness": 0.72
-    },
-    {
-      "id": "r",
-      "name": "rouille",
-      "color": "#6e4326",
-      "metallic": 0.2,
-      "roughness": 0.88
-    },
-    {
-      "id": "f",
-      "name": "acier_gouttiere",
-      "color": "#3d434a",
-      "metallic": 0.85,
-      "roughness": 0.55
-    }
+  "dims": [
+    0.215,
+    0.044,
+    0.96
   ],
-  "views": {
-    "front": [
-      "        s        ",
-      "        s        ",
-      "       sss       ",
-      "       sss       ",
-      "      sssss      ",
-      "      sssss      ",
-      "      sssss      ",
-      "      sssss      ",
-      "      sssss      ",
-      "      sssss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      ssfss      ",
-      "      sssss      ",
-      "      sssss      ",
-      "      sssss      ",
-      "  ggggggggggggg  ",
-      "  ggggggggggggg  ",
-      "       LLL       ",
-      "       LLL       ",
-      "       LLL       ",
-      "       LLL       ",
-      "       LLL       ",
-      "       LLL       ",
-      "       LLL       ",
-      "       LLL       ",
-      "       ggg       ",
-      "      ggggg      ",
-      "      ggggg      ",
-      "       ggg       "
-    ],
-    "side": [
-      "  s  ",
-      "  s  ",
-      "  s  ",
-      "  s  ",
-      "  s  ",
-      "  s  ",
-      "  s  ",
-      "  s  ",
-      "  s  ",
-      "  s  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  f  ",
-      "  s  ",
-      "  s  ",
-      "  s  ",
-      " ggg ",
-      " ggg ",
-      " LLL ",
-      " LLL ",
-      " LLL ",
-      " LLL ",
-      " LLL ",
-      " LLL ",
-      " LLL ",
-      " LLL ",
-      " ggg ",
-      " ggg ",
-      " ggg ",
-      " ggg "
-    ],
-    "top": [
-      "                 ",
-      "  ggggggggggggg  ",
-      "  ggggggggggggg  ",
-      "  ggggggggggggg  ",
-      "                 "
-    ]
+  "grid": [
+    96,
+    40,
+    208
+  ],
+  "smooth": 5,
+  "sdf_sigma": 0.75,
+  "budget_tris": 15000,
+  "texture_size": 1024,
+  "normal_strength": 2.3,
+  "materials": {
+    "blade": {
+      "base": "#9ca2a9",
+      "roughness": 0.26,
+      "metallic": 0.9
+    },
+    "fuller": {
+      "base": "#666c74",
+      "roughness": 0.42,
+      "metallic": 0.84
+    },
+    "guard": {
+      "base": "#cc9e42",
+      "roughness": 0.3,
+      "metallic": 0.93
+    },
+    "grip": {
+      "base": "#3b2517",
+      "roughness": 0.76,
+      "metallic": 0.03
+    },
+    "pommel": {
+      "base": "#cf9f44",
+      "roughness": 0.28,
+      "metallic": 0.94
+    }
   },
   "overlays": [
     {
-      "type": "rust",
-      "on": "s",
-      "with": "r",
-      "coverage": 0.22,
-      "band": [
-        0.06,
-        0.78
+      "type": "brushed_metal",
+      "on": [
+        "blade",
+        "fuller"
       ],
-      "scale": 10.0,
-      "softness": 0.05
+      "axis": "z",
+      "scale": 165.0,
+      "amount": 0.14
+    },
+    {
+      "type": "rust",
+      "on": [
+        "blade",
+        "fuller"
+      ],
+      "color": "#8f421d",
+      "coverage": 0.4,
+      "softness": 0.17,
+      "scale": 14.5,
+      "seed": 7
     },
     {
       "type": "wrap",
-      "on": "L",
-      "count": 12,
-      "twist": 0.35,
-      "darken": 0.5
+      "on": "grip",
+      "count": 11.0,
+      "ribbon_width": 0.44
+    },
+    {
+      "type": "patina",
+      "on": [
+        "guard",
+        "pommel"
+      ],
+      "color": "#584828",
+      "amount": 0.25,
+      "scale": 16.0,
+      "seed": 19
     },
     {
       "type": "edge_wear",
       "on": [
-        "s",
-        "g"
+        "blade",
+        "guard",
+        "pommel"
       ],
-      "amount": 0.5,
-      "scale": 18.0
+      "amount": 0.68,
+      "scale": 18.0,
+      "seed": 11
     }
-  ]
+  ],
+  "views": {
+    "front": {
+      "size": [
+        224,
+        512
+      ],
+      "shapes": [
+        {
+          "op": "spline",
+          "mat": "blade",
+          "center": [
+            [
+              2,
+              112
+            ],
+            [
+              404,
+              112
+            ]
+          ],
+          "half_width": [
+            [
+              2,
+              1.5
+            ],
+            [
+              16,
+              8.5
+            ],
+            [
+              44,
+              17.5
+            ],
+            [
+              96,
+              22.5
+            ],
+            [
+              220,
+              27.0
+            ],
+            [
+              404,
+              32.0
+            ]
+          ]
+        },
+        {
+          "op": "spline",
+          "mat": "fuller",
+          "center": [
+            [
+              92,
+              112
+            ],
+            [
+              398,
+              112
+            ]
+          ],
+          "half_width": [
+            [
+              92,
+              2.5
+            ],
+            [
+              140,
+              7.0
+            ],
+            [
+              398,
+              9.5
+            ]
+          ]
+        },
+        {
+          "op": "capsule",
+          "mat": "guard",
+          "a": [
+            12,
+            405
+          ],
+          "b": [
+            212,
+            405
+          ],
+          "r": 10.5
+        },
+        {
+          "op": "poly",
+          "mat": "guard",
+          "pts": [
+            [
+              4,
+              398
+            ],
+            [
+              46,
+              397
+            ],
+            [
+              112,
+              392
+            ],
+            [
+              178,
+              397
+            ],
+            [
+              220,
+              398
+            ],
+            [
+              220,
+              413
+            ],
+            [
+              178,
+              412
+            ],
+            [
+              112,
+              417
+            ],
+            [
+              46,
+              412
+            ],
+            [
+              4,
+              413
+            ]
+          ]
+        },
+        {
+          "op": "spline",
+          "mat": "grip",
+          "center": [
+            [
+              412,
+              112
+            ],
+            [
+              478,
+              112
+            ]
+          ],
+          "half_width": [
+            [
+              412,
+              14.5
+            ],
+            [
+              444,
+              16.5
+            ],
+            [
+              478,
+              13.5
+            ]
+          ]
+        },
+        {
+          "op": "ellipse",
+          "mat": "pommel",
+          "cx": 112,
+          "cy": 489,
+          "rx": 26.5,
+          "ry": 22.0
+        }
+      ]
+    },
+    "side": {
+      "size": [
+        96,
+        512
+      ],
+      "shapes": [
+        {
+          "op": "spline",
+          "mat": "blade",
+          "center": [
+            [
+              2,
+              48
+            ],
+            [
+              404,
+              48
+            ]
+          ],
+          "half_width": [
+            [
+              2,
+              2.0
+            ],
+            [
+              28,
+              7.5
+            ],
+            [
+              96,
+              12.0
+            ],
+            [
+              250,
+              15.0
+            ],
+            [
+              404,
+              18.0
+            ]
+          ]
+        },
+        {
+          "op": "spline",
+          "mat": "fuller",
+          "center": [
+            [
+              92,
+              48
+            ],
+            [
+              398,
+              48
+            ]
+          ],
+          "half_width": [
+            [
+              92,
+              2.2
+            ],
+            [
+              140,
+              6.0
+            ],
+            [
+              398,
+              8.0
+            ]
+          ]
+        },
+        {
+          "op": "ellipse",
+          "mat": "guard",
+          "cx": 48,
+          "cy": 405,
+          "rx": 45.0,
+          "ry": 11.5
+        },
+        {
+          "op": "spline",
+          "mat": "grip",
+          "center": [
+            [
+              412,
+              48
+            ],
+            [
+              478,
+              48
+            ]
+          ],
+          "half_width": [
+            [
+              412,
+              25.0
+            ],
+            [
+              444,
+              28.5
+            ],
+            [
+              478,
+              23.5
+            ]
+          ]
+        },
+        {
+          "op": "ellipse",
+          "mat": "pommel",
+          "cx": 48,
+          "cy": 489,
+          "rx": 39.0,
+          "ry": 22.0
+        }
+      ]
+    },
+    "top": {
+      "size": [
+        224,
+        96
+      ],
+      "shapes": [
+        {
+          "op": "ellipse",
+          "mat": "blade",
+          "cx": 112,
+          "cy": 48,
+          "rx": 33.0,
+          "ry": 20.0
+        },
+        {
+          "op": "capsule",
+          "mat": "guard",
+          "a": [
+            12,
+            48
+          ],
+          "b": [
+            212,
+            48
+          ],
+          "r": 45.0
+        },
+        {
+          "op": "ellipse",
+          "mat": "pommel",
+          "cx": 112,
+          "cy": 48,
+          "rx": 28.0,
+          "ry": 40.0
+        }
+      ]
+    }
+  }
 }
