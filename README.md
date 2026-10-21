@@ -4,28 +4,17 @@
 
 ![Vitrine Technique 3d-forge v5.1 — Ultra Design & Texture Engine](docs/img/v5_1_ultra_showcase.png)
 
-## 🤖 Utiliser avec **Arena.ai + GLM** (ou tout autre Agent IA) en ~60 secondes !
+## 🤖 Prompt pour Agents IA (`Arena / GLM / Claude / Cursor / Codex`)
 
-Ce dépôt est **spécialement optimisé pour Arena.ai (Agent Mode) + GLM** :
-- **[`PROMPT_ARENA_GLM.md`](PROMPT_ARENA_GLM.md)** : **Guide & Prompt Spécial Arena.ai + GLM (`3 tours d'outils = ~60 s`, auto-install PEP-668 incluse, zéro blocage pare-feu, cheatsheet API intégrée pour éviter toute lecture longue de fichiers !)**
-- **[`AGENTS.md`](AGENTS.md)** *(lu automatiquement dès que tu ouvres `DimalaxYT/3F` dans Arena Agent Mode !)* · **[`PROMPT_AGENT_IA.md`](PROMPT_AGENT_IA.md)** · **[`CLAUDE.md`](CLAUDE.md)** · **[`SKILL.md`](SKILL.md)**
+Copie-colle simplement ce bloc dans ton Agent IA (bouton **📋** en haut à droite) et remplace la dernière ligne *(voir aussi [`PROMPT_AGENT_IA.md`](PROMPT_AGENT_IA.md) ; [`AGENTS.md`](AGENTS.md) et [`CLAUDE.md`](CLAUDE.md) sont également chargés automatiquement si tu connectes le repo)* :
 
-### Option 1 — Repo `DimalaxYT/3F` connecté dans **Arena Agent Mode (GLM)** *(le plus rapide)* :
-Arena charge `AGENTS.md` tout seul ! Écris juste :
 ```markdown
-Utilise `AGENTS.md` (mode 3 tours `turbo_forge.py`, < 90 s) pour me créer cet asset 3D réaliste prêt pour Roblox Studio et UE5 :
-[DÉCRIS TON MODÈLE 3D ICI]
-```
+Utilise le skill 3D de ce dépôt GitHub : https://github.com/DimalaxYT/3F
+1. Clone le dépôt (s'il n'est pas déjà présent) et vérifie les dépendances de `requirements.txt`.
+2. Lis impérativement `SKILL.md` et `AUTOCRITIQUE.md` avant de commencer.
+3. Crée l'objet suivant avec `3d-forge v5.1` (en utilisant `scripts/turbo_forge.py` avec `meshkit.py` + `greebles.py` si c'est mécanique/architectural, ou `gpu_sculpt.py` si c'est une sculpture organique, + `--split-bed` via `scripts/split_stl.py` s'il dépasse 256×256×256 mm) et livre-moi les `.glb` (standard + Roblox Studio + UE5), le `.stl` 100 % étanche, le `preview.html` interactif et le rendu studio :
 
-### Option 2 — Chat Arena (GLM) vierge sans repo connecté *(Prompt Tout-en-Un 1 clic)* :
-```markdown
-Tu tournes dans Arena Agent Mode. Génère mon modèle 3D prêt pour **Roblox Studio** (`roblox/<nom>_roblox.glb` + `setup_<nom>.lua`) et **Unreal Engine 5** (`unreal/SM_<nom>.glb`) en **MAX 3 TOURS D'OUTILS (< 90 s)** avec `3d-forge v5.1 Turbo` :
-1. TOUR 1 : Si `/home/user/3F` n'existe pas, clone `git clone --depth 1 https://github.com/DimalaxYT/3F.git /home/user/3F` (interdit d'utiliser `research.py fetch` ou `web_search` !). Ne lis PAS les fichiers de `scripts/` : écris directement `custom_<nom>.py` (`def build() -> mk.Builder`) avec `write_file` en utilisant `meshkit as mk` (`mk.box(w,d,h)`, `mk.chamfer_box`, `mk.rounded_box`, `mk.cylinder(r,h)`, `mk.tube(r_out,r_in,h)`, `mk.cone(r,h)`, `mk.frustum(r1,r2,h)`, `mk.sphere(r)`, `mk.extrude(pts2d,h)`, `mk.lathe(rz)`, `mk.loft(secs,zs)`, `mk.tube_sweep(path,r)`, `mk.union([...])`, `mk.difference(a,[b])`, `mk.place(m,x,y,z)`, `mk.rot_x/y/z(m,deg)`) + `greebles as grb` (`grb.picatinny_rail`, `grb.louver_vent`, `grb.hex_bolt`, `grb.bolt_array`, `grb.ribbed_conduit`, `grb.corner_armor_cap`, `grb.toggle_latch`, `grb.ergonomic_handle`) + `mk.Material(name, hex, metallic, roughness, emissive=...)`. (Ou pour une créature organique : `generate_image(..., offer_options=False)` en parallèle dans le même tour pour `front.png`, `side.png`, `back.png`).
-2. TOUR 2 : Lance UNE SEULE commande (`turbo_forge.py` installe `requirements.txt` automatiquement si besoin) :
-   `python3 scripts/turbo_forge.py custom_<nom>.py --name <nom> --lod0-tris 4800 --stl -o out/<nom>`
-3. TOUR 3 : Lis uniquement `out/<nom>/qa_game_sheet.png` avec `read_file`, ouvre-le avec `present_file`, et livre `out/<nom>/roblox/<nom>_roblox.glb` + `setup_<nom>.lua` et `out/<nom>/unreal/SM_<nom>.glb`.
-
-DEMANDE : [DÉCRIS TON MODÈLE 3D ICI]
+Objet demandé : [ÉCRIS TON IDÉE ICI — ex: un sabre laser gravé noir et argent de 28 cm prêt pour Roblox Studio et l'impression 3D]
 ```
 
 > ### Nouveautés Majeures `3d-forge v5.1 — Ultra Design & Texture Engine`

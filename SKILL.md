@@ -24,8 +24,32 @@ description: >-
 >      `python3 scripts/turbo_forge.py --front front.png --side side.png --name creature -o out/creature`
 > 2. **ZERO BLOCKING WEB SCRAPING BY DEFAULT**: **DO NOT run `research.py fetch`** (HTTP image scraping timeouts waste 3–5 min) unless the user explicitly gives URLs or asks for web references.
 > 3. **INSPECT ONLY `qa_game_sheet.png` (1 IMAGE, NOT 14!) & DELIVER IN 1 PASS (`MAX 1 FIX`)**:
->    - `turbo_forge.py` automatically outputs `qa_game_sheet.png` (4 studio views + wireframe/normal QA). Read **only `qa_game_sheet.png`**.
->    - If geometry, proportions, and PBR textures look sharp (`>= 8.8/10`), **DELIVER IMMEDIATELY IN 1 PASS (0 rebuilds!)**. Otherwise apply **AT MOST 1 targeted surgical fix (`iter_1`)** and deliver immediately.
+>    - `turbo_forge.py` automatically outputs **ALL deliverables in 1 command (`~12–18s`)**: `<name>_game.glb`, `roblox/<name>_roblox.glb` + `setup_<name>.lua`, `unreal/SM_<name>.glb`, watertight `<name>.stl` (+ `--split-bed` if `> 256×256×256 mm`), interactive `preview.html`, and 4-view studio `qa_game_sheet.png`!
+>    - Read **only `qa_game_sheet.png`** (do NOT read `meshkit.py` / `game_ready.py` — exact signatures are right below!). If clean (`>= 8.8/10`), **DELIVER IMMEDIATELY IN 1 PASS (`present_file` on `qa_game_sheet.png` or `preview.html`)**.
+
+### Exact Python API Cheatsheet (`custom_<name>.py` -> zero extra file reads needed!)
+```python
+import sys; sys.path.insert(0, "scripts")
+import meshkit as mk, greebles as grb
+
+def build() -> mk.Builder:
+    b = mk.Builder("my_asset")  # Meters: X=right, Y=front(-)/back(+), Z=up(+)
+    # Materials (`rubber`/`grip`/`poly` -> strict metallic=0; `emissive="#..."` -> Roblox `Neon_*`):
+    #   mk.Material(name, hex_color, metallic=0.0, roughness=0.5, opacity=1.0, emissive=None)
+    # Watertight CAD primitives (`scripts/meshkit.py`):
+    #   mk.box(w,d,h), mk.chamfer_box(w,d,h,c=None), mk.rounded_box(w,d,h,r=None),
+    #   mk.cylinder(r,h,sections=32), mk.tube(r_out,r_in,h), mk.cone(r,h), mk.frustum(r1,r2,h),
+    #   mk.sphere(r), mk.capsule(r,h_cyl), mk.torus(R,r), mk.extrude(pts2d,height),
+    #   mk.lathe(profile_rz,sections=48), mk.loft(sections,zs=None), mk.tube_sweep(path_xyz,r),
+    #   mk.helix_spring(r_coil,r_wire,pitch,turns=6), mk.union([...]), mk.difference(base,[...]),
+    #   mk.place(m,x,y,z), mk.rot_x(m,deg), mk.rot_y(m,deg), mk.rot_z(m,deg), mk.scale(m,s), mk.ground(m)
+    # Watertight Hard-Surface Greebles (`scripts/greebles.py`):
+    #   grb.picatinny_rail(length,width,height,teeth), grb.louver_vent(width,height,slats,depth),
+    #   grb.hex_bolt(r,h), grb.bolt_array(points,normals,r,h), grb.ribbed_conduit(path_xyz,r,rings),
+    #   grb.corner_armor_cap(size,height), grb.toggle_latch(w,h,d) -> [(m,role)], grb.ergonomic_handle(span,reach,r) -> [(m,role)]
+    # Assembly: b.add(mesh, mat, name, group=None); b.def_joint(group, pivot, axis); b.def_socket(name, pos)
+    return b
+```
 
 > **New in `v5.1` (`Ultra Design, Texture & Turbo Engine`)**:
 > - **Hard-Surface Mechanical Kitbash Library (`scripts/greebles.py`)**: Always enrich hard-surface props, crates, vehicles, weapons, and sci-fi doors with 100%-watertight `greebles` (`hex_bolt`, `bolt_array`, `toggle_latch`, `louver_vent`, `picatinny_rail`, `ribbed_conduit`, `ergonomic_handle`, `corner_armor_cap`) + octagonal/tapered `mk.loft` hulls instead of plain boxes!

@@ -22,6 +22,7 @@ import os
 import sys
 
 PHOTO_PREFS = [
+    ("qa_game_sheet.png", "planche QA studio PBR"),
     ("*_trois_quarts.png", "vue 3/4"),
     ("*_three_quarter.png", "vue 3/4"),
     ("*_all_faces.png", "les 6 faces"),
