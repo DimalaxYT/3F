@@ -414,3 +414,17 @@ p95-p05 **0.091 → 0.173**. Saladier 0.107 → 0.213, assiette 0.099 → 0.191.
 - **`stl_watertight` de la fusée et de la voiture** : préexistant à cette vague, non traité ici.
 - Les durées `bench` sont **indicatives** : la même recette mesure 11 s ou 17 s selon la machine
   (vérifié en rejouant la base v5.6 sur cette machine : 17.25 s).
+
+
+### E. Piège d'outillage rencontré (et documenté)
+
+`bench.py --check` compare les tris **strictement**, en les supposant déterministes. Ils le sont
+vis-à-vis du code, mais **pas vis-à-vis de la version de la librairie de décimation** : cette
+machine produit 6846 tris au lieu de 6840 pour le `katana` LOD0. Vérifié en rejouant la base
+v5.6b dans un worktree propre — elle donne 6846 ici aussi. Ce n'était donc pas une régression,
+seulement un écart d'environnement. `docs/bench.json` conserve les valeurs mesurées par la CI
+(source de vérité), et seules les durées — ignorées par `--check` — sont locales.
+
+**À traiter un jour** : épingler `fast_simplification` dans `requirements.txt` pour que la
+tolérance sur les tris soit réellement nulle, ou passer `--check` en tolérance relative sur
+`lod0_tris` (±0.5 %).
