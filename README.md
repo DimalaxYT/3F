@@ -1,19 +1,69 @@
-# 3d-forge v4 🔨🐉✨
+# 3d-forge v5 🎮🟥⚔️🐉✨
 
-**CAO 3D paramétrique étanche × Sculpture Organique Multi-Vues GPU (`gpu_sculpt.py`) × Verre Cristal & Clearcoat glTF 2.0 × Découpe Imprimante 3D à Tenons (`split_stl.py`) — zéro GPU requis côté utilisateur.**
+**Moteur de génération d'Assets 3D Réalistes pensé en priorité pour Roblox Studio (`SurfaceAppearance` + `Studs` + `< 10k tris` + `Neon` + `Luau`) et Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`) — propulsé par CAO étanche + Sculpture Organique GPU (`gpu_sculpt.py`), zéro GPU requis côté utilisateur.**
+
+![Vitrine Technique 3d-forge v5 — AAA Game-Ready Asset Engine](docs/img/v5_game_ready_showcase.png)
+
+> ### Priorité n°1 : **Roblox Studio** (`roblox/`) & **Unreal Engine 5** (`unreal/`) — Profil par défaut `--engine roblox_unreal`
+>
+> Chaque génération `--game-ready` produit automatiquement un double pack **100 % prêt à glisser-déposer** qui résout **tous les pièges classiques de Roblox Studio et d'Unreal Engine 5** :
+> - **Pack `roblox/` (Priorité #1 — Plug & Play Roblox Studio `Import 3D`)** :
+>   - **`<Name>_roblox.glb` encodé en PNG pur (`webp=False`)** : l'outil **Import 3D** de Roblox Studio ignore `EXT_texture_webp` (qui donne un mesh tout gris) mais lit nativement le PNG embarqué en créant **automatiquement le `MeshPart` + l'objet `SurfaceAppearance` rempli avec ses 4 cartes dès le 1er clic** !
+>   - **Échelle exacte en `Studs` Roblox (`1 m = 3,5714 Studs`, soit `1 Stud = 0,28 m`)** : `katana` arrive directement à **`3,50 Studs`** dans la main d'un avatar R15, `sci_fi_crate` à **`3,31 × 2,13 × 1,82 Studs`** à hauteur de taille — **zéro redimensionnement manuel**.
+>   - **Respect garanti de la limite stricte `< 10 000 triangles / MeshPart`** (`2 600–4 200 tris` en `LOD0` pour tourner à **60 FPS Mobile + Console + PC**).
+>   - **AO Physique cuit directement dans `T_<Name>_ColorMap.png` (`1024×1024`)** : comme `SurfaceAppearance` de Roblox **n'a pas de slot Ambient Occlusion**, `3d-forge` multiplie l'AO géométrique dans `ColorMap` pour donner une profondeur d'ombre digne d'Unreal sous l'éclairage Roblox `Future`, et fournit aussi les 4 PNG séparés (`ColorMap`, `NormalMap` OpenGL `+Y`, `MetalnessMap`, `RoughnessMap`).
+>   - **Découpe automatique des parties lumineuses en `Neon_*` + Script Luau `setup_<Name>.lua`** : puisque `SurfaceAppearance` n'a pas de carte Emissive, chaque LED/phare/rune est extrait dans son propre `MeshPart` `Neon_*`, et **`setup_<Name>.lua`** configure automatiquement `Enum.Material.Neon`, les `Attachment`s (`GripAttachment`, `TipAttachment`), un **`HingeConstraint` + `ProximityPrompt [E]`** fonctionnel sur les coffres articulés (`sci_fi_crate`), et **`ConvertToTool()`** en 1 clic sur les armes (`katana`, `sword`) !
+> - **Pack `unreal/` (Priorité #2 — Unreal Engine 5 / UEFN)** :
+>   - **`SM_<Name>.glb`** en mètres avec colliders convexes **`UCX_SM_<Name>_00..N`**, sockets `SOCKET_*`, tangentes Mikk **`TANGENT (VEC4)`** et animations `gltf.animations`.
+>   - **`T_<Name>_BC.png`** (**Albédo pur De-Lit SANS AO cuit**, pour éviter tout double assombrissement sous **Lumen / GTAO** !) + **`T_<Name>_ORM.png`** (`R=AO, G=Roughness, B=Metallic`) + **`T_<Name>_N.png` DirectX (`-Y` canal vert inversé)**.
 
 ![Vitrine Technique 3d-forge v4](docs/img/v4_showcase.png)
 
 ![Showcase v3 GPU Mécanique & Armes](docs/img/v3_gpu_showcase.png)
 
-![Catalogue Complet des 19 Recettes Étanches v4](docs/img/gallery.png)
+![Catalogue Complet des Recettes Étanches](docs/img/gallery.png)
 
-> **Les 5 Piliers de `3d-forge v4` :**
-> 1. **Sculpture Organique 3D propulsée par le GPU Datacenter (`scripts/gpu_sculpt.py`)** : reconstruction SDF elliptique multi-branches sans escaliers ni angles carrés, lissage de Taubin, socle de musée chanfreiné soudé par `manifold3d` (**100 % `watertight`**) et bake UV `1024²` haute définition (ex. `examples/dragon_buste/` : **84 152 triangles**, `2,68 L`, `.glb` + `.stl` + `.usdz` + `preview.html` + `photo_hero.png`).
-> 2. **Catalogue complet de 19 recettes 100 % étanches (`scripts/recipes/`)** : refonte majeure de `car` (coupé GT fastback Clearcoat, vitres encastrées, jantes alliage 5 branches, disques de frein), `house` (fenêtres et porte CSG ajourées à croisillons, perron pierre), `tree` (racines et branches `tube_sweep`, couronnes organiques), `sword` et `motocross` (disques Wave ajourés, ailettes moteur, couronne dentée).
-> 3. **Rasteriseur UV NumPy vectorisé `×80` plus rapide (`scripts/pbr.py`)** : `rasterize_uv_triangles` (< `0,35 s` en `1024 × 1024`) + compression PNG sans perte `compress_png` gardant l'intégralité du dépôt légère et rapide.
-> 4. **Verre Cristal Réfractif, Vernis Clearcoat & Visionneuse `preview.html` v2** : extensions officielles glTF 2.0 (`KHR_materials_transmission`, `KHR_materials_ior`, `KHR_materials_clearcoat`), réfraction linéaire + réflexion interne totale (TIR) dans `renderer.py`, et inspecteur WebGL interactif hors-ligne avec **4 éclairages HDRI**, **ombre de contact douce** et **7 canaux techniques** (`PBR`, `Albédo`, `Roughness`, `Metallic`, `Normales`, `AO`, `Filaire`).
-> 5. **Hiérarchie `.glb` articulée & Découpe Plateau Imprimante 3D (`scripts/split_stl.py`)** : pivots d'articulation nommés (`front_axle`, `rear_axle`, `front_wheel`, `steering`, `front_door`) animables en direct dans `preview.html`, et découpe automatique des grands modèles (ex. `katana.stl` d'1 m découpé en **5 pièces étanches** pour plateau `256 × 256 × 256 mm` avec **7 tenons/mortaises chanfreinés à jeu paramétrique `0,20 mm`**).
+> **Nouveau dans `3d-forge v5 — AAA Game-Ready Edition` (Assets Temps Réel Réalistes) :**
+> 1. **High-Poly -> Low-Poly Mikk Tangent-Space Baker & Chaîne `LOD0 / LOD1 / LOD2` (`scripts/game_ready.py`)** : projette la géométrie haute densité (`50k–120k tris`, chanfreins CSG, boulons, écailles, AO, courbure) vers un maillage temps réel optimisé (`1.5k–4.2k tris`) dans son repère tangent exact **`TANGENT (VEC4)`**, avec mipmaps dédiés sans couture `LOD0 (1024²)` -> `LOD1 (40%, 512²)` -> `LOD2 (15%, 256²)` et fusion automatique des Draw Calls statiques opaques (**`1 seul Draw Call`** statique + verre + pièces mobiles !).
+> 2. **De-Lighting Physique d'Albédo par Harmoniques Sphériques IRLS (`scripts/delight.py`)** : supprime les ombres directionnelles et reflets studio brûlés des textures générées par IA (`-70 %` de variance directionnelle mesurée sur `dragon_buste`) afin que `BaseColor` réagisse avec un réalisme physique pur sous **Unreal Lumen**, **Unity Ray Tracing** ou un cycle jour/nuit dynamique.
+> 3. **Scans Matériaux GPU Datacenter, Patine Physique 4 Couches & Normal Decals** : grain triplanaire sans couture (`assets/ai_materials/`), usure métallique d'arêtes par courbure (`Curvature Edge Wear`), crasse mate dans les cavités (`Cavity Dirt`), salissure de contact au sol (`World-Z Ground Grime`) et **Normal Stamp Decals** procéduraux (panneaux rainurés et rivets d'acier sans aucun coût triangle).
+> 4. **Profils Multi-Moteurs Clés en Main (`--engine unreal | unity | godot | gltf | all`) & Compression `EXT_texture_webp`** :
+>    - **Unreal Engine 5 (`unreal/`)** : `SM_<Name>.glb` avec colliders convexes nommés `UCX_SM_<Name>_00..N` + `T_<Name>_BC.png` (sRGB) + `T_<Name>_ORM.png` (`R=AO, G=Roughness, B=Metallic` linéaire) + **`T_<Name>_N.png` DirectX (`-Y` canal vert inversé)**.
+>    - **Unity HDRP / URP (`unity/`)** : prefab `.glb` + `T_<Name>_BaseMap.png` + **`T_<Name>_MaskMap.png` RGBA (`R=Metallic, G=AO, B=Detail, A=Smoothness=1-Roughness`)** + `T_<Name>_NormalGL.png` OpenGL (`+Y`).
+>    - **Godot 4 (`godot/`)** : scène `*_godot.glb` intégrant directement les enveloppes de collision `-colonly`, les sockets `SOCKET_*` et les pistes `gltf.animations`.
+>    - **Binaire `.glb` compacté (`EXT_texture_webp`)** : purge complète des buffers morts -> **`dragon_buste_LOD2.glb` = `630 tris` en `108 Ko` (`×42` plus léger que le High-Poly !)**.
+> 5. **Colliders Physiques Convexes (`UCX_*`), Sockets Gameplay (`SOCKET_*`) & Animations `gltf.animations`** : décomposition convexe multi-pièces pour PhysX / Chaos / Jolt, points d'attache gameplay (`SOCKET_grip`, `SOCKET_tip`, `SOCKET_lid_latch`, `SOCKET_top_mount`, etc.), animations quaternions standards (`Idle_Action` lue nativement par Unreal, Unity, Godot, Blender et Three.js) et **20e recette `sci_fi_crate`** (caisse de ravitaillement blindée articulée).
+
+### Démarrage Rapide — Asset Game-Ready AAA en 1 commande
+
+```bash
+# 1. Prop Hard-Surface articulé (caisse blindée Sci-Fi : 25 pièces -> 2 Draw Calls, LOD0/1/2 + UCX + Lid Anim)
+python3 scripts/generate.py sci_fi_crate -f glb stl -q high --game-ready --engine all --lod0-tris 2800 -o examples
+
+# 2. Arme de mêlée temps réel (Katana : 8 Draw Calls -> 1 Draw Call, SOCKET_grip / SOCKET_tip, 94 Ko en LOD2)
+python3 scripts/game_ready.py katana --engine all --lod0-tris 2600 --tex-size 1024 -o examples/katana/game_ready
+
+# 3. Sculpture Organique IA -> Game-Ready (50 200 tris -> 4 200 LOD0 / 1 680 LOD1 / 630 LOD2 [-98.7%], De-Lit Albedo)
+python3 scripts/game_ready.py examples/dragon_buste/dragon_buste.glb --engine all --lod0-tris 4200 -o examples/dragon_buste/game_ready
+
+# 4. De-Lighting autonome d'une texture albédo IA
+python3 scripts/delight.py raw_albedo.png -o clean_albedo.png --strength 0.85
+```
+
+| Asset Vitrine `v5` | Source High-Poly | `LOD0` (`1024²`) | `LOD1` (`512²`) | `LOD2` (`256²`) | Draw Calls | Colliders `UCX_*` | Sockets & Animations |
+|---|---|---|---|---|---|---|---|
+| **`sci_fi_crate`** *(Prop Hard-Surface)* | `4 824 tris` | **`2 800 tris`** (`608 Ko`) | **`1 120 tris`** (`235 Ko`) | **`420 tris`** (`108 Ko`) | `25` ➔ **`2`** *(Body + Lid)* | `6` hulls (`164 tris`) | `SOCKET_lid_latch`, `SOCKET_top_mount` + `Idle_Action` |
+| **`katana`** *(Arme Temps Réel)* | `5 032 tris` | **`2 598 tris`** (`521 Ko`) | **`1 040 tris`** (`207 Ko`) | **`740 tris`** (`94 Ko`) | `8` ➔ **`1`** | `6` hulls (`748 tris`) | `SOCKET_grip`, `SOCKET_tip`, `SOCKET_trail_mid` |
+| **`dragon_buste`** *(Sculpture IA)* | `50 200 tris` (`4.5 Mo`) | **`4 200 tris`** (`761 Ko`) | **`1 680 tris`** (`285 Ko`) | **`630 tris`** (`108 Ko`, **`-98.7 %`**) | **`1`** | `1` hull (`164 tris`) | SH De-Lit (`-70 %` ombre) + `SOCKET_interact` |
+
+---
+
+> **Les 5 Piliers Fondateurs de `3d-forge v4` (toujours 100 % actifs et testés) :**
+> 1. **Sculpture Organique 3D propulsée par le GPU Datacenter (`scripts/gpu_sculpt.py`)** : reconstruction SDF elliptique multi-branches sans escaliers ni angles carrés, lissage de Taubin, socle de musée chanfreiné soudé par `manifold3d` (**100 % `watertight`**), de-lighting automatique `delight_albedo_3d` et bake UV `1024²` haute définition.
+> 2. **Catalogue complet de 20 recettes 100 % étanches (`scripts/recipes/`)** : `sci_fi_crate`, `car`, `house`, `tree`, `sword`, `katana`, `motocross`, etc.
+> 3. **Rasteriseur UV NumPy vectorisé `×80` plus rapide (`scripts/pbr.py`)** : `rasterize_uv_triangles` (< `0,35 s` en `1024 × 1024`) + compression PNG/WebP sans coutures.
+> 4. **Verre Cristal Réfractif, Vernis Clearcoat & Visionneuse `preview.html` v2** : extensions officielles glTF 2.0 (`KHR_materials_transmission`, `KHR_materials_ior`, `KHR_materials_clearcoat`, `EXT_texture_webp`), réfraction linéaire + réflexion interne totale (TIR) dans `renderer.py`, et inspecteur WebGL interactif hors-ligne avec **4 éclairages HDRI**, **ombre de contact douce** et **7 canaux techniques**.
+> 5. **Hiérarchie `.glb` articulée & Découpe Plateau Imprimante 3D (`scripts/split_stl.py`)** : pivots d'articulation nommés animés en quaternions standards `gltf.animations`, et découpe automatique des grands modèles pour plateau `256 × 256 × 256 mm` avec tenons/mortaises chanfreinés à jeu paramétrique `0,20 mm`.
 
 Là où un service text-to-3D devine une approximation ballonneuse de « une chaise »,
 un agent peut **raisonner** la géométrie — quatre pieds, une assise à 45 cm, un

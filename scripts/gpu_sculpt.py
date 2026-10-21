@@ -264,6 +264,7 @@ def bake_sculpt_pbr(
     view_pack: dict,
     resolution: int = 1024,
     metallic_gold_boost: bool = True,
+    delight_albedo: bool = True,
 ) -> tuple[trimesh.Trimesh, Image.Image, Image.Image, Image.Image]:
     """Déplie `mesh` avec `xatlas` et projette en 100 % vectorisé NumPy les vues
     orthographiques GPU (`-Y = front`, `+Y = back`, `±X = side`) + socle basalte poli
@@ -338,6 +339,13 @@ def bake_sculpt_pbr(
     basalt_col = np.array([0.095, 0.098, 0.106], dtype=np.float32)
     rgb = rgb * (1.0 - blend_p[:, None]) + basalt_col[None, :] * blend_p[:, None]
     is_plinth = blend_p > 0.5
+
+    # v5 Game-Ready : De-lighting physique SH d'ordre 2 sur l'Albédo projeté afin
+    # d'éliminer les ombres/reflets studio cuits avant export vers Unreal / Unity / Godot !
+    if delight_albedo:
+        import delight as dl
+        rgb_non_plinth, _ = dl.delight_albedo_3d(rgb, nrm, strength=0.78)
+        rgb = np.where(is_plinth[:, None], rgb, rgb_non_plinth)
 
     lum = 0.299 * rgb[:, 0] + 0.587 * rgb[:, 1] + 0.114 * rgb[:, 2]
     warmth = np.clip(rgb[:, 0] - rgb[:, 2], 0.0, 1.0)

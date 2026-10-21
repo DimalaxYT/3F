@@ -906,4 +906,97 @@ def build_motocross(length=2.2, body_color="#e8641b", plate_color="#f2f1ec",
     shaft, (sx2, sz2) = pipe((-0.355 * u, 0.428 * u), (-0.43 * u, 0.55 * u),
                              0.009 * u, sections=10)
     b.add(shaft, steel_m, name="shock_shaft", at=(sx2, 0, sz2))
+    b.def_socket("SOCKET_rider_grip", pos=(clamp_x - 0.01 * u, 0.0, bar_z + 0.04 * u))
+    b.def_socket("SOCKET_exhaust_tip", pos=(-0.62 * u, -0.095 * u, 0.62 * u))
     return b
+
+
+@register("sci_fi_crate",
+          defaults={"width": 0.86, "depth": 0.56, "height": 0.50,
+                    "body_color": "#38414a", "accent_color": "#d68a1c"},
+          info=[{"name": "width", "type": "float", "help": "Largeur X en m"},
+                {"name": "depth", "type": "float", "help": "Profondeur Y en m"},
+                {"name": "height", "type": "float", "help": "Hauteur Z en m"},
+                {"name": "body_color", "type": "color", "help": "Acier peint principal"},
+                {"name": "accent_color", "type": "color", "help": "Renforts / loquets tactiques"}])
+def build_sci_fi_crate(width=0.86, depth=0.56, height=0.50,
+                       body_color="#38414a", accent_color="#d68a1c"):
+    """Caisse de ravitaillement blindée Sci-Fi / Tactique Game-Ready (`v5`) :
+    coque acier chanfreinée à nervures creusées en CSG, pare-chocs d'angle boulonnés,
+    poignées latérales tubulaires cintrées (`tube_sweep`), loquets de verrouillage
+    avant, bandeau LED d'état cyan, couvercle supérieur articulé (`lid` sur charnières)
+    et sockets gameplay (`SOCKET_lid_latch`, `SOCKET_top_mount`). 100 % étanche !"""
+    b = mk.Builder("sci_fi_crate", {})
+    W, D, H = float(width), float(depth), float(height)
+    lid_z = H * 0.76
+
+    shell_m = mk.mat.forged_iron(body_color, 0.44)
+    dark_m = mk.mat.knobby_rubber("#1f2328", 0.72)
+    accent_m = mk.mat.car_clearcoat(accent_color, 0.28)
+    steel_m = mk.mat.brushed_stainless("#cfd5dd", 0.22)
+    led_m = mk.mat.emissive("#3af0ff", 2.4)
+
+    # Articulation de charnière arrière du couvercle blindé + Sockets Gameplay
+    b.def_joint("lid", pivot=(0.0, D * 0.46, lid_z), axis=(1.0, 0.0, 0.0))
+    b.def_socket("SOCKET_lid_latch", pos=(0.0, -D * 0.50, lid_z))
+    b.def_socket("SOCKET_top_mount", pos=(0.0, 0.0, H))
+
+    # 1. Cuve blindée inférieure creusée de niches latérales CSG pour les nervures & poignées
+    base_h = lid_z + 0.012
+    hull = mk.chamfer_box(W, D, base_h, c=0.022)
+    recesses = []
+    for sy in (-1, 1):
+        rec = mk.chamfer_box(W * 0.68, 0.032, base_h * 0.56, c=0.008)
+        mk.place(rec, 0.0, sy * (D * 0.5 - 0.008), base_h * 0.22)
+        recesses.append(rec)
+    for sx in (-1, 1):
+        rec_s = mk.chamfer_box(0.032, D * 0.58, base_h * 0.52, c=0.008)
+        mk.place(rec_s, sx * (W * 0.5 - 0.008), 0.0, base_h * 0.24)
+        recesses.append(rec_s)
+    b.add(mk.difference(hull, recesses), shell_m, name="armored_hull")
+
+    # 2. Patins de sol renforcés + 4 pare-chocs d'angle verticaux boulonnés
+    for sx in (-1, 1):
+        b.add(mk.chamfer_box(W * 0.22, D * 0.96, 0.024, c=0.005), dark_m,
+              name=f"skid_{sx}", at=(sx * W * 0.30, 0.0, 0.0))
+        for sy in (-1, 1):
+            b.add(mk.chamfer_box(0.068, 0.068, base_h * 0.96, c=0.012), dark_m,
+                  name=f"bumper_{sx}_{sy}",
+                  at=(sx * (W * 0.5 - 0.022), sy * (D * 0.5 - 0.022), 0.008))
+
+    # 3. Nervures obliques d'armure + poignées tubulaires cintrées + loquets avant
+    for sy in (-1, 1):
+        for k in (-1, 0, 1):
+            b.add(mk.chamfer_box(0.042, 0.026, base_h * 0.50, c=0.005), accent_m,
+                  name=f"rib_{sy}_{k}", at=(k * W * 0.21, sy * (D * 0.5 - 0.016), base_h * 0.25))
+        for lx in (-W * 0.22, W * 0.22):
+            b.add(mk.chamfer_box(0.056, 0.028, 0.105, c=0.005), steel_m,
+                  name=f"latch_{sy}_{lx:.2f}", at=(lx, sy * (D * 0.5 + 0.004), lid_z - 0.065))
+
+    for sx in (-1, 1):
+        h_curve = np.array([
+            [sx * (W * 0.5 - 0.018), -0.095, base_h * 0.54],
+            [sx * (W * 0.5 + 0.022), -0.085, base_h * 0.46],
+            [sx * (W * 0.5 + 0.022),  0.085, base_h * 0.46],
+            [sx * (W * 0.5 - 0.018),  0.095, base_h * 0.54],
+        ])
+        b.add(mk.tube_sweep(h_curve, r=0.011, sections=14, smooth_pts=20),
+              steel_m, name=f"side_handle_{sx}")
+
+    # Bandeau lumineux d'état énergétique encastré en façade avant
+    b.add(mk.rounded_box(W * 0.30, 0.016, 0.018, r=0.004), led_m,
+          name="status_led_front", at=(0.0, -D * 0.5 + 0.002, lid_z - 0.045))
+
+    # 4. Couvercle supérieur blindé articulé (`group="lid"`) + rails tactiques sur le dessus
+    lid_h = H - lid_z
+    b.add(mk.chamfer_box(W * 1.02, D * 1.02, lid_h, c=0.020), shell_m,
+          name="lid_cap", at=(0.0, 0.0, lid_z), group="lid")
+    for sx in (-1, 1):
+        b.add(mk.chamfer_box(W * 0.26, D * 0.88, 0.022, c=0.005), accent_m,
+              name=f"lid_armor_strip_{sx}", at=(sx * W * 0.26, 0.0, H - 0.016), group="lid")
+    for hx in (-W * 0.28, W * 0.28):
+        b.add(mk.cylinder(0.018, 0.075, sections=18), steel_m,
+              name=f"hinge_barrel_{hx:.2f}", rot=(0, 90, 0),
+              at=(hx - 0.0375, D * 0.5 - 0.006, lid_z), group="lid")
+    return b
+

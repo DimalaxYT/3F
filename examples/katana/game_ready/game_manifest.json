@@ -1,0 +1,123 @@
+{
+  "asset_name": "katana",
+  "high_poly_tris": 5032,
+  "lods": {
+    "LOD0": {
+      "tris": 2598,
+      "path": "examples/katana/game_ready/katana_game.glb",
+      "bytes": 520588
+    },
+    "LOD1": {
+      "tris": 1040,
+      "path": "examples/katana/game_ready/katana_LOD1.glb",
+      "bytes": 207204
+    },
+    "LOD2": {
+      "tris": 740,
+      "path": "examples/katana/game_ready/katana_LOD2.glb",
+      "bytes": 94448
+    }
+  },
+  "draw_calls_before": 8,
+  "draw_calls_after": 1,
+  "poly_reduction_pct": 48.37,
+  "physics_colliders": {
+    "count": 6,
+    "total_tris": 748,
+    "path": "examples/katana/game_ready/katana_colliders.glb"
+  },
+  "sockets": {
+    "SOCKET_origin_ground": {
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ]
+    },
+    "SOCKET_top": {
+      "position": [
+        0.0,
+        0.0,
+        0.9800199437536753
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ]
+    },
+    "SOCKET_grip": {
+      "position": [
+        0.0,
+        0.0,
+        0.13720279212551456
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ]
+    },
+    "SOCKET_tip": {
+      "position": [
+        0.0,
+        0.0,
+        0.9800199437536753
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ]
+    },
+    "SOCKET_trail_mid": {
+      "position": [
+        0.0,
+        0.0,
+        0.558611367939595
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "has_explicit_mikk_tangents": true,
+  "webp_compressed": true,
+  "engine_exports": {
+    "roblox": {
+      "studio_ready_glb_png": "examples/katana/game_ready/roblox/katana_roblox.glb",
+      "scale_unit": "studs",
+      "size_studs_xyz": [
+        0.293,
+        0.293,
+        3.5
+      ],
+      "max_part_tris": 2598,
+      "under_10k_tris_limit": true,
+      "surface_appearance": {
+        "ColorMap": "examples/katana/game_ready/roblox/T_katana_ColorMap.png",
+        "NormalMap": "examples/katana/game_ready/roblox/T_katana_NormalMap.png",
+        "MetalnessMap": "examples/katana/game_ready/roblox/T_katana_MetalnessMap.png",
+        "RoughnessMap": "examples/katana/game_ready/roblox/T_katana_RoughnessMap.png"
+      },
+      "neon_parts": [],
+      "luau_setup_script": "examples/katana/game_ready/roblox/setup_katana.lua"
+    },
+    "unreal": {
+      "static_mesh_with_ucx": "examples/katana/game_ready/unreal/SM_katana.glb",
+      "base_color": "examples/katana/game_ready/unreal/T_katana_BC.png",
+      "orm_packed": "examples/katana/game_ready/unreal/T_katana_ORM.png",
+      "normal_directx_neg_y": "examples/katana/game_ready/unreal/T_katana_N.png"
+    }
+  },
+  "delight_metrics": {},
+  "qa_sheet": "examples/katana/game_ready/qa_game_sheet.png",
+  "duration_s": 26.12
+}
