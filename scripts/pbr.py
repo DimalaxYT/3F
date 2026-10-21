@@ -278,8 +278,14 @@ def compute_edge_wear(mesh: trimesh.Trimesh) -> np.ndarray:
     # la vraie topologie d'adjacence des faces
     welded = trimesh.Trimesh(vertices=verts, faces=mesh.faces, process=True)
     if len(welded.vertices) and len(welded.face_adjacency):
-        angles = welded.face_adjacency_angles          # [0..pi], >0.35 = arête vive
-        sharp = np.clip((angles - 0.12) / 1.15, 0.0, 1.0)
+        # v5.6 — l'ancien mapping (`(angle - 0.12) / 1.15`) saturenait dès 60°
+        # et donnait 0.4 à 30° : sur un maillage CSG (chanfreins à 45-90°) TOUS
+        # les sommets devenaient « arêtes vives » (mesuré : courbure médiane 0.71,
+        # 80 % au-dessus du seuil d'usure) -> usure blanche répandue sur les
+        # panneaux plats. Une usure réaliste commence au-delà de ~50° et sature
+        # sur une vraie arête vive (~90°+).
+        angles = welded.face_adjacency_angles          # [0..pi]
+        sharp = np.clip((angles - 0.80) / 0.85, 0.0, 1.0) ** 1.3
         edges = welded.face_adjacency_edges
         w_weld = np.zeros(len(welded.vertices), dtype=np.float64)
         np.maximum.at(w_weld, edges[:, 0], sharp)

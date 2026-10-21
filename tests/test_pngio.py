@@ -52,3 +52,17 @@ def test_fast_png_produit_un_png_valide(tmp_path):
     assert again.format == "PNG"
     assert again.size == (64, 64)
     assert again.getpixel((10, 10)) == (12, 34, 56)
+
+
+def test_emissive_hex_et_triplet():
+    """Régression : `Material(emissive="#00e5ff")` (hex) a cassé tout le pipeline ;
+    `mk.mat.emissive(color, 2.6)` (triplet) doit conserver sa force HDR."""
+    import meshkit as mk
+
+    m = mk.Material("t", "#ffffff", emissive="#00e5ff")
+    assert m._emissive_strength == 1.0
+    assert abs(float(m.emissive[2]) - 1.0) < 1e-6      # canal le plus fort -> 1.0
+
+    m2 = mk.mat.emissive("#3af0ff", 2.6)
+    assert abs(m2._emissive_strength - 2.6) < 1e-6
+    assert float(m2.emissive.max()) <= 1.0 + 1e-9      # chromaticité bornée

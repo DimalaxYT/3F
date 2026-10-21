@@ -274,6 +274,38 @@ def _uv_overlap(man: dict, max_ratio: float = 1.05) -> tuple[bool, str]:
     return ratio <= max_ratio, f"ratio aire UV/couverture {ratio:.3f} (<= {max_ratio})"
 
 
+
+def _albedo_design(out_p: Path, name: str) -> tuple[bool, str]:
+    """Qualité de DESIGN de l'albédo (et pas seulement « pas plate »).
+
+    Trois défauts mesurés sur des rendus jugés ternes, encodés ici :
+      - saturation écrasée : l'objet se lit gris (les accents colorés comptent) ;
+      - contraste local faible : aspect plastique uniforme ;
+      - budget de blancs : une usure d'arêtes mal masquée « neige » la surface
+        (mesuré avant correction : 6.3 % de pixels > 0.7 sur la caisse).
+    Valeurs saines mesurées : sat 0.25-0.27, std 0.19-0.30, blancs 0-8.4 %.
+    """
+    import numpy as np
+    from PIL import Image
+    fp = out_p / "unreal" / f"T_{name}_BC.png"
+    if not fp.is_file():
+        return False, "ColorMap absente"
+    im = Image.open(fp).convert("RGB")
+    a = np.asarray(im, dtype=np.float32) / 255.0
+    sat = float(np.asarray(im.convert("HSV"), dtype=np.float32)[..., 1].mean() / 255.0)
+    std = float(a.reshape(-1, 3).std(axis=0).mean())
+    lum = a @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    whites = float((lum > 0.85).mean())
+    # Un aplat de couleur riche (vase émaillé, sat 0.66 / contraste 0.04) est un
+    # choix de design valide ; un métal bruité sans couleur (sat 0.03 / std 0.30)
+    # aussi. Le défaut réel est « gris ET plat » : on ne rejette que la conjonction.
+    rich_or_detailed = (sat >= 0.12) or (std >= 0.08)
+    details = (f"sat {sat:.2f} / contraste {std:.3f} (au moins un des deux requis) | "
+               f"blancs {whites * 100:.1f} % (<= 15 %)")
+    ok = rich_or_detailed and whites <= 0.15
+    return ok, details
+
+
 def check_package(out_dir: str | Path, target: str = "hero") -> dict:
     """Évalue toutes les gates d'un dossier produit par `turbo_forge.py`/`game_ready.py`."""
     out_p = Path(out_dir)
@@ -375,6 +407,14 @@ def check_package(out_dir: str | Path, target: str = "hero") -> dict:
               round(vol, 6) if vol is not None else None, "> 0")
     elif cfg["require_stl"]:
         g.add("stl_watertight", "STL présent (cible print)", False, stl, "<name>.stl")
+
+    # --- design de l'albédo (v5.7) -------------------------------------------
+    try:
+        ok, val = _albedo_design(out_p, name)
+        g.add("albedo_design", "albédo : saturation, contraste et blancs maîtrisés",
+              ok, val, "sat >= 0.12 OU contraste >= 0.08 ; blancs <= 15 %")
+    except Exception as exc:
+        g.add("albedo_design", "albédo mesurable", False, str(exc), "mesure ok")
 
     # --- contenu des textures & émission néon (v5.4) -------------------------
     try:

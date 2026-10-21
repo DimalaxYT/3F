@@ -196,3 +196,18 @@ def test_gate_uv_overlap_detecte_atlas_superpose(valid_pkg, tmp_path):
     scene.export(lod0)
     g = gate_map(pkg)
     assert not g["uv_overlap"]["pass"], "un atlas superposé doit être détecté"
+
+
+def test_gate_albedo_design_detecte_texture_grise(valid_pkg, tmp_path):
+    """Albédo désaturé (rendu « plastique gris ») : la gate doit le voir."""
+    import numpy as np
+    from PIL import Image
+
+    pkg = clone(valid_pkg, tmp_path / "m_alb")
+    fp = pkg / "unreal" / f"T_{NAME}_BC.png"
+    a = np.asarray(Image.open(fp).convert("RGB"), dtype=np.float32) / 255.0
+    lum = (a @ np.array([0.2126, 0.7152, 0.0722]))[..., None]
+    flat = np.repeat(lum * 0.35 + 0.45, 3, axis=2)      # gris uniforme sans couleur
+    Image.fromarray((np.clip(flat, 0, 1) * 255).astype(np.uint8)).save(fp)
+    g = gate_map(pkg)
+    assert not g["albedo_design"]["pass"], "un albédo gris et plat doit être détecté"

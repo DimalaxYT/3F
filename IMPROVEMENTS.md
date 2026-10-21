@@ -330,3 +330,27 @@ de ces chemins est assurée par les evals (reconstruction fraîche) et l'E2E CI.
 
 **Bilan perf** : `sci_fi_crate` **19,0 s → 12,1 s** (−36 %), `katana` **13,8 → 10,2 s** (−26 %).
 **Bilan qualité** : 23 gates, 9 mutants, 10 evals, CI visuelle, déterminisme prouvé.
+
+---
+
+## Vague v5.6/v5.7 — qualité de DESIGN (rendu & matière)
+
+Objectif : la qualité *visuelle* des assets, mesurée puis corrigée là où elle péchait.
+
+| # | Défaut constaté (mesuré) | Correction |
+|---|---|---|
+| D1 | rendu plat : key/fill sans séparation, coins aussi lumineux que le sujet | key/fill 1.05/0.38 → **1.35/0.26**, IBL 0.42 → 0.34 |
+| D2 | objet « posé » sans ancrage au sol | ombre de contact **deux couches** (halo large + noyau serré) |
+| D3 | pas de halo sur les émissions, coins plats, micro-détail écrasé | post-finition : **bloom émissif**, vignettage, unsharp mask |
+| D4 | **usure d'arêtes sur 80 % des sommets** (courbure médiane 0.71 !) → « neige » blanche sur les panneaux plats | recalibrage `compute_edge_wear` (seuil 0.80 rad, gain 1.3) → médiane **0.37**, 40 % ; masque d'exposition par AO ; usure réduite de 65 % sur le jaune sécurité |
+| D5 | émail uniforme = aspect « objet imprimé » | variations grande échelle : dérive de teinte par panneau (fbm 2.6/tile), poussière verticale (+Z), micro-nuance |
+| D6 | crasse écrasante | plafond 0.52 → 0.34 sur les cavités |
+| D7 | **néon mat** : intensité HDR perdue (glTF borne `emissiveFactor` à 1, et `hex_rgb` clipait) | `KHR_materials_emissive_strength` exportée ; chromaticité et force séparées |
+| D8 | familles non-métal pouvaient finir métalliques après additifs | **contrainte dure** en sortie de patine (`metal = 0` pour soie/caoutchouc/bois) |
+| D9 | galuchat blanc pur → plastique | ivoire vieilli (0.72 contre 0.86) |
+| G1 | aucune gate ne mesurait le **design** | gate `albedo_design` (saturation ≥ 0.12, contraste ≥ 0.08, blancs ≤ 15 %) + test mutant → **24 gates**, **10 mutants** |
+
+**Reste connu** : la poignée du katana sort encore gris clair au rendu alors que l'ORM y
+mesure `metallic 0.54` (la soie devrait être à 0). L'atlas est sain (ratio UV 0.947) et la
+contrainte unitaire fonctionne : le chemin de bake de cette zone reste à élucider (piste :
+la région d'atlas n'est pas classée `MAT_TSUKA_WRAP` au pixel, alors qu'elle l'est au sommet).

@@ -255,7 +255,9 @@ def apply_game_weathering(
         weave = 0.5 + 0.5 * np.sin((turns * 46.0 + ang * 18.0) * math.pi)
         pearls = 0.5 + 0.5 * np.sin(px_t * 2100.0) * np.sin(pz_t * 2100.0 + py_t * 1700.0)
         silk_col = np.array([0.075, 0.082, 0.105], dtype=np.float32)[None, :] * (0.82 + 0.36 * weave[:, None])
-        same_col = np.array([0.86, 0.84, 0.78], dtype=np.float32)[None, :] * (0.80 + 0.25 * pearls[:, None])
+        # ivoire vieilli (0.72) plutôt que blanc pur : à l'échelle de rendu, un
+        # galuchat à 0.86 se lisait comme du plastique blanc.
+        same_col = np.array([0.72, 0.70, 0.64], dtype=np.float32)[None, :] * (0.80 + 0.22 * pearls[:, None])
         # Ombre portée réaliste sous le ruban au bord des fenêtres de galuchat !
         window_ao = np.clip(0.52 + 0.48 * np.minimum(np.abs(u1 - 0.50), np.abs(u2 - 0.50)) / 0.22, 0.52, 1.0)
         col[is_tsuka] = same_col * window_ao[:, None] * (1.0 - silk_mask[:, None]) + silk_col * silk_mask[:, None]
@@ -305,11 +307,52 @@ def apply_game_weathering(
         col[is_steel] *= (0.92 + 0.16 * aniso[:, None])
         rough[is_steel] = np.clip(rough[is_steel] * (1.12 - 0.26 * aniso), 0.06, 0.65)
 
-    # 2. Usure d'arêtes par courbure (`curv > 0.56` : fine, nette et réaliste !)
-    breakup = pbr.fbm(pos[:, 0] * (32.0 / tile_m), pos[:, 1] * (32.0 / tile_m),
-                      pos[:, 2] * (32.0 / tile_m), octaves=3, seed=71).astype(np.float32)
+    # 1bis. VARIATION À GRANDE ÉCHELLE (v5.6) — un émail uniforme fait « objet
+    #       imprimé ». Trois couches physiquement motivées, toutes très basse
+    #       fréquence pour ne pas concurrencer les micro-détails :
+    #         a) dérive de teinte : les panneaux peints séparément ne sortent
+    #            jamais exactement du même bain (LOT / UV sun-fade) ;
+    #         b) poussière verticale : elle se dépose sur les surfaces tournées
+    #            vers le haut (+Z) et jamais sous l'objet ;
+    #         c) micro-nuance de peinture : très légère, casse l'aplat.
+    macro = pbr.fbm(pos[:, 0] * (2.6 / tile_m), pos[:, 1] * (2.6 / tile_m),
+                    pos[:, 2] * (1.7 / tile_m), octaves=3, seed=91).astype(np.float32)
+    lot = np.clip(0.5 + (macro - 0.5) * 1.15, 0.0, 1.0)
+    tint_drift = np.stack([0.94 + 0.13 * lot,
+                           0.96 + 0.09 * lot,
+                           0.92 + 0.10 * (1.0 - lot)], axis=1).astype(np.float32)
+    col = np.where(is_nonmetal[:, None], col, np.clip(col * tint_drift, 0.0, 1.0))
+
+    up_facing = np.clip(nrm[:, 2], 0.0, 1.0) ** 1.35
+    dust_fbm = pbr.fbm(pos[:, 0] * (3.4 / tile_m), pos[:, 1] * (3.4 / tile_m),
+                       pos[:, 2] * (9.0 / tile_m), octaves=3, seed=23).astype(np.float32)
+    dust = np.clip(up_facing * (0.35 + 0.85 * dust_fbm) * 0.16, 0.0, 0.20)
+    dust_col = np.array([0.33, 0.315, 0.285], dtype=np.float32)
+    col = col * (1.0 - dust[:, None]) + dust_col[None, :] * dust[:, None]
+    rough = np.clip(rough + 0.14 * dust, 0.05, 1.0)
+
+    micro = pbr.fbm(pos[:, 0] * (11.0 / tile_m), pos[:, 1] * (11.0 / tile_m),
+                    pos[:, 2] * (11.0 / tile_m), octaves=2, seed=53).astype(np.float32)
+    col *= np.clip(0.955 + 0.09 * micro[:, None], 0.88, 1.06)
+
+    # 2. Usure d'arêtes par courbure — v5.6 : usure COHÉRENTE sur les arêtes
+    #    EXPOSÉES. Deux défauts corrigés (mesurés : 6,3 % de pixels blancs
+    #    dispersés sur des panneaux plats) :
+    #      a) le `breakup` était à 32 cycles/tile_m -> moucheture haute fréquence
+    #         (« neige » blanche) au lieu d'éclats reliés ; on descend à 7 + 22 ;
+    #      b) la courbure est forte sur TOUS les chanfreins d'un union CSG, y
+    #         compris ceux enterrés dans les cavités : on gate par l'exposition
+    #         (AO), donc l'usure n'apparaît que sur les arêtes qui voient le jour.
+    breakup = pbr.fbm(pos[:, 0] * (7.0 / tile_m), pos[:, 1] * (7.0 / tile_m),
+                      pos[:, 2] * (7.0 / tile_m), octaves=3, seed=71).astype(np.float32)
+    breakup_fine = pbr.fbm(pos[:, 0] * (22.0 / tile_m), pos[:, 1] * (22.0 / tile_m),
+                           pos[:, 2] * (22.0 / tile_m), octaves=2, seed=17).astype(np.float32)
+    breakup = np.clip(0.60 * breakup + 0.40 * breakup_fine, 0.0, 1.0)
     sharp_edge = np.clip((curv - 0.54) / 0.34, 0.0, 1.0) ** 1.6
-    edge_mask = np.clip(sharp_edge * (0.30 + 0.95 * breakup) * wear_amount, 0.0, 0.78)
+    exposure = np.clip((ao - 0.42) / 0.58, 0.0, 1.0) ** 1.15
+    edge_mask = np.clip(sharp_edge * exposure
+                        * np.clip(0.25 + 1.05 * breakup, 0.0, 1.0) * wear_amount,
+                        0.0, 0.62)
 
     # Sur métal peint / chevrons : éclats d'acier poli ; sur caoutchouc : frottement mat gris sombre (`metal=0`) !
     bare_steel = np.array([0.78, 0.80, 0.83], dtype=np.float32)
@@ -320,6 +363,9 @@ def apply_game_weathering(
         np.where(is_gold[:, None], bright_gold, bare_steel[None, :]),
     )
     eff_edge = np.where(is_nonmetal, edge_mask * 0.42, edge_mask)
+    # Le jaune sécurité est une peinture fraîche et réfléchissante : on limite
+    # fortement l'éclat d'usure dessus, sinon il vire au brun sale.
+    eff_edge = np.where(is_hazard, eff_edge * 0.35, eff_edge)
     col = col * (1.0 - eff_edge[:, None]) + target_edge * eff_edge[:, None]
     metal = np.where(is_nonmetal, 0.0, np.clip(metal + eff_edge * 0.82, 0.0, 1.0))
     rough = np.where(
@@ -329,7 +375,9 @@ def apply_game_weathering(
     )
 
     # 3. Crasse et patine antique dans les cavités profondes d'AO uniquement (`ao < 0.60`)
-    cavity = np.clip((0.60 - ao) * 1.55 * (0.50 + 0.60 * breakup) * dirt_amount, 0.0, 0.52)
+    # v5.6 — la crasse ne doit pas désaturer l'objet : plafond 0.34 au lieu de
+    # 0.52 (27 % de la texture était sous AO 0.5, d'où un rendu « boueux »).
+    cavity = np.clip((0.52 - ao) * 1.35 * (0.50 + 0.60 * breakup) * dirt_amount, 0.0, 0.34)
     dirt_col = np.where(
         is_gold[:, None],
         np.array([[0.15, 0.125, 0.085]], dtype=np.float32),
@@ -357,6 +405,13 @@ def apply_game_weathering(
     if is_hazard.any():
         chevron_h[is_hazard] = 0.08
     height = (0.24 * (grain - 1.0) - 0.15 * eff_edge + dh + chevron_h + extra_h).astype(np.float32)
+
+    # v5.6 — contrainte DURE en sortie : les additifs (éclats, decals, boosts)
+    # pouvaient rendre métallique une famille qui ne doit jamais l'être. Mesuré
+    # sur le katana : soie `tsuka` à metallic 0.54 dans l'ORM -> la poignée
+    # reflétait le studio en gris argenté au lieu de rester de la soie noire.
+    metal = np.where(is_nonmetal, 0.0, metal)
+    rough = np.where(is_tsuka, np.clip(rough, 0.45, 1.0), rough)
 
     return np.clip(col, 0.0, 1.0), rough, metal, ao, height
 
