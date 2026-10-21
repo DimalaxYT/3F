@@ -1,8 +1,21 @@
-# 3d-forge v5 🎮⚔️🐉✨
+# 3d-forge v5 🎮🟥⚔️🐉✨
 
-**Moteur de génération d'Assets 3D Game-Ready AAA (Unreal Engine 5 · Unity HDRP/URP · Godot 4 · glTF 2.0) × CAO paramétrique 100 % étanche × Sculpture Organique Multi-Vues GPU (`gpu_sculpt.py`) — zéro GPU requis côté utilisateur.**
+**Moteur de génération d'Assets 3D Réalistes pensé en priorité pour Roblox Studio (`SurfaceAppearance` + `Studs` + `< 10k tris` + `Neon` + `Luau`) et Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`) — propulsé par CAO étanche + Sculpture Organique GPU (`gpu_sculpt.py`), zéro GPU requis côté utilisateur.**
 
 ![Vitrine Technique 3d-forge v5 — AAA Game-Ready Asset Engine](docs/img/v5_game_ready_showcase.png)
+
+> ### Priorité n°1 : **Roblox Studio** (`roblox/`) & **Unreal Engine 5** (`unreal/`) — Profil par défaut `--engine roblox_unreal`
+>
+> Chaque génération `--game-ready` produit automatiquement un double pack **100 % prêt à glisser-déposer** qui résout **tous les pièges classiques de Roblox Studio et d'Unreal Engine 5** :
+> - **Pack `roblox/` (Priorité #1 — Plug & Play Roblox Studio `Import 3D`)** :
+>   - **`<Name>_roblox.glb` encodé en PNG pur (`webp=False`)** : l'outil **Import 3D** de Roblox Studio ignore `EXT_texture_webp` (qui donne un mesh tout gris) mais lit nativement le PNG embarqué en créant **automatiquement le `MeshPart` + l'objet `SurfaceAppearance` rempli avec ses 4 cartes dès le 1er clic** !
+>   - **Échelle exacte en `Studs` Roblox (`1 m = 3,5714 Studs`, soit `1 Stud = 0,28 m`)** : `katana` arrive directement à **`3,50 Studs`** dans la main d'un avatar R15, `sci_fi_crate` à **`3,31 × 2,13 × 1,82 Studs`** à hauteur de taille — **zéro redimensionnement manuel**.
+>   - **Respect garanti de la limite stricte `< 10 000 triangles / MeshPart`** (`2 600–4 200 tris` en `LOD0` pour tourner à **60 FPS Mobile + Console + PC**).
+>   - **AO Physique cuit directement dans `T_<Name>_ColorMap.png` (`1024×1024`)** : comme `SurfaceAppearance` de Roblox **n'a pas de slot Ambient Occlusion**, `3d-forge` multiplie l'AO géométrique dans `ColorMap` pour donner une profondeur d'ombre digne d'Unreal sous l'éclairage Roblox `Future`, et fournit aussi les 4 PNG séparés (`ColorMap`, `NormalMap` OpenGL `+Y`, `MetalnessMap`, `RoughnessMap`).
+>   - **Découpe automatique des parties lumineuses en `Neon_*` + Script Luau `setup_<Name>.lua`** : puisque `SurfaceAppearance` n'a pas de carte Emissive, chaque LED/phare/rune est extrait dans son propre `MeshPart` `Neon_*`, et **`setup_<Name>.lua`** configure automatiquement `Enum.Material.Neon`, les `Attachment`s (`GripAttachment`, `TipAttachment`), un **`HingeConstraint` + `ProximityPrompt [E]`** fonctionnel sur les coffres articulés (`sci_fi_crate`), et **`ConvertToTool()`** en 1 clic sur les armes (`katana`, `sword`) !
+> - **Pack `unreal/` (Priorité #2 — Unreal Engine 5 / UEFN)** :
+>   - **`SM_<Name>.glb`** en mètres avec colliders convexes **`UCX_SM_<Name>_00..N`**, sockets `SOCKET_*`, tangentes Mikk **`TANGENT (VEC4)`** et animations `gltf.animations`.
+>   - **`T_<Name>_BC.png`** (**Albédo pur De-Lit SANS AO cuit**, pour éviter tout double assombrissement sous **Lumen / GTAO** !) + **`T_<Name>_ORM.png`** (`R=AO, G=Roughness, B=Metallic`) + **`T_<Name>_N.png` DirectX (`-Y` canal vert inversé)**.
 
 ![Vitrine Technique 3d-forge v4](docs/img/v4_showcase.png)
 

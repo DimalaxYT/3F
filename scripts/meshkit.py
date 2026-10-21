@@ -65,7 +65,7 @@ def hex_rgb(spec) -> np.ndarray:
             raise ValueError(f"couleur hex invalide: {spec!r}")
         return np.array([int(s[i:i + 2], 16) / 255.0 for i in (0, 2, 4)])
     arr = np.asarray(spec, dtype=float)
-    if arr.max() > 1.001:
+    if arr.max() > 16.0:
         arr = arr / 255.0
     return np.clip(arr, 0.0, 1.0)
 

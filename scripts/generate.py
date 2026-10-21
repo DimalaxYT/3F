@@ -84,7 +84,7 @@ def unique_dir(base):
 
 def run(recipe_name, params, formats, outdir, views, size, quality,
         render=True, quiet=False, faces_all=False, render_engine="auto",
-        texture_ai=None, game_ready_mode=False, game_engine="all", lod0_tris=3400):
+        texture_ai=None, game_ready_mode=False, game_engine="roblox_unreal", lod0_tris=3200):
     t0 = time.time()
     mk.set_quality(quality)
     recipe = get_recipe(recipe_name)
@@ -232,10 +232,11 @@ def main(argv=None):
     ap.add_argument("--game-ready", dest="game_ready", action="store_true",
                     help="Génère le pack AAA complet (High->Low Normal Bake, LOD0/1/2, ORM/MaskMap/DirectX, UCX colliders, Sockets)")
     ap.add_argument("--engine", dest="game_engine",
-                    choices=["all", "unreal", "unity", "godot", "gltf"], default="all",
-                    help="Profil moteur cible pour --game-ready")
-    ap.add_argument("--lod0-tris", dest="lod0_tris", type=int, default=3400,
-                    help="Budget triangles cible du LOD0 en mode --game-ready")
+                    choices=["roblox_unreal", "roblox", "unreal", "unity", "godot", "gltf", "all"],
+                    default="roblox_unreal",
+                    help="Profil moteur cible pour --game-ready (défaut: roblox_unreal = Roblox Studio + Unreal 5)")
+    ap.add_argument("--lod0-tris", dest="lod0_tris", type=int, default=3200,
+                    help="Budget triangles cible du LOD0 en mode --game-ready (< 10 000 tris Roblox Studio)")
     ap.add_argument("--no-render", action="store_true")
     ap.add_argument("--faces", choices=["all"], default=None,
                     help="all = photos des 6 faces + turntable en plus des vues")

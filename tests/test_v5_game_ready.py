@@ -165,3 +165,53 @@ def test_game_ready_end_to_end_multi_engine_package(tmp_path: Path):
     crate_gltf, _ = _parse_glb_json(ROOT / "examples" / "sci_fi_crate" / "game_ready" / "sci_fi_crate_game.glb")
     assert len(crate_gltf.get("animations", [])) >= 1
     assert crate_gltf["animations"][0]["name"] == "Idle_Action"
+
+
+def test_roblox_studio_strict_pipeline_studs_png_neon_and_luau(tmp_path: Path):
+    """Vérifie toutes les contraintes strictes de **Roblox Studio** + **Unreal Engine 5** (`roblox_unreal`) :
+      - ZÉRO `EXT_texture_webp` dans `<Name>_roblox.glb` (100 % `image/png` pour Import 3D Roblox !),
+      - Échelle native en `Studs` (`1 m = 3.5714 Studs`) prête face à un avatar R15 sans redimensionnement,
+      - Strictement `< 10 000` triangles par `MeshPart`,
+      - Pièces lumineuses séparées en `Neon_*` (`Enum.Material.Neon`) + script Luau `setup_*.lua` complet,
+      - `ColorMap` Roblox avec AO cuit vs `BaseColor` Unreal Engine 5 pur sans AO double.
+    """
+    out_dir = tmp_path / "crate_rbx_ue"
+    manifest = gr.export_game_package(
+        "sci_fi_crate",
+        out_dir=out_dir,
+        engine="roblox_unreal",
+        lod0_tris=2200,
+        tex_size=512,
+    )
+    assert set(manifest["engine_exports"].keys()) == {"roblox", "unreal"}
+
+    rbx = manifest["engine_exports"]["roblox"]
+    assert rbx["under_10k_tris_limit"] is True
+    assert rbx["max_part_tris"] < 10_000
+    # 0.93m de large -> ~3.31 Studs dans Roblox Studio !
+    assert 2.8 <= rbx["size_studs_xyz"][0] <= 3.8
+    assert "Neon_status_led_front" in rbx["neon_parts"]
+
+    rbx_gltf, _ = _parse_glb_json(Path(rbx["studio_ready_glb_png"]))
+    assert "EXT_texture_webp" not in rbx_gltf.get("extensionsUsed", []), (
+        "Roblox Studio Import 3D ignore WebP : le .glb Roblox DOIT contenir exclusivement du PNG !"
+    )
+    assert all(im.get("mimeType") == "image/png" for im in rbx_gltf.get("images", []))
+    node_names = {n.get("name", "") for n in rbx_gltf.get("nodes", [])}
+    assert "Neon_status_led_front" in node_names
+
+    # Vérifie les 4 cartes `SurfaceAppearance` (<= 1024px) et la différence AO Roblox vs Unreal
+    sa = rbx["surface_appearance"]
+    col_rbx = np.asarray(Image.open(sa["ColorMap"]), dtype=np.float32)
+    bc_ue = np.asarray(Image.open(manifest["engine_exports"]["unreal"]["base_color"]), dtype=np.float32)
+    mtl_rbx = Image.open(sa["MetalnessMap"])
+    rgh_rbx = Image.open(sa["RoughnessMap"])
+    assert mtl_rbx.mode == "L" and rgh_rbx.mode == "L"
+    assert col_rbx.shape[:2] == (512, 512)
+    assert float(col_rbx.mean()) < float(bc_ue.mean()), "ColorMap Roblox doit intégrer l'AO alors que BC Unreal reste pur !"
+
+    luau_code = Path(rbx["luau_setup_script"]).read_text(encoding="utf-8")
+    assert "Enum.Material.Neon" in luau_code
+    assert "HingeConstraint" in luau_code
+    assert "ProximityPrompt" in luau_code
+
