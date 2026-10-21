@@ -1,20 +1,53 @@
 ---
 name: 3d-forge
 description: >-
-  Hybrid CAD + Organic GPU Sculpture + Datacenter-GPU 3D generation toolkit (v4):
-  turns any object description (mechanical CAD, architectural CSG, glassware, OR
-  organic statues/creatures via `gpu_sculpt.py`) into clean, 100% watertight meshes
-  with physically-based Cook-Torrance GGX + Clearcoat + Refractive Crystal Glass
-  (`KHR_materials_transmission` / `ior` / `clearcoat`), articulated `.glb` joints,
-  80x faster vectorized UV baking, Sketchfab-grade offline `preview.html` inspector,
-  automatic 3D-printer bed splitting with keyed snap pins (`split_stl.py`), and
-  structure-locked Datacenter-GPU studio renders (`photo_pass.py`) — zero GPU
-  required on the user's machine.
+  AAA Game-Ready 3D Asset Engine + Hybrid Exact CAD + Organic GPU Sculpture
+  toolkit (v5): generates production real-time 3D game assets for Unreal Engine 5,
+  Unity HDRP/URP, Godot 4, and WebGL/glTF 2.0 with High-Poly -> Low-Poly Mikk
+  Tangent-Space Normal Baking (`TANGENT VEC4`), seamless mipmapped `LOD0 / LOD1 / LOD2`
+  chains, Draw-Call merging, Spherical Harmonics physical Albedo De-Lighting
+  (`delight.py`), Datacenter-GPU PBR material scans + 4-layer procedural game
+  weathering & normal decals, `UCX_*` / `-colonly` convex physics colliders,
+  gameplay `SOCKET_*` attachment nodes, standard `gltf.animations` tracks,
+  `EXT_texture_webp` compression, and 100% watertight 3D-printable CAD solids
+  — zero GPU required on the user's machine.
 ---
 
-# 3d-forge v4 — Hybrid Exact CAD + Organic GPU Sculpture + Print Engineering
+# 3d-forge v5 — AAA Game-Ready 3D Asset Engine + Exact CAD + Organic GPU Sculpture
 
-## Architecture: CPU Exact CAD/SDF × Host Datacenter GPU (`v4`)
+## Architecture: Real-Time Game Engine Pipeline × CPU Exact CAD/SDF × Host Datacenter GPU (`v5`)
+
+Whenever the user wants **realistic 3D game assets** (props, weapons, vehicles, architecture, statues/creatures for **Unreal Engine 5**, **Unity HDRP/URP**, **Godot 4**, Three.js, or Roblox/Fortnite UEFN), **ALWAYS enable the v5 Game-Ready pipeline (`--game-ready` or `scripts/game_ready.py`)**:
+
+### The 5 AAA Game-Ready Pillars (`v5` — `scripts/game_ready.py` & `scripts/delight.py`)
+1. **High-Poly -> Low-Poly Mikk Tangent-Space Baker & `LOD0 / LOD1 / LOD2` (`scripts/game_ready.py`)**:
+   - Welds split UV seams (`merge_vertices(merge_tex=True, merge_norm=True)`) into a watertight manifold before C++ QEM decimation (`fast_simplification`) so **zero seam cracks or gaps ever open even down to `420–630 tris`**.
+   - Projects high-poly surface normals, geometric AO, and curvature onto each LOD in **its own exact Mikk Tangent Space** (`LOD0 @ 1024²`, `LOD1 @ 40% tris / 512²`, `LOD2 @ 15% tris / 256²`) and merges static opaque parts into **1 Draw Call**.
+2. **Physical Spherical Harmonics IRLS Albedo De-Lighting (`scripts/delight.py`)**:
+   - Fits order-2 Spherical Harmonics (`Y_0..Y_8`) via Huber IRLS in log-luminance space to strip baked directional studio lighting and hot specular highlights from AI-generated textures while preserving intrinsic material colors (`-66%` to `-70%` directional variance reduction; auto-enabled in `gpu_sculpt.py` and `game_ready.py`).
+3. **Datacenter-GPU Material Scans + 4-Layer Game Weathering + Normal Stamp Decals**:
+   - Eliminates untextured "plastic CAD" surfaces with triplanar Datacenter-GPU material grain (`assets/ai_materials/`), **Curvature Edge Wear** (chipped paint exposing bare steel on sharp corners), **AO Cavity Dirt**, **World-Z Ground Grime**, and procedural **Normal Stamp Decals** (recessed panel seams + steel rivets baked straight into Normal + AO + Metallic with zero polygon cost).
+4. **Multi-Engine Native Export Profiles (`--engine unreal | unity | godot | gltf | all`) + Compact `EXT_texture_webp`**:
+   - **Explicit `NORMAL (VEC3)` + `TANGENT (VEC4)`** written into every textured glTF primitive + garbage-collected binary repacking (`EXT_texture_webp` reduces `.glb` sizes `×6` to `×42`, e.g., `94 KB` for `katana_LOD2.glb`).
+   - **`unreal/`**: `SM_<Name>.glb` (with `UCX_SM_<Name>_00..N` convex hulls) + `T_<Name>_BC.png` + `T_<Name>_ORM.png` (`R=AO, G=Roughness, B=Metallic`) + **`T_<Name>_N.png` DirectX (`-Y` inverted green channel)**.
+   - **`unity/`**: prefab `.glb` + `T_<Name>_BaseMap.png` + **`T_<Name>_MaskMap.png` RGBA (`R=Metallic, G=AO, B=Detail, A=Smoothness=1-Roughness`)** + `T_<Name>_NormalGL.png` (`+Y`).
+   - **`godot/`**: `<Name>_godot.glb` embedding `-colonly` collision hulls, `SOCKET_*` nodes, and `gltf.animations`.
+5. **Convex Physics Colliders (`UCX_*` / `-colonly`), Gameplay `SOCKET_*` Nodes & Standard `gltf.animations`**:
+   - `Builder.def_socket("SOCKET_grip", pos=..., rot_deg=...)` + automatic socket inference (`SOCKET_grip`, `SOCKET_tip`, `SOCKET_muzzle`, `SOCKET_origin_ground`, `SOCKET_top`).
+   - `Builder.def_joint(...)` automatically exports real glTF 2.0 quaternion keyframe tracks (`animations: [{"name": "Idle_Action", ...}]`) that play out of the box in Unreal, Unity, Godot, Blender, and Three.js.
+
+```bash
+# Generate any recipe with full AAA multi-engine game package in one command:
+python3 scripts/generate.py sci_fi_crate -f glb stl -q high --game-ready --engine all --lod0-tris 2800 -o out
+
+# Convert ANY high-poly .glb sculpture (from gpu_sculpt.py) or recipe into an optimized game pack:
+python3 scripts/game_ready.py examples/dragon_buste/dragon_buste.glb --engine unreal --lod0-tris 4200 -o out/dragon_ue5
+
+# Standalone Albedo De-Lighting for AI multi-view / tile textures:
+python3 scripts/delight.py raw_ai_albedo.png -o clean_albedo.png --strength 0.85
+```
+
+### Core Hybrid CAD / Sculpture / Print Foundations (`v4` — 20 Watertight Recipes)
 
 In an agent sandbox, Python executes on an isolated CPU container (`cuda_available: false`), while **your native diffusion tool (`generate_image`) executes directly on the model host's Datacenter GPU cluster** (zero local GPU required from the user). `3d-forge v4` combines five pillars across both processors:
 

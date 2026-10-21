@@ -68,6 +68,11 @@ def coerce_params(recipe_name, raw_sets, json_path=None):
     return params
 
 
+def _parse_quality(v: str) -> float:
+    presets = {"low": 0.6, "draft": 0.6, "medium": 1.0, "high": 1.5, "ultra": 2.0}
+    return presets[v.lower()] if v.lower() in presets else float(v)
+
+
 def unique_dir(base):
     if not os.path.exists(base):
         return base
@@ -79,7 +84,7 @@ def unique_dir(base):
 
 def run(recipe_name, params, formats, outdir, views, size, quality,
         render=True, quiet=False, faces_all=False, render_engine="auto",
-        texture_ai=None):
+        texture_ai=None, game_ready_mode=False, game_engine="all", lod0_tris=3400):
     t0 = time.time()
     mk.set_quality(quality)
     recipe = get_recipe(recipe_name)
@@ -159,6 +164,18 @@ def run(recipe_name, params, formats, outdir, views, size, quality,
                 print(f"[renderer] photos toutes faces échouées ({e})",
                       file=sys.stderr)
 
+    game_pack = None
+    if game_ready_mode:
+        import game_ready as gr
+        game_pack = gr.export_game_package(
+            builder,
+            out_dir=os.path.join(outdir, "game_ready"),
+            name=stem,
+            engine=game_engine,
+            lod0_tris=lod0_tris,
+            tex_size=1024,
+        )
+
     report = {
         "recipe": recipe_name,
         "params": params,
@@ -174,6 +191,8 @@ def run(recipe_name, params, formats, outdir, views, size, quality,
         report["photos"] = {k: [os.path.abspath(p) for p in v] if isinstance(v, list)
                             else os.path.abspath(v)
                             for k, v in photos.items()}
+    if game_pack:
+        report["game_ready"] = game_pack
     with open(os.path.join(outdir, "report.json"), "w") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
 
@@ -196,20 +215,27 @@ def main(argv=None):
     ap.add_argument("--set", nargs="*", default=[], metavar="CLE=VALEUR",
                     help="surcharges de paramètres")
     ap.add_argument("--json", help="fichier JSON de surcharges de paramètres")
-    ap.add_argument("--formats", nargs="*", default=["glb", "stl"],
+    ap.add_argument("-f", "--formats", nargs="*", default=["glb", "stl"],
                     choices=VALID_FORMATS, help="formats d'export")
-    ap.add_argument("--out", default=os.path.join(os.getcwd(), "out"),
+    ap.add_argument("-o", "--out", default=os.path.join(os.getcwd(), "out"),
                     help="répertoire de sortie")
     ap.add_argument("--views", nargs="*", default=list(DEFAULT_VIEWS),
                     choices=list(renderer.DEFAULT_VIEWS), help="vues à rendre")
     ap.add_argument("--size", type=int, default=1024, help="taille PNG")
-    ap.add_argument("--quality", type=float, default=1.0,
-                    help="densité de maillage (0.5 rapide, 2 fin)")
+    ap.add_argument("-q", "--quality", type=_parse_quality, default=1.0,
+                    help="densité de maillage (0.5 rapide, 2 fin, ou low/medium/high/ultra)")
     ap.add_argument("--render", dest="render_engine",
                     choices=["auto", "numpy", "cycles"], default="auto",
                     help="moteur de rendu : auto (GGX+HDRI+SSAO), cycles (Blender headless)")
     ap.add_argument("--texture-ai", dest="texture_ai", default=None,
                     help="JSON de tuiles matière GPU datacenter à cuire dans l'atlas UV du .glb")
+    ap.add_argument("--game-ready", dest="game_ready", action="store_true",
+                    help="Génère le pack AAA complet (High->Low Normal Bake, LOD0/1/2, ORM/MaskMap/DirectX, UCX colliders, Sockets)")
+    ap.add_argument("--engine", dest="game_engine",
+                    choices=["all", "unreal", "unity", "godot", "gltf"], default="all",
+                    help="Profil moteur cible pour --game-ready")
+    ap.add_argument("--lod0-tris", dest="lod0_tris", type=int, default=3400,
+                    help="Budget triangles cible du LOD0 en mode --game-ready")
     ap.add_argument("--no-render", action="store_true")
     ap.add_argument("--faces", choices=["all"], default=None,
                     help="all = photos des 6 faces + turntable en plus des vues")
@@ -234,7 +260,9 @@ def main(argv=None):
     report = run(args.recipe, params, args.formats, args.out, args.views,
                  args.size, args.quality, render=not args.no_render,
                  quiet=args.quiet, faces_all=(args.faces == "all"),
-                 render_engine=args.render_engine, texture_ai=args.texture_ai)
+                 render_engine=args.render_engine, texture_ai=args.texture_ai,
+                 game_ready_mode=args.game_ready, game_engine=args.game_engine,
+                 lod0_tris=args.lod0_tris)
     if report and not args.no_preview:
         try:
             import preview

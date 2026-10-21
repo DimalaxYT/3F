@@ -1,0 +1,125 @@
+{
+  "asset_name": "sci_fi_crate",
+  "high_poly_tris": 4416,
+  "lods": {
+    "LOD0": {
+      "tris": 2800,
+      "path": "examples/sci_fi_crate/game_ready/sci_fi_crate_game.glb",
+      "bytes": 661340
+    },
+    "LOD1": {
+      "tris": 1120,
+      "path": "examples/sci_fi_crate/game_ready/sci_fi_crate_LOD1.glb",
+      "bytes": 273932
+    },
+    "LOD2": {
+      "tris": 420,
+      "path": "examples/sci_fi_crate/game_ready/sci_fi_crate_LOD2.glb",
+      "bytes": 112748
+    }
+  },
+  "draw_calls_before": 25,
+  "draw_calls_after": 2,
+  "poly_reduction_pct": 36.59,
+  "physics_colliders": {
+    "count": 6,
+    "total_tris": 164,
+    "path": "examples/sci_fi_crate/game_ready/sci_fi_crate_colliders.glb"
+  },
+  "sockets": {
+    "SOCKET_lid_latch": {
+      "position": [
+        0.0,
+        -0.28,
+        0.38
+      ],
+      "rotation_deg": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "SOCKET_top_mount": {
+      "position": [
+        0.0,
+        0.0,
+        0.5
+      ],
+      "rotation_deg": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "SOCKET_origin_ground": {
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ]
+    },
+    "SOCKET_top": {
+      "position": [
+        0.0,
+        0.0,
+        0.506
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ]
+    },
+    "SOCKET_interact": {
+      "position": [
+        0.0,
+        -0.29800000000000004,
+        0.253
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ]
+    },
+    "SOCKET_lid": {
+      "position": [
+        0.0,
+        0.25760000000000005,
+        0.38
+      ],
+      "rotation_deg": [
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "has_explicit_mikk_tangents": true,
+  "webp_compressed": true,
+  "engine_exports": {
+    "unreal": {
+      "static_mesh_with_ucx": "examples/sci_fi_crate/game_ready/unreal/SM_sci_fi_crate.glb",
+      "base_color": "examples/sci_fi_crate/game_ready/unreal/T_sci_fi_crate_BC.png",
+      "orm_packed": "examples/sci_fi_crate/game_ready/unreal/T_sci_fi_crate_ORM.png",
+      "normal_directx_neg_y": "examples/sci_fi_crate/game_ready/unreal/T_sci_fi_crate_N.png"
+    },
+    "unity": {
+      "prefab_glb": "examples/sci_fi_crate/game_ready/sci_fi_crate_game.glb",
+      "base_map": "examples/sci_fi_crate/game_ready/unity/T_sci_fi_crate_BaseMap.png",
+      "hdrp_mask_map_rgba": "examples/sci_fi_crate/game_ready/unity/T_sci_fi_crate_MaskMap.png",
+      "normal_opengl_pos_y": "examples/sci_fi_crate/game_ready/unity/T_sci_fi_crate_NormalGL.png"
+    },
+    "godot": {
+      "scene_with_colonly": "examples/sci_fi_crate/game_ready/godot/sci_fi_crate_godot.glb"
+    }
+  },
+  "delight_metrics": {},
+  "qa_sheet": "examples/sci_fi_crate/game_ready/qa_game_sheet.png",
+  "duration_s": 36.5
+}

@@ -773,8 +773,21 @@ class Builder:
         self._parts = []   # (mesh, Material|None, label)
         self._part_groups = {}  # part_index -> group_name
         self._joints = {}  # group_name -> {"pivot": [x,y,z], "axis": [ax,ay,az], "kind": str}
+        self._sockets = {}  # socket_name -> {"position": [x,y,z], "rotation_deg": [rx,ry,rz]}
         self._baked_scene: trimesh.Scene | None = None
         self._baked_maps: tuple | None = None
+
+    def def_socket(self, name: str, pos=(0.0, 0.0, 0.0), rot_deg=(0.0, 0.0, 0.0)) -> str:
+        """Déclare un point d'attache gameplay (`SOCKET_grip`, `SOCKET_muzzle`, `SOCKET_tip`,
+        `SOCKET_light_0`...) exporté comme nœud Xform nommé dans le `.glb` final."""
+        clean = re.sub(r"[^A-Za-z0-9_\-]", "_", name)
+        if not clean.upper().startswith("SOCKET_"):
+            clean = f"SOCKET_{clean}"
+        self._sockets[clean] = {
+            "position": [float(pos[0]), float(pos[1]), float(pos[2])],
+            "rotation_deg": [float(rot_deg[0]), float(rot_deg[1]), float(rot_deg[2])],
+        }
+        return clean
 
     def def_joint(self, group: str, pivot=(0.0, 0.0, 0.0), axis=(0.0, 1.0, 0.0),
                   kind: str = "revolute"):
@@ -931,6 +944,7 @@ class Builder:
             sc.add_geometry(g, node_name=gname, geom_name=gname, parent_node_name=parent)
 
         sc.metadata["joints"] = dict(self._joints)
+        sc.metadata["sockets"] = dict(self._sockets)
         return sc
 
     def union_solid(self) -> trimesh.Trimesh:
@@ -1028,16 +1042,64 @@ def export_obj_with_mtl(scene: trimesh.Scene, obj_path: str) -> str:
     return obj_path
 
 
-def export_glb_pbr(scene: trimesh.Scene, glb_path: str) -> str:
-    """Exporte `scene` en `.glb` binaire et enrichit son chunk JSON glTF 2.0 avec :
-      - les extensions officielles `KHR_materials_transmission`, `KHR_materials_ior`,
-        `KHR_materials_clearcoat` pour le vrai verre réfractif et le vernis auto,
-      - les métadonnées d'articulation (`extras.joint = {pivot, axis, kind}`) sur
-        chaque nœud d'assemblage déclaré via `Builder.def_joint(...)`."""
+def compute_mikk_tangents(mesh: trimesh.Trimesh, uv: np.ndarray | None = None) -> np.ndarray:
+    """Calcule l'attribut glTF 2.0 `TANGENT` (`(V, 4)` float32 : `Tx, Ty, Tz, w`)
+    orthonormalisé par Gram-Schmidt avec signe de bitangente `w ∈ {-1.0, +1.0}`.
+    Élimine les coutures d'éclairage Normal Map sous Unreal Engine, Unity, Godot et Three.js !"""
+    verts = np.asarray(mesh.vertices, dtype=np.float64)
+    nrms = np.asarray(mesh.vertex_normals, dtype=np.float64)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    n_v = len(verts)
+    if uv is None:
+        uv = getattr(mesh.visual, "uv", None)
+    if uv is None or len(uv) != n_v or len(faces) == 0:
+        # Repère tangent orthonormé canonique sans UV
+        up = np.where(np.abs(nrms[:, 2:3]) < 0.9, np.array([[0.0, 0.0, 1.0]]), np.array([[1.0, 0.0, 0.0]]))
+        t = np.cross(up, nrms)
+        t /= np.linalg.norm(t, axis=1, keepdims=True) + 1e-12
+        return np.column_stack([t, np.ones(n_v, dtype=np.float64)]).astype(np.float32)
+
+    uv = np.asarray(uv, dtype=np.float64)
+    i0, i1, i2 = faces[:, 0], faces[:, 1], faces[:, 2]
+    e1 = verts[i1] - verts[i0]
+    e2 = verts[i2] - verts[i0]
+    duv1 = uv[i1] - uv[i0]
+    duv2 = uv[i2] - uv[i0]
+    denom = duv1[:, 0] * duv2[:, 1] - duv2[:, 0] * duv1[:, 1]
+    inv = np.where(np.abs(denom) > 1e-12, 1.0 / np.where(np.abs(denom) > 1e-12, denom, 1.0), 0.0)
+    sdir = (duv2[:, 1:2] * e1 - duv1[:, 1:2] * e2) * inv[:, None]
+    tdir = (duv1[:, 0:1] * e2 - duv2[:, 0:1] * e1) * inv[:, None]
+
+    tan1 = np.zeros((n_v, 3), dtype=np.float64)
+    tan2 = np.zeros((n_v, 3), dtype=np.float64)
+    np.add.at(tan1, i0, sdir); np.add.at(tan1, i1, sdir); np.add.at(tan1, i2, sdir)
+    np.add.at(tan2, i0, tdir); np.add.at(tan2, i1, tdir); np.add.at(tan2, i2, tdir)
+
+    t = tan1 - nrms * np.sum(nrms * tan1, axis=1, keepdims=True)
+    t_len = np.linalg.norm(t, axis=1, keepdims=True)
+    fallback = np.cross(
+        np.where(np.abs(nrms[:, 2:3]) < 0.9, np.array([[0.0, 0.0, 1.0]]), np.array([[1.0, 0.0, 0.0]])),
+        nrms,
+    )
+    fallback /= np.linalg.norm(fallback, axis=1, keepdims=True) + 1e-12
+    t = np.where(t_len > 1e-9, t / np.maximum(t_len, 1e-9), fallback)
+    w = np.where(np.sum(np.cross(nrms, t) * tan2, axis=1) < 0.0, -1.0, 1.0)
+    return np.column_stack([t, w]).astype(np.float32)
+
+
+def export_glb_pbr(scene: trimesh.Scene, glb_path: str, webp: bool = False) -> str:
+    """Exporte `scene` en `.glb` binaire standard glTF 2.0 Game-Ready (`v5`) avec :
+      - Attribut `TANGENT` (`VEC4`, `FLOAT`) explicite sur chaque primitive texturée UV,
+      - Extensions officielles `KHR_materials_transmission`, `KHR_materials_ior`,
+        `KHR_materials_clearcoat` (+ `EXT_texture_webp` si `webp=True`),
+      - Pistes d'animations standards `gltf.animations` (quaternions) générées
+        automatiquement depuis `joints` (roues, charnières, tourelles, portes),
+      - Nœuds vides nommés `SOCKET_*` pour l'attachement gameplay direct en moteur."""
+    import io
     import json
     import struct
 
-    scene.export(glb_path)
+    scene.export(glb_path, include_normals=True)
     mat_exts = {}
     for geom in scene.geometry.values():
         m = getattr(geom.visual, "material", None)
@@ -1059,22 +1121,140 @@ def export_glb_pbr(scene: trimesh.Scene, glb_path: str) -> str:
         if ext:
             mat_exts[m.name] = ext
 
-    joints = (scene.metadata or {}).get("joints") or {}
-    if not mat_exts and not joints:
-        return glb_path
+    meta = scene.metadata or {}
+    joints = meta.get("joints") or {}
+    sockets = meta.get("sockets") or {}
 
     with open(glb_path, "rb") as fh:
         raw = fh.read()
-    magic, version, total_len = struct.unpack_from("<III", raw, 0)
+    magic, version, _ = struct.unpack_from("<III", raw, 0)
     if magic != 0x46546C67:
         return glb_path
     j_len, j_type = struct.unpack_from("<II", raw, 12)
     if j_type != 0x4E4F534A:
         return glb_path
     gltf = json.loads(raw[20:20 + j_len].decode("utf-8"))
-    rest = raw[20 + j_len:]
+    bin_off = 20 + j_len
+    if bin_off + 8 <= len(raw):
+        b_len, b_type = struct.unpack_from("<II", raw, bin_off)
+        bin_data = bytearray(raw[bin_off + 8:bin_off + 8 + b_len])
+    else:
+        b_type = 0x004E4942
+        bin_data = bytearray()
 
+    def _append_bytes(payload: bytes, target: int | None = None) -> int:
+        while len(bin_data) % 4 != 0:
+            bin_data.append(0)
+        offset = len(bin_data)
+        bin_data.extend(payload)
+        while len(bin_data) % 4 != 0:
+            bin_data.append(0)
+        bv = {"buffer": 0, "byteOffset": offset, "byteLength": len(payload)}
+        if target is not None:
+            bv["target"] = target
+        gltf.setdefault("bufferViews", []).append(bv)
+        return len(gltf["bufferViews"]) - 1
+
+    # 1. Injecte `TANGENT` (VEC4 float32) sur chaque primitive disposant de `POSITION` + `NORMAL` + `TEXCOORD_0`
+    acc_list = gltf.setdefault("accessors", [])
+    bv_list = gltf.setdefault("bufferViews", [])
+
+    def _read_acc_f32(acc_idx: int, n_comp: int) -> np.ndarray | None:
+        acc = acc_list[acc_idx]
+        if acc.get("componentType") != 5126:
+            return None
+        bv = bv_list[acc["bufferView"]]
+        start = int(bv.get("byteOffset", 0)) + int(acc.get("byteOffset", 0))
+        cnt = int(acc["count"])
+        stride = int(bv.get("byteStride") or (n_comp * 4))
+        if stride == n_comp * 4:
+            return np.frombuffer(bin_data, dtype="<f4", count=cnt * n_comp, offset=start).reshape(cnt, n_comp).copy()
+        out_a = np.empty((cnt, n_comp), dtype=np.float32)
+        for k in range(cnt):
+            out_a[k] = np.frombuffer(bin_data, dtype="<f4", count=n_comp, offset=start + k * stride)
+        return out_a
+
+    def _read_indices(acc_idx: int) -> np.ndarray:
+        acc = acc_list[acc_idx]
+        bv = bv_list[acc["bufferView"]]
+        start = int(bv.get("byteOffset", 0)) + int(acc.get("byteOffset", 0))
+        cnt = int(acc["count"])
+        ctype = acc["componentType"]
+        dt = {5121: np.uint8, 5123: "<u2", 5125: "<u4"}[ctype]
+        return np.frombuffer(bin_data, dtype=dt, count=cnt, offset=start).astype(np.int64)
+
+    for mesh_def in gltf.get("meshes", []):
+        for prim in mesh_def.get("primitives", []):
+            attrs = prim.get("attributes", {})
+            if "TANGENT" in attrs or "TEXCOORD_0" not in attrs or "POSITION" not in attrs:
+                continue
+            pos_a = _read_acc_f32(attrs["POSITION"], 3)
+            uv_a = _read_acc_f32(attrs["TEXCOORD_0"], 2)
+            if pos_a is None or uv_a is None:
+                continue
+            if "indices" in prim:
+                f_idx = _read_indices(prim["indices"]).reshape(-1, 3)
+            else:
+                f_idx = np.arange(len(pos_a), dtype=np.int64).reshape(-1, 3)
+            if "NORMAL" in attrs:
+                nrm_a = _read_acc_f32(attrs["NORMAL"], 3)
+            else:
+                tmp_n = trimesh.Trimesh(vertices=pos_a, faces=f_idx, process=False)
+                nrm_a = np.asarray(tmp_n.vertex_normals, dtype=np.float32)
+                bv_n = _append_bytes(nrm_a.astype("<f4").tobytes(), target=34962)
+                acc_list.append({
+                    "bufferView": bv_n,
+                    "byteOffset": 0,
+                    "componentType": 5126,
+                    "count": int(len(nrm_a)),
+                    "type": "VEC3",
+                    "min": [float(x) for x in nrm_a.min(axis=0)],
+                    "max": [float(x) for x in nrm_a.max(axis=0)],
+                })
+                attrs["NORMAL"] = len(acc_list) - 1
+            if nrm_a is None:
+                continue
+            tmp_m = trimesh.Trimesh(vertices=pos_a, faces=f_idx, vertex_normals=nrm_a, process=False)
+            tang = compute_mikk_tangents(tmp_m, uv_a)
+            bv_i = _append_bytes(tang.astype("<f4").tobytes(), target=34962)
+            acc_list.append({
+                "bufferView": bv_i,
+                "byteOffset": 0,
+                "componentType": 5126,
+                "count": int(len(tang)),
+                "type": "VEC4",
+                "min": [float(x) for x in tang.min(axis=0)],
+                "max": [float(x) for x in tang.max(axis=0)],
+            })
+            attrs["TANGENT"] = len(acc_list) - 1
+
+    # 2. Compression WebP sans coutures (`EXT_texture_webp`) optionnelle sur les images embarquées
     used = set(gltf.get("extensionsUsed", []))
+    if webp and gltf.get("images") and gltf.get("textures"):
+        from PIL import Image as _PILImage
+        for img_def in gltf.get("images", []):
+            if "bufferView" not in img_def:
+                continue
+            bv = bv_list[img_def["bufferView"]]
+            s0 = int(bv.get("byteOffset", 0))
+            s1 = s0 + int(bv["byteLength"])
+            try:
+                pil_im = _PILImage.open(io.BytesIO(bytes(bin_data[s0:s1])))
+                wbuf = io.BytesIO()
+                pil_im.save(wbuf, format="WEBP", quality=90, method=4)
+                wbytes = wbuf.getvalue()
+                new_bv = _append_bytes(wbytes)
+                img_def["bufferView"] = new_bv
+                img_def["mimeType"] = "image/webp"
+            except Exception:
+                continue
+        for tex_def in gltf.get("textures", []):
+            src_i = tex_def.get("source")
+            if src_i is not None and gltf["images"][src_i].get("mimeType") == "image/webp":
+                tex_def.setdefault("extensions", {})["EXT_texture_webp"] = {"source": src_i}
+                used.add("EXT_texture_webp")
+
+    # 3. Extensions matériaux PBR avancées
     for m_def in gltf.get("materials", []):
         nm = m_def.get("name")
         if nm in mat_exts:
@@ -1083,17 +1263,123 @@ def export_glb_pbr(scene: trimesh.Scene, glb_path: str) -> str:
     if used:
         gltf["extensionsUsed"] = sorted(used)
 
-    if joints:
-        for n_def in gltf.get("nodes", []):
-            nm = n_def.get("name")
-            if nm in joints:
-                n_def.setdefault("extras", {})["joint"] = joints[nm]
+    # 4. Nœuds `SOCKET_*` gameplay + pistes `gltf.animations` standards sur `joints` !
+    nodes = gltf.setdefault("nodes", [])
+    scenes = gltf.setdefault("scenes", [{"nodes": []}])
+    root_children = scenes[0].setdefault("nodes", [])
+    existing_names = {n.get("name") for n in nodes}
 
+    for sname, sinfo in sockets.items():
+        if sname in existing_names:
+            continue
+        p = sinfo["position"]
+        rx, ry, rz = [math.radians(a) * 0.5 for a in sinfo.get("rotation_deg", [0, 0, 0])]
+        cx, sx = math.cos(rx), math.sin(rx)
+        cy, sy = math.cos(ry), math.sin(ry)
+        cz, sz = math.cos(rz), math.sin(rz)
+        quat = [
+            sx * cy * cz - cx * sy * sz,
+            cx * sy * cz + sx * cy * sz,
+            cx * cy * sz - sx * sy * cz,
+            cx * cy * cz + sx * sy * sz,
+        ]
+        nodes.append({
+            "name": sname,
+            "translation": [float(p[0]), float(p[1]), float(p[2])],
+            "rotation": [round(float(q), 6) for q in quat],
+            "extras": {"socket": True},
+        })
+        root_children.append(len(nodes) - 1)
+
+    if joints:
+        anim_channels = []
+        anim_samplers = []
+        for idx_n, n_def in enumerate(nodes):
+            nm = n_def.get("name")
+            if nm not in joints:
+                continue
+            jinfo = joints[nm]
+            n_def.setdefault("extras", {})["joint"] = jinfo
+            ax = np.asarray(jinfo.get("axis", [0.0, 1.0, 0.0]), dtype=np.float64)
+            ax /= np.linalg.norm(ax) + 1e-12
+            is_spin = any(k in nm.lower() for k in ("wheel", "axle", "prop", "rotor", "fan", "turret"))
+            if is_spin:
+                times = np.array([0.0, 0.5, 1.0, 1.5, 2.0], dtype=np.float32)
+                angs = [0.0, 0.5 * math.pi, math.pi, 1.5 * math.pi, 2.0 * math.pi]
+            else:
+                times = np.array([0.0, 0.8, 1.6, 2.4], dtype=np.float32)
+                angs = [0.0, math.radians(65.0), math.radians(65.0), 0.0]
+            quats = np.array(
+                [[ax[0] * math.sin(a / 2), ax[1] * math.sin(a / 2), ax[2] * math.sin(a / 2), math.cos(a / 2)]
+                 for a in angs],
+                dtype=np.float32,
+            )
+            bv_t = _append_bytes(times.astype("<f4").tobytes())
+            acc_list.append({
+                "bufferView": bv_t, "componentType": 5126, "count": len(times), "type": "SCALAR",
+                "min": [float(times.min())], "max": [float(times.max())],
+            })
+            t_acc = len(acc_list) - 1
+            bv_q = _append_bytes(quats.astype("<f4").tobytes())
+            acc_list.append({
+                "bufferView": bv_q, "componentType": 5126, "count": len(quats), "type": "VEC4",
+                "min": [float(x) for x in quats.min(axis=0)], "max": [float(x) for x in quats.max(axis=0)],
+            })
+            q_acc = len(acc_list) - 1
+            anim_samplers.append({"input": t_acc, "interpolation": "LINEAR", "output": q_acc})
+            anim_channels.append({"sampler": len(anim_samplers) - 1,
+                                  "target": {"node": idx_n, "path": "rotation"}})
+        if anim_channels:
+            gltf.setdefault("animations", []).append({
+                "name": "Idle_Action",
+                "samplers": anim_samplers,
+                "channels": anim_channels,
+            })
+
+    # Compacte le chunk binaire `BIN` pour purger tout ancien buffer PNG remplacé par WebP !
+    referenced_bvs: set[int] = set()
+    for acc_d in gltf.get("accessors", []):
+        if "bufferView" in acc_d:
+            referenced_bvs.add(int(acc_d["bufferView"]))
+    for img_d in gltf.get("images", []):
+        if "bufferView" in img_d:
+            referenced_bvs.add(int(img_d["bufferView"]))
+
+    compact_bin = bytearray()
+    new_bvs = []
+    old_to_new: dict[int, int] = {}
+    for old_i, bv_d in enumerate(gltf.get("bufferViews", [])):
+        if old_i not in referenced_bvs:
+            continue
+        s0 = int(bv_d.get("byteOffset", 0))
+        ln = int(bv_d["byteLength"])
+        while len(compact_bin) % 4 != 0:
+            compact_bin.append(0)
+        nbv = dict(bv_d)
+        nbv["byteOffset"] = len(compact_bin)
+        compact_bin.extend(bin_data[s0:s0 + ln])
+        old_to_new[old_i] = len(new_bvs)
+        new_bvs.append(nbv)
+    while len(compact_bin) % 4 != 0:
+        compact_bin.append(0)
+    gltf["bufferViews"] = new_bvs
+    for acc_d in gltf.get("accessors", []):
+        if "bufferView" in acc_d:
+            acc_d["bufferView"] = old_to_new[int(acc_d["bufferView"])]
+    for img_d in gltf.get("images", []):
+        if "bufferView" in img_d:
+            img_d["bufferView"] = old_to_new[int(img_d["bufferView"])]
+    bin_data = compact_bin
+
+    if gltf.get("buffers"):
+        gltf["buffers"][0]["byteLength"] = len(bin_data)
     j_bytes = json.dumps(gltf, separators=(",", ":")).encode("utf-8")
     pad = (4 - (len(j_bytes) % 4)) % 4
     j_bytes += b" " * pad
-    out = struct.pack("<III", magic, version, 12 + 8 + len(j_bytes) + len(rest))
-    out += struct.pack("<II", len(j_bytes), 0x4E4F534A) + j_bytes + rest
+    total_len = 12 + 8 + len(j_bytes) + 8 + len(bin_data)
+    out = struct.pack("<III", magic, version, total_len)
+    out += struct.pack("<II", len(j_bytes), 0x4E4F534A) + j_bytes
+    out += struct.pack("<II", len(bin_data), b_type) + bytes(bin_data)
     with open(glb_path, "wb") as fh:
         fh.write(out)
     return glb_path
