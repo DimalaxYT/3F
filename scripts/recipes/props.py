@@ -99,23 +99,37 @@ def build_katana(length=0.98, sori=0.018, ito_color="#1c1e24",
     fuchi = mk.rounded_box(0.038 * u, 0.024 * u, 0.016 * u, r=0.004 * u)
     b.add(fuchi, lacquer_m, name="fuchi", at=(0, 0, 0.283 * u))
 
-    # 2. Seppa + Tsuba ronde ajourée (CSG) + Seppa haut + Habaki laiton
+    # 2. Seppa + Tsuba mokko-gata ajourée en bronze ciselé (CSG) + Menuki d'or + Habaki laiton
+    for sy in (-1, 1):
+        menuki = mk.rounded_box(0.024 * u, 0.0055 * u, 0.011 * u, r=0.0028 * u)
+        b.add(menuki, mk.mat.named_metal("gold", 0.20), name=f"menuki_{sy}",
+              at=(0.0, sy * 0.0094 * u, 0.148 * u))
+
     b.add(mk.rounded_box(0.042 * u, 0.026 * u, 0.004 * u, r=0.0012 * u),
           brass_m, name="seppa_low", at=(0, 0, 0.297 * u))
 
-    tsuba = mk.cylinder(0.041 * u, 0.0065 * u, sections=56)
+    # Tsuba quadrilobée japonaise `mokko-gata` + 4 ajours symétriques `sukashi`
+    ths_t = np.linspace(0, 2 * math.pi, 72, endpoint=False)
+    r_mokko = 0.042 * u * (1.0 - 0.085 * np.cos(4.0 * ths_t))
+    tsuba_prof = [(float(r * math.cos(t) * 1.04), float(r * math.sin(t) * 0.88))
+                  for r, t in zip(r_mokko, ths_t)]
+    tsuba = mk.extrude(tsuba_prof, 0.0072 * u)
     mk.place(tsuba, 0, 0, 0.300 * u)
     cutouts = []
     for sx in (-1, 1):
-        slot = mk.cylinder(0.0115 * u, 0.020 * u, sections=24)
-        mk.scale(slot, (0.68, 1.25, 1.0))
-        mk.place(slot, sx * 0.021 * u, 0, 0.294 * u)
+        slot = mk.cylinder(0.0108 * u, 0.024 * u, sections=24)
+        mk.scale(slot, (0.64, 1.32, 1.0))
+        mk.place(slot, sx * 0.0215 * u, 0, 0.293 * u)
         cutouts.append(slot)
+    for sy in (-1, 1):
+        sub_h = mk.cylinder(0.0058 * u, 0.024 * u, sections=18)
+        mk.place(sub_h, 0.0, sy * 0.0215 * u, 0.293 * u)
+        cutouts.append(sub_h)
     tsuba = mk.difference(tsuba, cutouts)
     b.add(tsuba, tsuba_m, name="tsuba")
 
     b.add(mk.rounded_box(0.042 * u, 0.026 * u, 0.004 * u, r=0.0012 * u),
-          brass_m, name="seppa_top", at=(0, 0, 0.3055 * u))
+          brass_m, name="seppa_top", at=(0, 0, 0.3062 * u))
 
     # Habaki profilé épousant déjà l'amorce trapézoïdale de la lame
     hab_prof = [(-0.0165 * u, 0.0), (-0.004 * u, 0.0052 * u),
@@ -124,33 +138,32 @@ def build_katana(length=0.98, sori=0.018, ito_color="#1c1e24",
                       scale=[(1.04, 1.06), (0.98, 0.98)])
     b.add(habaki, brass_m, name="habaki")
 
-    # 3. Lame shinogi-zukuri continue par sweep() :
-    #    dos épais (mune, -X), arêtes shinogi (±Y), tranchant rasoir (ha, +X),
-    #    courbure sori lisse vers -X et pointe kissaki géométrique nette.
+    # 3. Lame shinogi-zukuri continue AVEC gouttière `bo-hi` creusée le long du dos (`mune`) !
     blade_prof = np.array([
         [-0.0155,  0.0000],   # mune (dos)
         [-0.0135,  0.0036],   # flanc mune +Y
+        [-0.0112,  0.0024],   # fond de gouttière bo-hi +Y !
+        [-0.0068,  0.0025],   # bord de gouttière bo-hi +Y !
         [-0.0035,  0.0039],   # arête shinogi +Y
         [ 0.0155,  0.00035],  # tranchant ha (+X)
         [ 0.0155, -0.00035],
         [-0.0035, -0.0039],   # arête shinogi -Y
+        [-0.0068, -0.0025],   # bord de gouttière bo-hi -Y !
+        [-0.0112, -0.0024],   # fond de gouttière bo-hi -Y !
         [-0.0135, -0.0036],   # flanc mune -Y
     ]) * u
 
-    n_st = 56
+    n_st = 32
     ts = np.linspace(0.0, 1.0, n_st)
     z0_b, z1_b = 0.334 * u, float(length)
-    # Le dos (mune) se courbe vers -X selon une parabole douce (sori authentique)
     xs_path = -float(sori) * (ts ** 1.75)
     zs_path = z0_b + (z1_b - z0_b) * ts
     blade_path = np.column_stack([xs_path, np.zeros_like(ts), zs_path])
 
     def _blade_taper(t: float):
-        # Réduction progressive (fumbari -> motohaba -> sakihaba -> kissaki)
         w_t = 1.0 - 0.24 * (t ** 1.15)
         th_t = 1.0 - 0.34 * (t ** 1.05)
         if t > 0.915:
-            # Kissaki : le tranchant remonte franchement vers la pointe
             u_k = (t - 0.915) / 0.085
             k_fac = max(0.035, (1.0 - u_k) ** 0.82)
             w_t *= k_fac
@@ -159,12 +172,14 @@ def build_katana(length=0.98, sori=0.018, ito_color="#1c1e24",
 
     blade = mk.sweep(blade_prof, blade_path, scale=_blade_taper)
     b.add(blade, steel_m, name="blade")
+    b.def_socket("SOCKET_grip", pos=(0.0, 0.0, 0.145 * u))
+    b.def_socket("SOCKET_tip", pos=(float(xs_path[-1]), 0.0, float(z1_b)))
 
     if textured:
         b.bake_pbr(
             overlays=[
                 {"type": "wrap", "on": "tsuka", "diamond": True,
-                 "under_color": same_color, "count": 9.5, "ribbon_width": 0.35},
+                 "under_color": same_color, "count": 9.5, "ribbon_width": 0.58},
                 {"type": "brushed_metal", "on": "blade", "axis": "z",
                  "scale": 170.0, "amount": 0.11},
                 {"type": "hamon", "on": "blade", "axis": "x",
@@ -173,7 +188,7 @@ def build_katana(length=0.98, sori=0.018, ito_color="#1c1e24",
                  "amount": 0.45, "scale": 20.0},
             ],
             texture_size=1024,
-            normal_strength=1.8,
+            normal_strength=2.2,
         )
     return b
 
@@ -912,91 +927,154 @@ def build_motocross(length=2.2, body_color="#e8641b", plate_color="#f2f1ec",
 
 
 @register("sci_fi_crate",
-          defaults={"width": 0.86, "depth": 0.56, "height": 0.50,
-                    "body_color": "#38414a", "accent_color": "#d68a1c"},
+          defaults={"width": 0.88, "depth": 0.58, "height": 0.52,
+                    "body_color": "#2b3540", "accent_color": "#e09119"},
           info=[{"name": "width", "type": "float", "help": "Largeur X en m"},
                 {"name": "depth", "type": "float", "help": "Profondeur Y en m"},
                 {"name": "height", "type": "float", "help": "Hauteur Z en m"},
-                {"name": "body_color", "type": "color", "help": "Acier peint principal"},
-                {"name": "accent_color", "type": "color", "help": "Renforts / loquets tactiques"}])
-def build_sci_fi_crate(width=0.86, depth=0.56, height=0.50,
-                       body_color="#38414a", accent_color="#d68a1c"):
-    """Caisse de ravitaillement blindée Sci-Fi / Tactique Game-Ready (`v5`) :
-    coque acier chanfreinée à nervures creusées en CSG, pare-chocs d'angle boulonnés,
-    poignées latérales tubulaires cintrées (`tube_sweep`), loquets de verrouillage
-    avant, bandeau LED d'état cyan, couvercle supérieur articulé (`lid` sur charnières)
-    et sockets gameplay (`SOCKET_lid_latch`, `SOCKET_top_mount`). 100 % étanche !"""
+                {"name": "body_color", "type": "color", "help": "Émail blindé principal"},
+                {"name": "accent_color", "type": "color", "help": "Plaques d'accent & danger"}])
+def build_sci_fi_crate(width=0.88, depth=0.58, height=0.52,
+                       body_color="#2b3540", accent_color="#e09119"):
+    """Caisse de ravitaillement Hard-Surface AAA (`v5.1` — `greebles.py`) :
+    - Coque octogonale évasée (`mk.loft` trapézoïdal, 0 simple boîte cubique !),
+    - 4 sabots d'armure d'angle facettés à poches CSG (`grb.corner_armor_cap`) + boulons 6-pans,
+    - 4 loquets mécaniques articulés à étrier acier cintré (`grb.toggle_latch`),
+    - 2 grilles d'aération latérales à persiennes inclinées (`grb.louver_vent`),
+    - 2 poignées ergonomiques moulées et boulonnées (`grb.ergonomic_handle`),
+    - 2 rails tactiques crantés MIL-STD-1913 sur le couvercle articulé (`grb.picatinny_rail`),
+    - Plaques obliques à chevrons industriels (`hazard_plate_*`) & bandeau LED cyan (`Neon_*`).
+    100 % `is_watertight == True` !"""
+    import greebles as grb
+
     b = mk.Builder("sci_fi_crate", {})
     W, D, H = float(width), float(depth), float(height)
-    lid_z = H * 0.76
+    lid_z = H * 0.74
 
-    shell_m = mk.mat.forged_iron(body_color, 0.44)
-    dark_m = mk.mat.knobby_rubber("#1f2328", 0.72)
-    accent_m = mk.mat.car_clearcoat(accent_color, 0.28)
-    steel_m = mk.mat.brushed_stainless("#cfd5dd", 0.22)
-    led_m = mk.mat.emissive("#3af0ff", 2.4)
+    shell_m = mk.Material("painted_armor", body_color, metallic=0.36, roughness=0.38,
+                          clearcoat=0.25, clearcoat_roughness=0.18)
+    dark_poly_m = mk.Material("matte_rubber", "#1b1f24", metallic=0.0, roughness=0.76)
+    hazard_m = mk.Material("hazard_stripe", accent_color, metallic=0.18, roughness=0.34)
+    steel_m = mk.Material("brushed_steel", "#d2d8e0", metallic=0.92, roughness=0.22)
+    led_m = mk.mat.emissive("#3af0ff", 2.6)
 
-    # Articulation de charnière arrière du couvercle blindé + Sockets Gameplay
-    b.def_joint("lid", pivot=(0.0, D * 0.46, lid_z), axis=(1.0, 0.0, 0.0))
-    b.def_socket("SOCKET_lid_latch", pos=(0.0, -D * 0.50, lid_z))
-    b.def_socket("SOCKET_top_mount", pos=(0.0, 0.0, H))
+    b.def_joint("lid", pivot=(0.0, D * 0.455, lid_z), axis=(1.0, 0.0, 0.0))
+    b.def_socket("SOCKET_lid_latch", pos=(0.0, -D * 0.51, lid_z))
+    b.def_socket("SOCKET_top_mount", pos=(0.0, 0.0, H + 0.012))
 
-    # 1. Cuve blindée inférieure creusée de niches latérales CSG pour les nervures & poignées
-    base_h = lid_z + 0.012
-    hull = mk.chamfer_box(W, D, base_h, c=0.022)
+    def _oct_profile(hw: float, hd: float, cut: float) -> list[tuple[float, float]]:
+        return [
+            (-hw + cut, -hd), (hw - cut, -hd),
+            ( hw, -hd + cut), (hw,  hd - cut),
+            ( hw - cut,  hd), (-hw + cut,  hd),
+            (-hw,  hd - cut), (-hw, -hd + cut),
+        ]
+
+    # 1. Coque octogonale profilée à ceinture évasée + caissons latéraux creusés en CSG
+    base_h = lid_z + 0.010
+    p_bot = _oct_profile(W * 0.465, D * 0.465, 0.042)
+    p_waist = _oct_profile(W * 0.500, D * 0.500, 0.048)
+    p_rim = _oct_profile(W * 0.492, D * 0.492, 0.046)
+    hull = mk.loft([
+        (p_bot, 0.016),
+        (p_waist, base_h * 0.18),
+        (p_waist, base_h * 0.84),
+        (p_rim, base_h),
+    ], caps=True)
+
     recesses = []
     for sy in (-1, 1):
-        rec = mk.chamfer_box(W * 0.68, 0.032, base_h * 0.56, c=0.008)
-        mk.place(rec, 0.0, sy * (D * 0.5 - 0.008), base_h * 0.22)
+        rec = mk.chamfer_box(W * 0.64, 0.036, base_h * 0.54, c=0.010)
+        mk.place(rec, 0.0, sy * (D * 0.50 - 0.012), base_h * 0.21)
         recesses.append(rec)
     for sx in (-1, 1):
-        rec_s = mk.chamfer_box(0.032, D * 0.58, base_h * 0.52, c=0.008)
-        mk.place(rec_s, sx * (W * 0.5 - 0.008), 0.0, base_h * 0.24)
+        rec_s = mk.chamfer_box(0.036, D * 0.56, base_h * 0.52, c=0.010)
+        mk.place(rec_s, sx * (W * 0.50 - 0.012), 0.0, base_h * 0.22)
         recesses.append(rec_s)
     b.add(mk.difference(hull, recesses), shell_m, name="armored_hull")
 
-    # 2. Patins de sol renforcés + 4 pare-chocs d'angle verticaux boulonnés
+    # 2. Patins amortisseurs inférieurs + 4 sabots d'angle facettés `grb.corner_armor_cap` + boulons 6-pans
     for sx in (-1, 1):
-        b.add(mk.chamfer_box(W * 0.22, D * 0.96, 0.024, c=0.005), dark_m,
-              name=f"skid_{sx}", at=(sx * W * 0.30, 0.0, 0.0))
+        b.add(mk.chamfer_box(W * 0.24, D * 0.90, 0.028, c=0.006), dark_poly_m,
+              name=f"skid_foot_{sx}", at=(sx * W * 0.29, 0.0, 0.0))
         for sy in (-1, 1):
-            b.add(mk.chamfer_box(0.068, 0.068, base_h * 0.96, c=0.012), dark_m,
-                  name=f"bumper_{sx}_{sy}",
-                  at=(sx * (W * 0.5 - 0.022), sy * (D * 0.5 - 0.022), 0.008))
+            cap = grb.corner_armor_cap(size=0.086, height=base_h * 0.94)
+            b.add(cap, dark_poly_m, name=f"corner_cap_{sx}_{sy}",
+                  at=(sx * (W * 0.472), sy * (D * 0.468), 0.014))
+            c_bolts = grb.bolt_array(
+                [
+                    [sx * (W * 0.472), sy * (D * 0.505), base_h * 0.82],
+                    [sx * (W * 0.472), sy * (D * 0.505), base_h * 0.16],
+                ],
+                [[0.0, float(sy), 0.0], [0.0, float(sy), 0.0]],
+                r=0.0085, h=0.007,
+            )
+            for bi, bm in enumerate(c_bolts):
+                b.add(bm, steel_m, name=f"cap_bolt_{sx}_{sy}_{bi}")
 
-    # 3. Nervures obliques d'armure + poignées tubulaires cintrées + loquets avant
+    # 3. Façades avant / arrière : 4 vrais loquets `toggle_latch` à étrier acier + plaques `hazard_stripe` !
     for sy in (-1, 1):
-        for k in (-1, 0, 1):
-            b.add(mk.chamfer_box(0.042, 0.026, base_h * 0.50, c=0.005), accent_m,
-                  name=f"rib_{sy}_{k}", at=(k * W * 0.21, sy * (D * 0.5 - 0.016), base_h * 0.25))
-        for lx in (-W * 0.22, W * 0.22):
-            b.add(mk.chamfer_box(0.056, 0.028, 0.105, c=0.005), steel_m,
-                  name=f"latch_{sy}_{lx:.2f}", at=(lx, sy * (D * 0.5 + 0.004), lid_z - 0.065))
+        yaw = 0.0 if sy < 0 else 180.0
+        b.add(mk.chamfer_box(W * 0.28, 0.022, base_h * 0.44, c=0.006), hazard_m,
+              name=f"hazard_plate_{sy}", at=(0.0, sy * (D * 0.50 - 0.022), base_h * 0.26))
+        for kx in (-1, 1):
+            rib = mk.chamfer_box(0.052, 0.026, base_h * 0.46, c=0.006)
+            mk.rot_y(rib, kx * 9.0)
+            b.add(rib, steel_m, name=f"stiffener_rib_{sy}_{kx}",
+                  at=(kx * W * 0.225, sy * (D * 0.50 - 0.018), base_h * 0.25))
 
+        for li, lx in enumerate((-W * 0.23, W * 0.23)):
+            for part_m, role in grb.toggle_latch(width=0.058, height=0.116, depth=0.026):
+                if yaw:
+                    mk.rot_z(part_m, yaw)
+                b.add(
+                    part_m,
+                    dark_poly_m if role == "housing" else steel_m,
+                    name=f"latch_{sy}_{li}_{role}",
+                    at=(lx, sy * (D * 0.50 - 0.004), lid_z - 0.048),
+                )
+
+    # 4. Flancs gauche / droit : grilles d'aération `louver_vent` + poignées `ergonomic_handle` !
     for sx in (-1, 1):
-        h_curve = np.array([
-            [sx * (W * 0.5 - 0.018), -0.095, base_h * 0.54],
-            [sx * (W * 0.5 + 0.022), -0.085, base_h * 0.46],
-            [sx * (W * 0.5 + 0.022),  0.085, base_h * 0.46],
-            [sx * (W * 0.5 - 0.018),  0.095, base_h * 0.54],
-        ])
-        b.add(mk.tube_sweep(h_curve, r=0.011, sections=14, smooth_pts=20),
-              steel_m, name=f"side_handle_{sx}")
+        vent = grb.louver_vent(width=D * 0.46, height=0.082, slats=5, depth=0.020)
+        mk.rot_z(vent, 90.0 if sx > 0 else -90.0)
+        b.add(vent, dark_poly_m, name=f"side_vent_{sx}",
+              at=(sx * (W * 0.50 - 0.016), 0.0, base_h * 0.66))
 
-    # Bandeau lumineux d'état énergétique encastré en façade avant
-    b.add(mk.rounded_box(W * 0.30, 0.016, 0.018, r=0.004), led_m,
-          name="status_led_front", at=(0.0, -D * 0.5 + 0.002, lid_z - 0.045))
+        for hi, (hm, hrole) in enumerate(grb.ergonomic_handle(span=0.185, reach=0.040, r=0.0105)):
+            if sx < 0:
+                mk.rot_z(hm, 180.0)
+            mat_h = dark_poly_m if hrole in ("mount", "grip") else steel_m
+            b.add(hm, mat_h, name=f"side_handle_{sx}_{hi}_{hrole}",
+                  at=(sx * (W * 0.50 - 0.018), 0.0, base_h * 0.36))
 
-    # 4. Couvercle supérieur blindé articulé (`group="lid"`) + rails tactiques sur le dessus
+    # 5. Bandeau LED d'état énergétique encastré (`Neon_*` automatique dans Roblox Studio !)
+    b.add(mk.rounded_box(W * 0.26, 0.018, 0.016, r=0.004), led_m,
+          name="status_led_front", at=(0.0, -D * 0.50 + 0.002, lid_z - 0.036))
+
+    # 6. Couvercle blindé octogonal articulé (`group="lid"`) + 2 rails tactiques `picatinny_rail` !
     lid_h = H - lid_z
-    b.add(mk.chamfer_box(W * 1.02, D * 1.02, lid_h, c=0.020), shell_m,
-          name="lid_cap", at=(0.0, 0.0, lid_z), group="lid")
+    p_lid_base = _oct_profile(W * 0.512, D * 0.512, 0.048)
+    p_lid_mid = _oct_profile(W * 0.504, D * 0.504, 0.050)
+    p_lid_top = _oct_profile(W * 0.458, D * 0.448, 0.056)
+    lid_body = mk.loft([
+        (p_lid_base, 0.0),
+        (p_lid_mid, lid_h * 0.42),
+        (p_lid_top, lid_h),
+    ], caps=True)
+    b.add(lid_body, shell_m, name="lid_cap", at=(0.0, 0.0, lid_z), group="lid")
+
+    b.add(mk.chamfer_box(W * 0.30, D * 0.72, 0.016, c=0.005), hazard_m,
+          name="lid_center_badge", at=(0.0, 0.0, H - 0.008), group="lid")
+
     for sx in (-1, 1):
-        b.add(mk.chamfer_box(W * 0.26, D * 0.88, 0.022, c=0.005), accent_m,
-              name=f"lid_armor_strip_{sx}", at=(sx * W * 0.26, 0.0, H - 0.016), group="lid")
+        rail = grb.picatinny_rail(length=D * 0.74, width=0.030, height=0.015, teeth=9)
+        b.add(rail, steel_m, name=f"lid_picatinny_rail_{sx}",
+              at=(sx * W * 0.285, 0.0, H - 0.004), group="lid")
+
     for hx in (-W * 0.28, W * 0.28):
-        b.add(mk.cylinder(0.018, 0.075, sections=18), steel_m,
+        b.add(mk.cylinder(0.019, 0.082, sections=20), steel_m,
               name=f"hinge_barrel_{hx:.2f}", rot=(0, 90, 0),
-              at=(hx - 0.0375, D * 0.5 - 0.006, lid_z), group="lid")
+              at=(hx - 0.041, D * 0.485, lid_z), group="lid")
     return b
 

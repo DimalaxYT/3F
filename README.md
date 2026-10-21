@@ -1,8 +1,20 @@
-# 3d-forge v5 🎮🟥⚔️🐉✨
+# 3d-forge v5.1 🎮🟥⚔️🐉✨
 
-**Moteur de génération d'Assets 3D Réalistes pensé en priorité pour Roblox Studio (`SurfaceAppearance` + `Studs` + `< 10k tris` + `Neon` + `Luau`) et Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`) — propulsé par CAO étanche + Sculpture Organique GPU (`gpu_sculpt.py`), zéro GPU requis côté utilisateur.**
+**Moteur Ultra Design & Texture PBR photoréaliste pensé en priorité pour Roblox Studio (`SurfaceAppearance` Dual-`1024²` + `Studs` + `< 10k tris` + `Neon` + `Luau`) et Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`) — propulsé par Kitbash Mécanique Hard-Surface (`greebles.py`) + Peinture Multi-Vues GPU Z-Buffer (`gpu_bridge.py`) + Sculpture Organique GPU (`gpu_sculpt.py`), zéro GPU requis côté utilisateur.**
 
-![Vitrine Technique 3d-forge v5 — AAA Game-Ready Asset Engine](docs/img/v5_game_ready_showcase.png)
+![Vitrine Technique 3d-forge v5.1 — Ultra Design & Texture Engine](docs/img/v5_1_ultra_showcase.png)
+
+> ### Nouveautés Majeures `3d-forge v5.1 — Ultra Design & Texture Engine`
+> 1. **Bibliothèque Mécanique Hard-Surface 100 % Étanche (`scripts/greebles.py`)** : `hex_bolt` (empreinte 6-pans creuse BTR), `bolt_array`, `toggle_latch` (loquet à étrier acier cintré `tube_sweep`), `louver_vent` (persiennes d'aération inclinées), `picatinny_rail` (rail cranté MIL-STD-1913), `ribbed_conduit`, `ergonomic_handle` et `corner_armor_cap` — zéro simple boîte cubique sur `sci_fi_crate` (`44` pièces mécaniques profilées -> **`3` Draw Calls** temps réel !).
+> 2. **Peinture Texture Multi-Vues GPU Datacenter à Z-Buffer Exact (`gpu_bridge.py` + `--ai-front/--ai-side/--ai-top`)** : génère des guides orthographiques millimétrés (`ortho_meta.json`), peint les pochoirs industriels (`CARGO BAY 04`, `CR-04`), micro-rayures et joints sur le GPU Datacenter, supprime l'éclairage studio (`delight.py`), puis reprojette dans l'UV avec **test d'occultation Z-buffer par caméra** (zéro bavure sur les faces cachées, couvercle articulé `lid` aligné au sous-pixel !).
+> 3. **Moteur PBR Sémantique 8 Archétypes & Micro-Tissage Analytique `1024²` (`game_ready.py`)** :
+>    - **`MAT_RUBBER_POLY`** : garantit `metallic == 0.0` strict sur le caoutchouc/polymère (zéro tache chromée parasite !).
+>    - **`MAT_PAINTED_ARMOR` & `MAT_HAZARD_STRIPE`** : préserve 95 % d'émail riche + éclats d'acier ciblés sur `curv > 0.54` + chevrons diagonaux 45° ultra-nets.
+>    - **`MAT_TSUKA_WRAP` & `MAT_TAMAHAGANE`** : tressage japonais *tsuka-maki* en soie tressée + nodules de galuchat *samegawa* + ligne de trempe ondulée *notare-choji hamon* évalués analytiquement sur chacun des `1 048 576` pixels !
+> 4. **Mode Haute Densité Texels Roblox Studio (`Blade_1024²` + `Hilt_1024²`) & Redressement UV PCA (`pbr.unwrap`)** : oriente automatiquement les îlots UV le long de leurs axes principaux et offre à la poignée `Hilt` et à la lame `Blade` chacune leur propre `SurfaceAppearance` `1024×1024` dans `<Name>_roblox.glb` (`4×` plus net en vue subjective Roblox tout en restant à `2` Draw Calls et `< 4 100 tris/part` !).
+> 5. **Sculpture Organique `v5.1` Haute Définition (`gpu_sculpt.py`)** : lissage de Taubin préservant le tranchant des cornes/écailles (`6` passes) + normales Mikk bi-bandes micro+méso (`sigma=1.1` & `3.8`) + **`-81,6 %`** de dé-lighting SH mesuré sur `dragon_buste`.
+
+![Vitrine Technique 3d-forge v5.0 — Baseline Précédente](docs/img/v5_game_ready_showcase.png)
 
 > ### Priorité n°1 : **Roblox Studio** (`roblox/`) & **Unreal Engine 5** (`unreal/`) — Profil par défaut `--engine roblox_unreal`
 >

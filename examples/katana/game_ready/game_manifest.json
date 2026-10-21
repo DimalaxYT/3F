@@ -1,32 +1,56 @@
 {
   "asset_name": "katana",
-  "high_poly_tris": 5032,
+  "high_poly_tris": 9524,
   "lods": {
     "LOD0": {
-      "tris": 2598,
+      "tris": 8200,
       "path": "examples/katana/game_ready/katana_game.glb",
-      "bytes": 520588
+      "bytes": 1025976
     },
     "LOD1": {
-      "tris": 1040,
+      "tris": 3280,
       "path": "examples/katana/game_ready/katana_LOD1.glb",
-      "bytes": 207204
+      "bytes": 397456
     },
     "LOD2": {
-      "tris": 740,
+      "tris": 1230,
       "path": "examples/katana/game_ready/katana_LOD2.glb",
-      "bytes": 94448
+      "bytes": 158556
     }
   },
-  "draw_calls_before": 8,
+  "draw_calls_before": 10,
   "draw_calls_after": 1,
-  "poly_reduction_pct": 48.37,
+  "poly_reduction_pct": 13.9,
   "physics_colliders": {
     "count": 6,
-    "total_tris": 748,
+    "total_tris": 622,
     "path": "examples/katana/game_ready/katana_colliders.glb"
   },
   "sockets": {
+    "SOCKET_grip": {
+      "position": [
+        0.0,
+        0.0,
+        0.145
+      ],
+      "rotation_deg": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "SOCKET_tip": {
+      "position": [
+        -0.018,
+        0.0,
+        0.98
+      ],
+      "rotation_deg": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
     "SOCKET_origin_ground": {
       "position": [
         0.0,
@@ -43,31 +67,7 @@
       "position": [
         0.0,
         0.0,
-        0.9800199437536753
-      ],
-      "rotation_deg": [
-        0,
-        0,
-        0
-      ]
-    },
-    "SOCKET_grip": {
-      "position": [
-        0.0,
-        0.0,
-        0.13720279212551456
-      ],
-      "rotation_deg": [
-        0,
-        0,
-        0
-      ]
-    },
-    "SOCKET_tip": {
-      "position": [
-        0.0,
-        0.0,
-        0.9800199437536753
+        0.9800198375509606
       ],
       "rotation_deg": [
         0,
@@ -79,7 +79,7 @@
       "position": [
         0.0,
         0.0,
-        0.558611367939595
+        0.5586113074040475
       ],
       "rotation_deg": [
         0,
@@ -95,11 +95,11 @@
       "studio_ready_glb_png": "examples/katana/game_ready/roblox/katana_roblox.glb",
       "scale_unit": "studs",
       "size_studs_xyz": [
-        0.293,
-        0.293,
+        0.289,
+        0.244,
         3.5
       ],
-      "max_part_tris": 2598,
+      "max_part_tris": 4100,
       "under_10k_tris_limit": true,
       "surface_appearance": {
         "ColorMap": "examples/katana/game_ready/roblox/T_katana_ColorMap.png",
@@ -119,5 +119,5 @@
   },
   "delight_metrics": {},
   "qa_sheet": "examples/katana/game_ready/qa_game_sheet.png",
-  "duration_s": 26.12
+  "duration_s": 57.36
 }

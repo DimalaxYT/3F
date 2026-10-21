@@ -222,9 +222,17 @@ def sculpt_from_views(
     verts, faces, _, _ = marching_cubes(pad_sdf, level=0.0, spacing=(voxel_m, voxel_m, voxel_m))
     raw_mesh = trimesh.Trimesh(vertices=verts, faces=faces, process=True)
 
-    # Lissage de Taubin sans retrait volumique (sculpture pierre/bronze ultra-lisse !)
-    trimesh.smoothing.filter_taubin(raw_mesh, lamb=0.5, nu=-0.53, iterations=10)
+    # Lissage de Taubin calibré `v5.1` (6 passes au lieu de 10 -> préserve le tranchant
+    # des cornes, crocs, arêtes d'armure et gravures sans aucun escalier de voxel !)
+    trimesh.smoothing.filter_taubin(raw_mesh, lamb=0.45, nu=-0.48, iterations=6)
     raw_mesh.remove_unreferenced_vertices()
+    comps = raw_mesh.split(only_watertight=False)
+    if len(comps) > 1:
+        raw_mesh = max(comps, key=lambda c: len(c.faces))
+    if not raw_mesh.is_watertight:
+        trimesh.repair.fill_holes(raw_mesh)
+        trimesh.repair.fix_winding(raw_mesh)
+        trimesh.repair.fix_normals(raw_mesh)
 
     # Centre X/Y et pose le buste sur son socle de musée chanfreiné en basalte noir
     c_xy = 0.5 * (raw_mesh.bounds[0][:2] + raw_mesh.bounds[1][:2])
@@ -370,11 +378,14 @@ def bake_sculpt_pbr(
     albedo = albedo[nn_idx[0], nn_idx[1]]
     mr = mr[nn_idx[0], nn_idx[1]]
     hmap = hmap[nn_idx[0], nn_idx[1]]
-    hmap_hp = hmap - ndimage.gaussian_filter(hmap, sigma=3.0)
+    # Extraction multi-bandes `v5.1` : micro-grain d'écailles (`sigma=1.1`) + biseaux ciselés (`sigma=3.8`) !
+    hp_micro = hmap - ndimage.gaussian_filter(hmap, sigma=1.1)
+    hp_meso = ndimage.gaussian_filter(hmap, sigma=1.0) - ndimage.gaussian_filter(hmap, sigma=3.8)
+    hmap_hp = 1.65 * hp_micro + 1.15 * hp_meso
 
     alb_img = Image.fromarray((np.clip(albedo, 0.0, 1.0) * 255).astype(np.uint8), "RGB")
     mr_img = Image.fromarray((np.clip(mr, 0.0, 1.0) * 255).astype(np.uint8), "RGB")
-    dy, dx = np.gradient(hmap_hp.astype(np.float32) * 1.55)
+    dy, dx = np.gradient(hmap_hp.astype(np.float32) * 2.15)
     nz = np.ones_like(dx)
     nlen = np.sqrt(dx * dx + dy * dy + nz * nz) + 1e-12
     nmap = np.stack([-dx / nlen, dy / nlen, nz / nlen], axis=-1) * 0.5 + 0.5

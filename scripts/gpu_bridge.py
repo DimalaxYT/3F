@@ -54,6 +54,17 @@ import renderer
 def _single_mesh_from_scene(scene_or_mesh) -> trimesh.Trimesh:
     if isinstance(scene_or_mesh, trimesh.Trimesh):
         return scene_or_mesh.copy()
+    if hasattr(scene_or_mesh, "parts") and not hasattr(scene_or_mesh, "graph"):
+        parts_colored = []
+        for pm, pmat, _ in scene_or_mesh.parts:
+            mc = pm.copy()
+            col_u8 = np.clip(np.asarray(getattr(pmat, "color", [0.6, 0.6, 0.6]), dtype=np.float32)[:3] * 255.0, 0, 255).astype(np.uint8)
+            mc.visual.vertex_colors = np.column_stack([
+                np.tile(col_u8, (len(mc.vertices), 1)),
+                np.full(len(mc.vertices), 255, dtype=np.uint8),
+            ])
+            parts_colored.append(mc)
+        return trimesh.util.concatenate(parts_colored)
     geos = []
     for name in scene_or_mesh.graph.nodes_geometry:
         tf, gname = scene_or_mesh.graph[name]
@@ -449,6 +460,236 @@ def bake_multiview_to_mesh(mesh: trimesh.Trimesh, cam_manifest: dict,
         "normal": normal_img,
         "projected_coverage": float(valid[filled].mean()) if filled.any() else 0.0,
     }
+
+
+def render_orthographic_paint_guides(
+    scene_or_mesh,
+    out_dir: str,
+    size: int = 1024,
+    pad: float = 0.075,
+) -> dict:
+    """Rend 3 guides orthographiques calibrés au millimètre (`front` `-Y`, `side` `+X`, `top` `+Z`)
+    par Z-buffer analytique + éclairage studio diffus d'AO douce, prêts à être peints par
+    le GPU Datacenter (`generate_image(..., images=[guide])`) puis reprojetés sans décalage !"""
+    os.makedirs(out_dir, exist_ok=True)
+    mesh = _single_mesh_from_scene(scene_or_mesh)
+    bmin, bmax = mesh.bounds
+    center = 0.5 * (bmin + bmax)
+    span = float(np.max(bmax - bmin)) * (1.0 + 2.0 * float(pad))
+    half = max(span * 0.5, 1e-5)
+
+    ao_v = pbr.compute_ambient_occlusion(mesh).astype(np.float32)
+    curv_v = pbr.compute_edge_wear(mesh).astype(np.float32)
+    v_col = getattr(mesh.visual, "vertex_colors", None)
+    if v_col is not None and len(v_col) == len(mesh.vertices):
+        base_v = np.asarray(v_col[:, :3], dtype=np.float32) / 255.0
+    else:
+        base_v = np.full((len(mesh.vertices), 3), 0.55, dtype=np.float32)
+
+    S = int(size)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    verts = np.asarray(mesh.vertices, dtype=np.float32) - center[None, :]
+    vnorms = np.asarray(mesh.vertex_normals, dtype=np.float32)
+
+    # Définition exacte des axes `(right, up, towards_cam)` pour `front`, `side`, `top`
+    axes_spec = {
+        "front": ([1, 0, 0], [0, 0, 1], [0, -1, 0]),
+        "side":  ([0, 1, 0], [0, 0, 1], [1,  0, 0]),
+        "top":   ([1, 0, 0], [0, 1, 0], [0,  0, 1]),
+    }
+    out_paths = {}
+    for vname, (rx, uy, dz) in axes_spec.items():
+        R_ax = np.asarray(rx, dtype=np.float32)
+        U_ax = np.asarray(uy, dtype=np.float32)
+        D_ax = np.asarray(dz, dtype=np.float32)
+        px = ((verts @ R_ax) / half * 0.5 + 0.5) * (S - 1)
+        py = (0.5 - (verts @ U_ax) / half * 0.5) * (S - 1)
+        pz = verts @ D_ax  # plus grand = plus proche de la caméra !
+
+        zbuf = np.full((S, S), -1e9, dtype=np.float32)
+        img = np.full((S, S, 3), 0.94, dtype=np.float32)
+
+        tri_xy = np.stack([px[faces], py[faces]], axis=-1)
+        # Filtre back-face rapide
+        fn = np.cross(verts[faces[:, 1]] - verts[faces[:, 0]], verts[faces[:, 2]] - verts[faces[:, 0]])
+        vis_f = np.flatnonzero((fn @ D_ax) > -1e-9)
+        for fi in vis_f:
+            a, b_i, c = faces[fi]
+            pts2 = tri_xy[fi]
+            x0 = max(int(math.floor(pts2[:, 0].min())), 0)
+            x1 = min(int(math.ceil(pts2[:, 0].max())), S - 1)
+            y0 = max(int(math.floor(pts2[:, 1].min())), 0)
+            y1 = min(int(math.ceil(pts2[:, 1].max())), S - 1)
+            if x0 > x1 or y0 > y1:
+                continue
+            gx, gy = np.meshgrid(np.arange(x0, x1 + 1, dtype=np.float32),
+                                 np.arange(y0, y1 + 1, dtype=np.float32))
+            v0x, v0y = pts2[1, 0] - pts2[0, 0], pts2[1, 1] - pts2[0, 1]
+            v1x, v1y = pts2[2, 0] - pts2[0, 0], pts2[2, 1] - pts2[0, 1]
+            den = v0x * v1y - v1x * v0y
+            if abs(den) < 1e-7:
+                continue
+            inv = 1.0 / den
+            dxp, dyp = gx - pts2[0, 0], gy - pts2[0, 1]
+            w1 = (dxp * v1y - v1x * dyp) * inv
+            w2 = (v0x * dyp - dxp * v0y) * inv
+            w0 = 1.0 - w1 - w2
+            inside = (w0 >= -1e-4) & (w1 >= -1e-4) & (w2 >= -1e-4)
+            if not inside.any():
+                continue
+            zz = w0 * pz[a] + w1 * pz[b_i] + w2 * pz[c]
+            sub_z = zbuf[y0:y1 + 1, x0:x1 + 1]
+            win = inside & (zz > sub_z)
+            if not win.any():
+                continue
+            sub_z[win] = zz[win]
+            n_interp = (w0[win, None] * vnorms[a] + w1[win, None] * vnorms[b_i] + w2[win, None] * vnorms[c])
+            n_interp /= np.linalg.norm(n_interp, axis=-1, keepdims=True) + 1e-9
+            c_interp = w0[win, None] * base_v[a] + w1[win, None] * base_v[b_i] + w2[win, None] * base_v[c]
+            ao_i = w0[win] * ao_v[a] + w1[win] * ao_v[b_i] + w2[win] * ao_v[c]
+            cr_i = w0[win] * curv_v[a] + w1[win] * curv_v[b_i] + w2[win] * curv_v[c]
+            hemi = 0.62 + 0.38 * np.clip(n_interp @ D_ax, 0.0, 1.0)
+            shaded = np.clip((c_interp * hemi[:, None] + 0.10 * cr_i[:, None]) * ao_i[:, None], 0.0, 1.0)
+            sub_img = img[y0:y1 + 1, x0:x1 + 1]
+            sub_img[win] = shaded
+
+        out_p = os.path.join(out_dir, f"ortho_{vname}.png")
+        Image.fromarray((img * 255.0).round().astype(np.uint8), mode="RGB").save(out_p)
+        out_paths[vname] = out_p
+
+    meta = {"center": center.tolist(), "half_extent": half, "size": S, "guides": out_paths}
+    with open(os.path.join(out_dir, "ortho_meta.json"), "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, indent=2)
+    return meta
+
+
+def sample_orthographic_ai_views_zbuffer(
+    high_mesh: trimesh.Trimesh,
+    sample_pos: np.ndarray,
+    sample_nrm: np.ndarray,
+    ai_views: dict[str, str],
+    pad: float = 0.075,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Projette des vues orthographiques peintes par le GPU Datacenter (`front`, `side`, `top`)
+    sur les points 3D `sample_pos` de `high_mesh` AVEC **vrai test d'occultation Z-buffer** :
+      - Zéro bavure sur les faces cachées ou derrière les poignées / loquets !
+      - Pondération angulaire `cos^5` + symétrisation gauche/droite & avant/arrière propre !
+      - Retourne `(ai_rgb, ai_detail_height, coverage_weight)` alignés sur `sample_pos`.
+    """
+    import delight as dl
+
+    bmin, bmax = high_mesh.bounds
+    center = 0.5 * (bmin + bmax)
+    span = float(np.max(bmax - bmin)) * (1.0 + 2.0 * float(pad))
+    half = max(span * 0.5, 1e-5)
+
+    # Si un fichier `ortho_meta.json` accompagne les vues, on utilise le `center` et `half_extent`
+    # EXACTS du rendu guide global (garantit 0.00 px de décalage même sur les pièces articulées `lid` !)
+    for vp in ai_views.values():
+        if vp and os.path.exists(vp):
+            meta_p = os.path.join(os.path.dirname(str(vp)), "ortho_meta.json")
+            if os.path.exists(meta_p):
+                with open(meta_p, encoding="utf-8") as fh:
+                    om = json.load(fh)
+                center = np.asarray(om["center"], dtype=np.float32)
+                half = float(om["half_extent"])
+                break
+
+    S = 512
+    faces = np.asarray(high_mesh.faces, dtype=np.int64)
+    verts = np.asarray(high_mesh.vertices, dtype=np.float32) - center[None, :]
+    pts = np.asarray(sample_pos, dtype=np.float32) - center[None, :]
+    nrm = np.asarray(sample_nrm, dtype=np.float32)
+
+    # Construire les 6 directions cardinales en miroir si `back`/`left` ne sont pas fournies
+    cardinal = []
+    if "front" in ai_views and os.path.exists(ai_views["front"]):
+        cardinal.append((ai_views["front"], [1, 0, 0], [0, 0, 1], [0, -1, 0], False))
+        cardinal.append((ai_views.get("back", ai_views["front"]), [-1, 0, 0], [0, 0, 1], [0, 1, 0], "back" not in ai_views))
+    if "side" in ai_views and os.path.exists(ai_views["side"]):
+        cardinal.append((ai_views["side"], [0, 1, 0], [0, 0, 1], [1, 0, 0], False))
+        cardinal.append((ai_views.get("left", ai_views["side"]), [0, -1, 0], [0, 0, 1], [-1, 0, 0], "left" not in ai_views))
+    if "top" in ai_views and os.path.exists(ai_views["top"]):
+        cardinal.append((ai_views["top"], [1, 0, 0], [0, 1, 0], [0, 0, 1], False))
+
+    acc_rgb = np.zeros((len(pts), 3), dtype=np.float32)
+    acc_hgt = np.zeros(len(pts), dtype=np.float32)
+    acc_w = np.zeros(len(pts), dtype=np.float32)
+
+    tex_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    for vpath, rx, uy, dz, mirrored in cardinal:
+        if vpath not in tex_cache:
+            raw_im = Image.open(vpath).convert("RGB").resize((S, S), Image.Resampling.LANCZOS)
+            delit_im, _ = dl.delight_image_2d(raw_im, strength=0.65)
+            rgb_a = np.asarray(delit_im, dtype=np.float32) / 255.0
+            lum_a = rgb_a @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+            hp_a = lum_a - ndimage.gaussian_filter(lum_a, sigma=3.2)
+            tex_cache[vpath] = (rgb_a, hp_a)
+        rgb_a, hp_a = tex_cache[vpath]
+        if mirrored:
+            rgb_a = rgb_a[:, ::-1, :]
+            hp_a = hp_a[:, ::-1]
+
+        R_ax = np.asarray(rx, dtype=np.float32)
+        U_ax = np.asarray(uy, dtype=np.float32)
+        D_ax = np.asarray(dz, dtype=np.float32)
+
+        # Z-buffer rapide de visibilité de la vue
+        px = ((verts @ R_ax) / half * 0.5 + 0.5) * (S - 1)
+        py = (0.5 - (verts @ U_ax) / half * 0.5) * (S - 1)
+        pz = verts @ D_ax
+        zbuf = np.full((S, S), -1e9, dtype=np.float32)
+        fn = np.cross(verts[faces[:, 1]] - verts[faces[:, 0]], verts[faces[:, 2]] - verts[faces[:, 0]])
+        for fi in np.flatnonzero((fn @ D_ax) > -1e-9):
+            a, b_i, c = faces[fi]
+            x0, x1 = max(int(min(px[a], px[b_i], px[c])), 0), min(int(math.ceil(max(px[a], px[b_i], px[c]))), S - 1)
+            y0, y1 = max(int(min(py[a], py[b_i], py[c])), 0), min(int(math.ceil(max(py[a], py[b_i], py[c]))), S - 1)
+            if x0 > x1 or y0 > y1:
+                continue
+            gx, gy = np.meshgrid(np.arange(x0, x1 + 1, dtype=np.float32),
+                                 np.arange(y0, y1 + 1, dtype=np.float32))
+            v0x, v0y = px[b_i] - px[a], py[b_i] - py[a]
+            v1x, v1y = px[c] - px[a], py[c] - py[a]
+            den = v0x * v1y - v1x * v0y
+            if abs(den) < 1e-7:
+                continue
+            inv = 1.0 / den
+            dxp, dyp = gx - px[a], gy - py[a]
+            w1 = (dxp * v1y - v1x * dyp) * inv
+            w2 = (v0x * dyp - dxp * v0y) * inv
+            w0 = 1.0 - w1 - w2
+            ins = (w0 >= -1e-3) & (w1 >= -1e-3) & (w2 >= -1e-3)
+            if not ins.any():
+                continue
+            zz = w0 * pz[a] + w1 * pz[b_i] + w2 * pz[c]
+            sub = zbuf[y0:y1 + 1, x0:x1 + 1]
+            win = ins & (zz > sub)
+            sub[win] = zz[win]
+
+        # Dilate légèrement le Z-buffer max local 3x3 pour éviter l'acné aux rasances
+        zmax_local = ndimage.maximum_filter(zbuf, size=3)
+        sx_p = np.clip(((pts @ R_ax) / half * 0.5 + 0.5) * (S - 1), 0, S - 1)
+        sy_p = np.clip((0.5 - (pts @ U_ax) / half * 0.5) * (S - 1), 0, S - 1)
+        sz_p = pts @ D_ax
+        ix, iy = sx_p.round().astype(np.int32), sy_p.round().astype(np.int32)
+
+        facing = np.clip(nrm @ D_ax, 0.0, 1.0)
+        unoccluded = sz_p >= (zmax_local[iy, ix] - half * 0.035)
+        w = (facing ** 5) * unoccluded.astype(np.float32)
+        hit_m = w > 1e-4
+        if not hit_m.any():
+            continue
+        acc_rgb[hit_m] += rgb_a[iy[hit_m], ix[hit_m]] * w[hit_m, None]
+        acc_hgt[hit_m] += hp_a[iy[hit_m], ix[hit_m]] * w[hit_m]
+        acc_w[hit_m] += w[hit_m]
+
+    cov = np.clip(acc_w / (acc_w + 0.05), 0.0, 1.0)
+    out_rgb = np.zeros_like(acc_rgb)
+    out_hgt = np.zeros_like(acc_hgt)
+    ok = acc_w > 1e-5
+    out_rgb[ok] = acc_rgb[ok] / acc_w[ok, None]
+    out_hgt[ok] = acc_hgt[ok] / acc_w[ok]
+    return out_rgb, out_hgt, cov
 
 
 def main():

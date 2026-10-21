@@ -12,7 +12,12 @@ description: >-
   GPU required on the user's machine.
 ---
 
-# 3d-forge v5 — Realistic 3D Asset Engine for **Roblox Studio** (Primary) & **Unreal Engine 5** (Secondary)
+# 3d-forge v5.1 — Ultra Design & Texture Engine for **Roblox Studio** (Primary) & **Unreal Engine 5** (Secondary)
+
+> **New in `v5.1` (`Ultra Design & Texture Engine`)**:
+> - **Hard-Surface Mechanical Kitbash Library (`scripts/greebles.py`)**: Always enrich hard-surface props, crates, vehicles, weapons, and sci-fi doors with 100%-watertight `greebles` (`hex_bolt`, `bolt_array`, `toggle_latch`, `louver_vent`, `picatinny_rail`, `ribbed_conduit`, `ergonomic_handle`, `corner_armor_cap`) + octagonal/tapered `mk.loft` hulls instead of plain boxes!
+> - **Datacenter-GPU Z-Buffer Multi-View Texture Paint (`gpu_bridge.render_orthographic_paint_guides` + `--ai-front/--ai-side/--ai-top`)**: Render sub-millimeter orthographic guides (`ortho_meta.json`), paint studio albedo stencils/panels via `generate_image(..., images=[guide])`, and project them cleanly with per-camera Z-buffer occlusion testing across both static hulls AND articulated sub-parts (`lid`, `door`).
+> - **8-Archetype Semantic PBR Engine & Dual-`1024²` Roblox Weapon Split**: Strictly enforces `metallic = 0.0` on `MAT_RUBBER_POLY` bumpers/tires, sharpens `MAT_TSUKA_WRAP` braided silk + `MAT_TAMAHAGANE` *hamon* at full `1024²` pixel resolution, straightens UV islands via PCA in `pbr.unwrap()`, and auto-splits elongated weapons (`katana`, `sword`) into `<Name>_Blade` (`1024²`) + `<Name>_Hilt` (`1024²`) inside `<Name>_roblox.glb`!
 
 ## Target Engine Priority (ALWAYS FOLLOW BY DEFAULT!)
 
