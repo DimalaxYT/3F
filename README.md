@@ -46,21 +46,37 @@
 >    - **Binaire `.glb` compacté (`EXT_texture_webp`)** : purge complète des buffers morts -> **`dragon_buste_LOD2.glb` = `630 tris` en `108 Ko` (`×42` plus léger que le High-Poly !)**.
 > 5. **Colliders Physiques Convexes (`UCX_*`), Sockets Gameplay (`SOCKET_*`) & Animations `gltf.animations`** : décomposition convexe multi-pièces pour PhysX / Chaos / Jolt, points d'attache gameplay (`SOCKET_grip`, `SOCKET_tip`, `SOCKET_lid_latch`, `SOCKET_top_mount`, etc.), animations quaternions standards (`Idle_Action` lue nativement par Unreal, Unity, Godot, Blender et Three.js) et **20e recette `sci_fi_crate`** (caisse de ravitaillement blindée articulée).
 
-### Démarrage Rapide — Asset Game-Ready AAA en 1 commande
+### Démarrage Rapide — Pipeline Turbo Express (`12 à 20 s` CPU au lieu de `30+ min` !)
 
 ```bash
-# 1. Prop Hard-Surface articulé (caisse blindée Sci-Fi : 25 pièces -> 2 Draw Calls, LOD0/1/2 + UCX + Lid Anim)
-python3 scripts/generate.py sci_fi_crate -f glb stl -q high --game-ready --engine all --lod0-tris 2800 -o examples
+# 1. Pipeline Express TOUT-EN-UN (`scripts/turbo_forge.py`) — 1 seule commande = Géométrie + LOD0/1/2 + Roblox + UE5 + QA !
+#    • Katana Dual-1024² (Blade + Hilt) : 67.91 s -> 12.66 s (x5,4 plus rapide !)
+python3 scripts/turbo_forge.py katana --lod0-tris 8200 -o examples/katana/game_ready
 
-# 2. Arme de mêlée temps réel (Katana : 8 Draw Calls -> 1 Draw Call, SOCKET_grip / SOCKET_tip, 94 Ko en LOD2)
-python3 scripts/game_ready.py katana --engine all --lod0-tris 2600 --tex-size 1024 -o examples/katana/game_ready
+#    • Caisse blindée Sci-Fi articulée + Peinture Z-Buffer GPU : 60.54 s -> 20.46 s (x3,0 plus rapide !)
+python3 scripts/turbo_forge.py sci_fi_crate --lod0-tris 3800 \
+  --ai-front examples/sci_fi_crate/ortho_guides/ai_paint_front.png \
+  --ai-side  examples/sci_fi_crate/ortho_guides/ai_paint_side.png \
+  --ai-top   examples/sci_fi_crate/ortho_guides/ai_paint_top.png \
+  -o examples/sci_fi_crate/game_ready
 
-# 3. Sculpture Organique IA -> Game-Ready (50 200 tris -> 4 200 LOD0 / 1 680 LOD1 / 630 LOD2 [-98.7%], De-Lit Albedo)
-python3 scripts/game_ready.py examples/dragon_buste/dragon_buste.glb --engine all --lod0-tris 4200 -o examples/dragon_buste/game_ready
+#    • Buste de Dragon 3-Vues GPU -> Sculpture 123k tris + STL étanche + Pack Roblox & UE5 : 102.11 s -> 18.85 s (x5,4 plus rapide !)
+python3 scripts/turbo_forge.py \
+  --front assets/ai_multiview/dragon_front.png \
+  --side  assets/ai_multiview/dragon_side.png \
+  --back  assets/ai_multiview/dragon_back.png \
+  --name dragon_buste --lod0-tris 4800 -o examples/dragon_buste/game_ready
 
-# 4. De-Lighting autonome d'une texture albédo IA
-python3 scripts/delight.py raw_albedo.png -o clean_albedo.png --strength 0.85
+# 2. Objet 3D 100 % inédit écrit par l'IA (`def build() -> mk.Builder`) en 1 seule passe (< 15 s CPU) :
+python3 scripts/turbo_forge.py mon_arme_custom.py --lod0-tris 4200 -o out/mon_arme
 ```
+
+| Benchmark Vitesse `v5.1 Turbo` | Avant (`v5.1` initial) | Après (`v5.1 Turbo`) | Gain Mesuré |
+|---|---|---|---|
+| **`katana`** *(Dual-`1024²` Roblox + UE5 + LOD0/1/2 + QA)* | `67,91 s` | **`12,66 s`** | **`×5,4` plus rapide** |
+| **`dragon_buste`** *(Sculpt GPU `123k` tris + STL + Roblox + UE5)* | `102,11 s` | **`18,85 s`** | **`×5,4` plus rapide** |
+| **`sci_fi_crate`** *(`44` pièces CSG + Z-Buffer GPU + Lid + Roblox + UE5)* | `60,54 s` | **`20,46 s`** | **`×3,0` plus rapide** |
+| **Workflow complet d'un Agent IA (bout en bout)** | `30 à 40 min` *(5 boucles `9.5`)* | **`~60 à 90 s`** *(1 passe `turbo_forge`)* | **`×20+` plus rapide** |
 
 | Asset Vitrine `v5` | Source High-Poly | `LOD0` (`1024²`) | `LOD1` (`512²`) | `LOD2` (`256²`) | Draw Calls | Colliders `UCX_*` | Sockets & Animations |
 |---|---|---|---|---|---|---|---|

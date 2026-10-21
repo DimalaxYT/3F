@@ -132,3 +132,24 @@ def test_flagship_v5_1_packages_roblox_and_unreal():
     sc_crate = trimesh.load(crate_dir / "roblox" / "sci_fi_crate_roblox.glb", force="scene")
     lid_mat = sc_crate.geometry["lid_mesh"].visual.material
     assert getattr(lid_mat, "baseColorTexture", None) is not None, "Le couvercle articulé doit posséder sa texture PBR !"
+
+
+def test_turbo_forge_single_command_under_25_seconds(tmp_path):
+    """Vérifie que `turbo_forge.run_turbo` génère un pack complet Roblox + UE5 + LODs + QA en < 25s !"""
+    import time
+    import turbo_forge as tf
+
+    t0 = time.perf_counter()
+    manifest = tf.run_turbo(
+        target="katana",
+        out_dir=tmp_path / "turbo_katana_check",
+        lod0_tris=6000,
+        tex_size=1024,
+    )
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 25.0, f"Trop lent ({elapsed:.2f}s >= 25s) — risque de régression de vitesse !"
+    assert (tmp_path / "turbo_katana_check" / "roblox" / "katana_roblox.glb").is_file()
+    assert (tmp_path / "turbo_katana_check" / "unreal" / "SM_katana.glb").is_file()
+    assert (tmp_path / "turbo_katana_check" / "qa_game_sheet.png").is_file()
+    assert manifest["engine_exports"]["roblox"]["under_10k_tris_limit"] is True
+

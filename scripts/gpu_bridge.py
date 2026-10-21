@@ -509,52 +509,34 @@ def render_orthographic_paint_guides(
         zbuf = np.full((S, S), -1e9, dtype=np.float32)
         img = np.full((S, S, 3), 0.94, dtype=np.float32)
 
-        tri_xy = np.stack([px[faces], py[faces]], axis=-1)
-        # Filtre back-face rapide
         fn = np.cross(verts[faces[:, 1]] - verts[faces[:, 0]], verts[faces[:, 2]] - verts[faces[:, 0]])
         vis_f = np.flatnonzero((fn @ D_ax) > -1e-9)
-        for fi in vis_f:
-            a, b_i, c = faces[fi]
-            pts2 = tri_xy[fi]
-            x0 = max(int(math.floor(pts2[:, 0].min())), 0)
-            x1 = min(int(math.ceil(pts2[:, 0].max())), S - 1)
-            y0 = max(int(math.floor(pts2[:, 1].min())), 0)
-            y1 = min(int(math.ceil(pts2[:, 1].max())), S - 1)
-            if x0 > x1 or y0 > y1:
-                continue
-            gx, gy = np.meshgrid(np.arange(x0, x1 + 1, dtype=np.float32),
-                                 np.arange(y0, y1 + 1, dtype=np.float32))
-            v0x, v0y = pts2[1, 0] - pts2[0, 0], pts2[1, 1] - pts2[0, 1]
-            v1x, v1y = pts2[2, 0] - pts2[0, 0], pts2[2, 1] - pts2[0, 1]
-            den = v0x * v1y - v1x * v0y
-            if abs(den) < 1e-7:
-                continue
-            inv = 1.0 / den
-            dxp, dyp = gx - pts2[0, 0], gy - pts2[0, 1]
-            w1 = (dxp * v1y - v1x * dyp) * inv
-            w2 = (v0x * dyp - dxp * v0y) * inv
-            w0 = 1.0 - w1 - w2
-            inside = (w0 >= -1e-4) & (w1 >= -1e-4) & (w2 >= -1e-4)
-            if not inside.any():
-                continue
-            zz = w0 * pz[a] + w1 * pz[b_i] + w2 * pz[c]
-            sub_z = zbuf[y0:y1 + 1, x0:x1 + 1]
-            win = inside & (zz > sub_z)
-            if not win.any():
-                continue
-            sub_z[win] = zz[win]
-            n_interp = (w0[win, None] * vnorms[a] + w1[win, None] * vnorms[b_i] + w2[win, None] * vnorms[c])
-            n_interp /= np.linalg.norm(n_interp, axis=-1, keepdims=True) + 1e-9
-            c_interp = w0[win, None] * base_v[a] + w1[win, None] * base_v[b_i] + w2[win, None] * base_v[c]
-            ao_i = w0[win] * ao_v[a] + w1[win] * ao_v[b_i] + w2[win] * ao_v[c]
-            cr_i = w0[win] * curv_v[a] + w1[win] * curv_v[b_i] + w2[win] * curv_v[c]
-            hemi = 0.62 + 0.38 * np.clip(n_interp @ D_ax, 0.0, 1.0)
-            shaded = np.clip((c_interp * hemi[:, None] + 0.10 * cr_i[:, None]) * ao_i[:, None], 0.0, 1.0)
-            sub_img = img[y0:y1 + 1, x0:x1 + 1]
-            sub_img[win] = shaded
+        if len(vis_f):
+            tri_2d = np.empty((len(vis_f), 3, 2), dtype=np.float64)
+            tri_2d[..., 0] = px[faces[vis_f]]
+            tri_2d[..., 1] = py[faces[vis_f]]
+            rast = pbr.rasterize_uv_triangles(tri_2d, S)
+            if rast is not None:
+                fh_i, xs_i, ys_i, w0_i, w1_i, w2_i = rast
+                orig_f = vis_f[fh_i]
+                va_i, vb_i, vc_i = faces[orig_f, 0], faces[orig_f, 1], faces[orig_f, 2]
+                w0f, w1f, w2f = w0_i.astype(np.float32), w1_i.astype(np.float32), w2_i.astype(np.float32)
+                zz = w0f * pz[va_i] + w1f * pz[vb_i] + w2f * pz[vc_i]
+                order = np.argsort(zz, kind="mergesort")  # peintre Arrière -> Avant exact !
+                xs_s, ys_s, o_s = xs_i[order], ys_i[order], order
+                va_s, vb_s, vc_s = va_i[o_s], vb_i[o_s], vc_i[o_s]
+                w0s, w1s, w2s = w0f[o_s], w1f[o_s], w2f[o_s]
+                zbuf[ys_s, xs_s] = zz[o_s]
+                n_interp = w0s[:, None] * vnorms[va_s] + w1s[:, None] * vnorms[vb_s] + w2s[:, None] * vnorms[vc_s]
+                n_interp /= np.linalg.norm(n_interp, axis=-1, keepdims=True) + 1e-9
+                c_interp = w0s[:, None] * base_v[va_s] + w1s[:, None] * base_v[vb_s] + w2s[:, None] * base_v[vc_s]
+                ao_i = w0s * ao_v[va_s] + w1s * ao_v[vb_s] + w2s * ao_v[vc_s]
+                cr_i = w0s * curv_v[va_s] + w1s * curv_v[vb_s] + w2s * curv_v[vc_s]
+                hemi = 0.62 + 0.38 * np.clip(n_interp @ D_ax, 0.0, 1.0)
+                img[ys_s, xs_s] = np.clip((c_interp * hemi[:, None] + 0.10 * cr_i[:, None]) * ao_i[:, None], 0.0, 1.0)
 
         out_p = os.path.join(out_dir, f"ortho_{vname}.png")
-        Image.fromarray((img * 255.0).round().astype(np.uint8), mode="RGB").save(out_p)
+        Image.fromarray((img * 255.0).round().astype(np.uint8), mode="RGB").save(out_p, compress_level=1)
         out_paths[vname] = out_p
 
     meta = {"center": center.tolist(), "half_extent": half, "size": S, "guides": out_paths}
@@ -616,16 +598,21 @@ def sample_orthographic_ai_views_zbuffer(
     acc_hgt = np.zeros(len(pts), dtype=np.float32)
     acc_w = np.zeros(len(pts), dtype=np.float32)
 
-    tex_cache: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+    if not hasattr(sample_orthographic_ai_views_zbuffer, "_img_cache"):
+        sample_orthographic_ai_views_zbuffer._img_cache = {}
+    tex_cache = sample_orthographic_ai_views_zbuffer._img_cache
+
+    fn = np.cross(verts[faces[:, 1]] - verts[faces[:, 0]], verts[faces[:, 2]] - verts[faces[:, 0]])
     for vpath, rx, uy, dz, mirrored in cardinal:
-        if vpath not in tex_cache:
-            raw_im = Image.open(vpath).convert("RGB").resize((S, S), Image.Resampling.LANCZOS)
+        mtime_key = (vpath, os.path.getmtime(vpath), S)
+        if mtime_key not in tex_cache:
+            raw_im = Image.open(vpath).convert("RGB").resize((S, S), Image.Resampling.BILINEAR)
             delit_im, _ = dl.delight_image_2d(raw_im, strength=0.65)
             rgb_a = np.asarray(delit_im, dtype=np.float32) / 255.0
             lum_a = rgb_a @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
             hp_a = lum_a - ndimage.gaussian_filter(lum_a, sigma=3.2)
-            tex_cache[vpath] = (rgb_a, hp_a)
-        rgb_a, hp_a = tex_cache[vpath]
+            tex_cache[mtime_key] = (rgb_a, hp_a)
+        rgb_a, hp_a = tex_cache[mtime_key]
         if mirrored:
             rgb_a = rgb_a[:, ::-1, :]
             hp_a = hp_a[:, ::-1]
@@ -634,37 +621,24 @@ def sample_orthographic_ai_views_zbuffer(
         U_ax = np.asarray(uy, dtype=np.float32)
         D_ax = np.asarray(dz, dtype=np.float32)
 
-        # Z-buffer rapide de visibilité de la vue
+        # Z-buffer 100 % vectorisé NumPy (`np.maximum.at`, zéro boucle Python par triangle !)
         px = ((verts @ R_ax) / half * 0.5 + 0.5) * (S - 1)
         py = (0.5 - (verts @ U_ax) / half * 0.5) * (S - 1)
         pz = verts @ D_ax
         zbuf = np.full((S, S), -1e9, dtype=np.float32)
-        fn = np.cross(verts[faces[:, 1]] - verts[faces[:, 0]], verts[faces[:, 2]] - verts[faces[:, 0]])
-        for fi in np.flatnonzero((fn @ D_ax) > -1e-9):
-            a, b_i, c = faces[fi]
-            x0, x1 = max(int(min(px[a], px[b_i], px[c])), 0), min(int(math.ceil(max(px[a], px[b_i], px[c]))), S - 1)
-            y0, y1 = max(int(min(py[a], py[b_i], py[c])), 0), min(int(math.ceil(max(py[a], py[b_i], py[c]))), S - 1)
-            if x0 > x1 or y0 > y1:
-                continue
-            gx, gy = np.meshgrid(np.arange(x0, x1 + 1, dtype=np.float32),
-                                 np.arange(y0, y1 + 1, dtype=np.float32))
-            v0x, v0y = px[b_i] - px[a], py[b_i] - py[a]
-            v1x, v1y = px[c] - px[a], py[c] - py[a]
-            den = v0x * v1y - v1x * v0y
-            if abs(den) < 1e-7:
-                continue
-            inv = 1.0 / den
-            dxp, dyp = gx - px[a], gy - py[a]
-            w1 = (dxp * v1y - v1x * dyp) * inv
-            w2 = (v0x * dyp - dxp * v0y) * inv
-            w0 = 1.0 - w1 - w2
-            ins = (w0 >= -1e-3) & (w1 >= -1e-3) & (w2 >= -1e-3)
-            if not ins.any():
-                continue
-            zz = w0 * pz[a] + w1 * pz[b_i] + w2 * pz[c]
-            sub = zbuf[y0:y1 + 1, x0:x1 + 1]
-            win = ins & (zz > sub)
-            sub[win] = zz[win]
+        vis_f = np.flatnonzero((fn @ D_ax) > -1e-9)
+        if len(vis_f):
+            tri_2d = np.empty((len(vis_f), 3, 2), dtype=np.float64)
+            tri_2d[..., 0] = px[faces[vis_f]]
+            tri_2d[..., 1] = py[faces[vis_f]]
+            rast = pbr.rasterize_uv_triangles(tri_2d, S)
+            if rast is not None:
+                fh_i, xs_i, ys_i, w0_i, w1_i, w2_i = rast
+                orig_f = vis_f[fh_i]
+                zz = (w0_i.astype(np.float32) * pz[faces[orig_f, 0]]
+                      + w1_i.astype(np.float32) * pz[faces[orig_f, 1]]
+                      + w2_i.astype(np.float32) * pz[faces[orig_f, 2]])
+                np.maximum.at(zbuf, (ys_i, xs_i), zz)
 
         # Dilate légèrement le Z-buffer max local 3x3 pour éviter l'acné aux rasances
         zmax_local = ndimage.maximum_filter(zbuf, size=3)

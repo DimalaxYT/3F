@@ -392,34 +392,16 @@ def decimate_mesh_clean(mesh: trimesh.Trimesh, target_tris: int) -> trimesh.Trim
     return out
 
 
-def bake_high_to_low(
+def prepare_high_poly_sampler(
     high_mesh: trimesh.Trimesh,
     high_vertex_albedo: np.ndarray,
     high_vertex_rough: np.ndarray,
     high_vertex_metal: np.ndarray,
-    low_mesh_in: trimesh.Trimesh,
     high_vertex_mat_id: np.ndarray | None = None,
-    ai_views: dict[str, str | Path] | None = None,
-    tex_size: int = 1024,
-    weathering: bool = True,
-    delight_pass: bool = False,
-    decal_strength: float = 0.65,
 ) -> dict:
-    """Cuit par projection géométrique 3D exacte un maillage `high_mesh` arbitrairement dense
-    (`50k - 150k tris`) vers un maillage temps réel `low_mesh_in` (`1k - 6k tris`) :
-
-      - Déplie `low_mesh_in` via `xatlas` + redressement PCA par îlot UV (`pbr.unwrap` `v5.1`).
-      - Calcule sur `high_mesh` l'AO géométrique fine + la Courbure (`Curvature`) + les normales.
-      - Projette optionnellement des vues orthographiques peintes sur le GPU Datacenter (`ai_views`)
-        avec **test d'occlusion Z-buffer par caméra** (`gpu_bridge.sample_orthographic_ai_views_zbuffer`).
-      - Génère simultanément les cartes OpenGL (`+Y`), DirectX (`-Y` pour Unreal), `ORM` et `MaskMap` Unity !
-    """
-    S = int(tex_size)
-    v_labels = np.zeros(len(low_mesh_in.vertices), dtype=np.int64)
-    low_uv_mesh, _, uv = pbr.unwrap(low_mesh_in, v_labels)
-    tangents_v4 = mk.compute_mikk_tangents(low_uv_mesh, uv)
-
-    # Pré-calcule AO + Courbure sur le High-Poly
+    """Pré-calcule UNE SEULE FOIS l'AO, la Courbure, l'échantillonnage de surface et le
+    `cKDTree` multi-cœurs d'un maillage `high_mesh` afin de réutiliser ce cache instantanément
+    sur `LOD0`, `Blade`, `Hilt`, etc. sans jamais recalculer 5 fois le High-Poly !"""
     ao_hi = pbr.compute_ambient_occlusion(high_mesh).astype(np.float32)
     curv_hi = pbr.compute_edge_wear(high_mesh).astype(np.float32)
     v_hi = np.asarray(high_mesh.vertices, dtype=np.float32)
@@ -430,8 +412,7 @@ def bake_high_to_low(
     else:
         v_mid = np.asarray(high_vertex_mat_id, dtype=np.int32)
 
-    # Sur-échantillonne les triangles larges du High-Poly pour une projection sub-millimétrique !
-    n_surf = min(max(len(high_mesh.faces) * 3, 65_000), 180_000)
+    n_surf = min(max(len(high_mesh.faces) * 2, 48_000), 110_000)
     pts_s, face_idx = trimesh.sample.sample_surface(high_mesh, n_surf, seed=42)
     pts_s = pts_s.astype(np.float32)
     f_hi = np.asarray(high_mesh.faces, dtype=np.int64)[face_idx]
@@ -452,14 +433,91 @@ def bake_high_to_low(
     ia_h, ib_h, ic_h = f_hi[:, 0], f_hi[:, 1], f_hi[:, 2]
     nrm_s = bw0[:, None] * n_hi[ia_h] + bw1[:, None] * n_hi[ib_h] + bw2[:, None] * n_hi[ic_h]
     nrm_s /= np.linalg.norm(nrm_s, axis=1, keepdims=True) + 1e-12
-    alb_s = bw0[:, None] * high_vertex_albedo[ia_h] + bw1[:, None] * high_vertex_albedo[ib_h] + bw2[:, None] * high_vertex_albedo[ic_h]
-    rgh_s = bw0 * high_vertex_rough[ia_h] + bw1 * high_vertex_rough[ib_h] + bw2 * high_vertex_rough[ic_h]
-    mtl_s = bw0 * high_vertex_metal[ia_h] + bw1 * high_vertex_metal[ib_h] + bw2 * high_vertex_metal[ic_h]
-    ao_s = bw0 * ao_hi[ia_h] + bw1 * ao_hi[ib_h] + bw2 * ao_hi[ic_h]
-    crv_s = bw0 * curv_hi[ia_h] + bw1 * curv_hi[ib_h] + bw2 * curv_hi[ic_h]
-    mid_s = v_mid[ia_h]
+    return {
+        "nrm_s": nrm_s,
+        "alb_s": bw0[:, None] * high_vertex_albedo[ia_h] + bw1[:, None] * high_vertex_albedo[ib_h] + bw2[:, None] * high_vertex_albedo[ic_h],
+        "rgh_s": bw0 * high_vertex_rough[ia_h] + bw1 * high_vertex_rough[ib_h] + bw2 * high_vertex_rough[ic_h],
+        "mtl_s": bw0 * high_vertex_metal[ia_h] + bw1 * high_vertex_metal[ib_h] + bw2 * high_vertex_metal[ic_h],
+        "ao_s": bw0 * ao_hi[ia_h] + bw1 * ao_hi[ib_h] + bw2 * ao_hi[ic_h],
+        "crv_s": bw0 * curv_hi[ia_h] + bw1 * curv_hi[ib_h] + bw2 * curv_hi[ic_h],
+        "mid_s": v_mid[ia_h],
+        "kdtree": cKDTree(pts_s),
+        "diag": float(np.linalg.norm(high_mesh.extents)) + 1e-6,
+        "bounds": high_mesh.bounds,
+    }
 
-    kdtree = cKDTree(pts_s)
+
+def build_shared_atlas_lod(lod0_mesh: trimesh.Trimesh, baked_lod0: dict, low_raw: trimesh.Trimesh, mip_size: int) -> trimesh.Trimesh:
+    """Construit `LOD1` ou `LOD2` en transférant instantanément (`< 0.05 s`, zéro `xatlas`)
+    les coordonnées UV exactes du `LOD0` par voisinage surface+normale + mipmap dédiée !"""
+    v0 = np.asarray(lod0_mesh.vertices, dtype=np.float32)
+    n0 = np.asarray(lod0_mesh.vertex_normals, dtype=np.float32)
+    uv0 = np.asarray(lod0_mesh.visual.uv, dtype=np.float64)
+    tree0 = cKDTree(v0)
+
+    vl = np.asarray(low_raw.vertices, dtype=np.float32)
+    nl = np.asarray(low_raw.vertex_normals, dtype=np.float32)
+    dists, idx_k = tree0.query(vl, k=min(8, len(v0)), workers=-1)
+    if idx_k.ndim == 1:
+        best_v = idx_k
+    else:
+        al = np.sum(n0[idx_k] * nl[:, None, :], axis=2)
+        sc = dists / (float(np.linalg.norm(lod0_mesh.extents)) + 1e-6) + 0.02 * (1.0 - np.clip(al, -0.2, 1.0))
+        best_v = idx_k[np.arange(len(vl)), np.argmin(sc, axis=1)]
+
+    uv_lod = uv0[best_v]
+    alb_m = baked_lod0["albedo"].resize((mip_size, mip_size), Image.Resampling.BILINEAR)
+    orm_m = baked_lod0["orm"].resize((mip_size, mip_size), Image.Resampling.BILINEAR)
+    nrm_m = baked_lod0["normal_gl"].resize((mip_size, mip_size), Image.Resampling.BILINEAR)
+    out_m = low_raw.copy()
+    pbr_m = trimesh.visual.material.PBRMaterial(
+        name="game_lod_pbr",
+        baseColorFactor=[255, 255, 255, 255],
+        baseColorTexture=alb_m,
+        metallicRoughnessTexture=orm_m,
+        occlusionTexture=orm_m,
+        normalTexture=nrm_m,
+        metallicFactor=1.0,
+        roughnessFactor=1.0,
+    )
+    out_m.visual = trimesh.visual.TextureVisuals(uv=uv_lod, material=pbr_m)
+    out_m.metadata = dict(getattr(out_m, "metadata", {}) or {})
+    out_m.metadata["mikk_tangents"] = mk.compute_mikk_tangents(out_m, uv_lod)
+    return out_m
+
+
+def bake_high_to_low(
+    high_mesh: trimesh.Trimesh,
+    high_vertex_albedo: np.ndarray,
+    high_vertex_rough: np.ndarray,
+    high_vertex_metal: np.ndarray,
+    low_mesh_in: trimesh.Trimesh,
+    high_vertex_mat_id: np.ndarray | None = None,
+    ai_views: dict[str, str | Path] | None = None,
+    hp_cache: dict | None = None,
+    tex_size: int = 1024,
+    weathering: bool = True,
+    delight_pass: bool = False,
+    decal_strength: float = 0.65,
+) -> dict:
+    """Cuit par projection géométrique 3D exacte un maillage `high_mesh` arbitrairement dense
+    (`50k - 150k tris`) vers un maillage temps réel `low_mesh_in` (`1k - 6k tris`)."""
+    S = int(tex_size)
+    v_labels = np.zeros(len(low_mesh_in.vertices), dtype=np.int64)
+    low_uv_mesh, _, uv = pbr.unwrap(low_mesh_in, v_labels)
+    tangents_v4 = mk.compute_mikk_tangents(low_uv_mesh, uv)
+
+    sampler = hp_cache or prepare_high_poly_sampler(
+        high_mesh, high_vertex_albedo, high_vertex_rough, high_vertex_metal, high_vertex_mat_id,
+    )
+    nrm_s = sampler["nrm_s"]
+    alb_s = sampler["alb_s"]
+    rgh_s = sampler["rgh_s"]
+    mtl_s = sampler["mtl_s"]
+    ao_s  = sampler["ao_s"]
+    crv_s = sampler["crv_s"]
+    mid_s = sampler["mid_s"]
+    kdtree = sampler["kdtree"]
 
     # Rastérisation vectorisée de l'atlas UV `S × S` du Low-Poly
     f_low = np.asarray(low_uv_mesh.faces, dtype=np.int64)
@@ -483,11 +541,11 @@ def bake_high_to_low(
     sign_w = np.where(T4_px[:, 3:4] < 0.0, -1.0, 1.0).astype(np.float32)
     B_px = np.cross(N_px, T_px) * sign_w
 
-    # Projection Cage Ray-Aware
-    dists, idx_k = kdtree.query(pos_px, k=6)
+    # Projection Cage Ray-Aware multi-cœurs (`workers=-1`)
+    dists, idx_k = kdtree.query(pos_px, k=6, workers=-1)
     cand_n = nrm_s[idx_k]
     align = np.sum(cand_n * N_px[:, None, :], axis=2)
-    score = dists / (float(np.linalg.norm(high_mesh.extents)) + 1e-6) + 0.035 * (1.0 - np.clip(align, -0.2, 1.0))
+    score = dists / sampler["diag"] + 0.035 * (1.0 - np.clip(align, -0.2, 1.0))
     best = idx_k[np.arange(len(pos_px)), np.argmin(score, axis=1)]
 
     nhi_px = nrm_s[best]
@@ -897,13 +955,20 @@ def export_game_package(
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
     if isinstance(source, str) and not Path(source).exists():
+        import inspect
         import generate as _gen
         rec = _gen.get_recipe(source)
         if rec is not None:
             if name is None:
                 name = source
-            mk.set_quality(1.4)
-            source = rec["builder"]()
+            mk.set_quality(1.0)
+            fn_b = rec["builder"]
+            # Saute tout pré-bake UV redondant (`textured=False`) puisque `game_ready` cuit
+            # directement ses cartes `1024²` sémantiques depuis la géométrie analytique !
+            if "textured" in inspect.signature(fn_b).parameters:
+                source = fn_b(textured=False)
+            else:
+                source = fn_b()
     if name is None:
         if isinstance(source, mk.Builder):
             name = source.name
@@ -988,48 +1053,54 @@ def export_game_package(
         if delight_pass is None:
             delight_pass = True
 
-    use_weather = weathering and (not has_prebaked_uv)
-    baked = bake_high_to_low(
-        high_body, v_alb, v_rgh, v_mtl, low_base,
-        high_vertex_mat_id=v_mid, ai_views=ai_views,
-        tex_size=tex_size, weathering=use_weather,
-        delight_pass=bool(delight_pass), decal_strength=decal_strength,
-    )
-    lod0_mesh = baked["mesh_lod0"]
+    from concurrent.futures import ThreadPoolExecutor
 
-    # Cuit aussi chaque groupe articulé mobile (`lid`, `front_door`, `turret`...) en PBR complet !
-    joint_baked_map: dict[str, dict] = {}
-    for grp, plist in joint_opaque_groups.items():
+    use_weather = weathering and (not has_prebaked_uv)
+    hp_cache = prepare_high_poly_sampler(high_body, v_alb, v_rgh, v_mtl, v_mid)
+
+    def _bake_body_task() -> dict:
+        return bake_high_to_low(
+            high_body, v_alb, v_rgh, v_mtl, low_base,
+            high_vertex_mat_id=v_mid, ai_views=ai_views, hp_cache=hp_cache,
+            tex_size=tex_size, weathering=use_weather,
+            delight_pass=bool(delight_pass), decal_strength=decal_strength,
+        )
+
+    def _bake_joint_task(grp_item: tuple[str, list]) -> tuple[str, dict]:
+        grp, plist = grp_item
         j_hi = trimesh.util.concatenate([p[0] for p in plist])
         j_alb = np.vstack([np.tile(np.asarray(p[1].color, dtype=np.float32), (len(p[0].vertices), 1)) for p in plist])
         j_rgh = np.concatenate([np.full(len(p[0].vertices), float(p[1].roughness), dtype=np.float32) for p in plist])
         j_mtl = np.concatenate([np.full(len(p[0].vertices), float(p[1].metallic), dtype=np.float32) for p in plist])
         j_mid = np.concatenate([np.full(len(p[0].vertices), classify_material_id(p[1], p[2]), dtype=np.int32) for p in plist])
         j_low = decimate_mesh_clean(mk.union([p[0] for p in plist]) if len(plist) > 1 else plist[0][0], max(lod0_tris // 3, 280))
-        joint_baked_map[grp] = bake_high_to_low(
+        j_res = bake_high_to_low(
             j_hi, j_alb, j_rgh, j_mtl, j_low,
             high_vertex_mat_id=j_mid, ai_views=ai_views,
             tex_size=max(tex_size // 2, 512), weathering=weathering,
             delight_pass=bool(delight_pass), decal_strength=decal_strength,
         )
+        return grp, j_res
 
-    # Génère `LOD1` (40%, mipmap 512px) puis `LOD2` (15%, mipmap 256px) en cascade monotone stricte (`LOD0 > LOD1 > LOD2`) !
+    joint_baked_map: dict[str, dict] = {}
+    if joint_opaque_groups:
+        with ThreadPoolExecutor(max_workers=1 + len(joint_opaque_groups)) as ex:
+            fut_body = ex.submit(_bake_body_task)
+            fut_joints = [ex.submit(_bake_joint_task, item) for item in joint_opaque_groups.items()]
+            baked = fut_body.result()
+            for fj in fut_joints:
+                gk, gv = fj.result()
+                joint_baked_map[gk] = gv
+    else:
+        baked = _bake_body_task()
+
+    lod0_mesh = baked["mesh_lod0"]
+
+    # `LOD1` (40%, mipmap 512px) et `LOD2` (15%, mipmap 256px) en transfert d'atlas partagé instantané (< 0.06s !)
     lod1_raw = decimate_mesh_clean(low_base, min(len(low_base.faces) - 2, max(int(lod0_tris * 0.40), 64)))
     lod2_raw = decimate_mesh_clean(lod1_raw, min(len(lod1_raw.faces) - 2, max(int(lod0_tris * 0.15), 32)))
-    baked_lod1 = bake_high_to_low(
-        high_body, v_alb, v_rgh, v_mtl, lod1_raw,
-        high_vertex_mat_id=v_mid, ai_views=ai_views,
-        tex_size=max(tex_size // 2, 256), weathering=use_weather,
-        delight_pass=bool(delight_pass), decal_strength=decal_strength,
-    )
-    baked_lod2 = bake_high_to_low(
-        high_body, v_alb, v_rgh, v_mtl, lod2_raw,
-        high_vertex_mat_id=v_mid, ai_views=ai_views,
-        tex_size=max(tex_size // 4, 128), weathering=use_weather,
-        delight_pass=bool(delight_pass), decal_strength=decal_strength,
-    )
-    lod1_mesh = baked_lod1["mesh_lod0"]
-    lod2_mesh = baked_lod2["mesh_lod0"]
+    lod1_mesh = build_shared_atlas_lod(lod0_mesh, baked, lod1_raw, max(tex_size // 2, 256))
+    lod2_mesh = build_shared_atlas_lod(lod0_mesh, baked, lod2_raw, max(tex_size // 4, 128))
 
     # Construit la scène principale `LOD0` fusionnée en Draw Calls minimaux !
     def _assemble_lod_scene(body_mesh: trimesh.Trimesh, include_colliders: str | None = None) -> trimesh.Scene:
@@ -1136,17 +1207,15 @@ def export_game_package(
         p_nrm = rbx_dir / f"T_{clean_name}_NormalMap.png"
         p_mtl = rbx_dir / f"T_{clean_name}_MetalnessMap.png"
         p_rgh = rbx_dir / f"T_{clean_name}_RoughnessMap.png"
-        rbx_col_img.save(p_col, optimize=True, compress_level=9)
-        rbx_nrm_img.save(p_nrm, optimize=True, compress_level=9)
-        rbx_mtl_img.save(p_mtl, optimize=True, compress_level=9)
-        rbx_rgh_img.save(p_rgh, optimize=True, compress_level=9)
+        rbx_col_img.save(p_col, compress_level=2)
+        rbx_nrm_img.save(p_nrm, compress_level=2)
+        rbx_mtl_img.save(p_mtl, compress_level=2)
+        rbx_rgh_img.save(p_rgh, compress_level=2)
 
         sc_rbx = trimesh.Scene(base_frame=f"{clean_name}_roblox")
 
         # MODE HAUTE DENSITÉ TEXELS ROBLOX (`v5.1` Dual-1024² `SurfaceAppearance`) :
-        # Pour les objets très allongés (> 4.2:1, ex: `katana`, `sword`), on sépare automatiquement
-        # `Blade` (1024²) et `Hilt` (1024²) afin de quadrupler la finesse du tressage `tsuka-maki`
-        # et de la garde `tsuba` dans Roblox Studio tout en restant à 2 Draw Calls !
+        # Bake parallèle multi-cœurs (`Blade` + `Hilt`) en réutilisant `hp_cache` !
         sorted_spans = np.sort(all_bounds[1] - all_bounds[0])[::-1]
         is_elongated_weapon = (
             len(static_part_entries) >= 2
@@ -1157,28 +1226,33 @@ def export_game_package(
             blade_parts = [e for e in static_part_entries if any(k in e[2].lower() for k in ("blade", "fuller", "edge", "tip"))]
             hilt_parts = [e for e in static_part_entries if e not in blade_parts]
             if blade_parts and hilt_parts:
-                for zname, zentries in (("Blade", blade_parts), ("Hilt", hilt_parts)):
-                    z_meshes = [e[0].copy() for e in zentries]
+                def _bake_zone_worker(zname_entries):
+                    zn, zent = zname_entries
+                    z_meshes = [e[0].copy() for e in zent]
                     z_low = decimate_mesh_clean(
                         mk.union(z_meshes) if len(z_meshes) > 1 else z_meshes[0],
                         min(ROBLOX_MAX_TRIS_PER_PART - 200, max(lod0_tris // 2, 900)),
                     )
                     z_baked = bake_high_to_low(
                         high_body, v_alb, v_rgh, v_mtl, z_low,
-                        high_vertex_mat_id=v_mid, ai_views=ai_views,
+                        high_vertex_mat_id=v_mid, ai_views=ai_views, hp_cache=hp_cache,
                         tex_size=ROBLOX_MAX_TEX_SIZE, weathering=use_weather,
                         delight_pass=bool(delight_pass), decal_strength=decal_strength,
                     )
-                    z_mat, z_col, z_nrm, z_mtl, z_rgh = _make_rbx_material(z_baked, f"{clean_name}_{zname}", ROBLOX_MAX_TEX_SIZE)
-                    z_col.save(rbx_dir / f"T_{clean_name}_{zname}_ColorMap.png", optimize=True, compress_level=9)
-                    z_nrm.save(rbx_dir / f"T_{clean_name}_{zname}_NormalMap.png", optimize=True, compress_level=9)
-                    z_mtl.save(rbx_dir / f"T_{clean_name}_{zname}_MetalnessMap.png", optimize=True, compress_level=9)
-                    z_rgh.save(rbx_dir / f"T_{clean_name}_{zname}_RoughnessMap.png", optimize=True, compress_level=9)
+                    z_mat, z_col, z_nrm, z_mtl, z_rgh = _make_rbx_material(z_baked, f"{clean_name}_{zn}", ROBLOX_MAX_TEX_SIZE)
+                    z_col.save(rbx_dir / f"T_{clean_name}_{zn}_ColorMap.png", compress_level=2)
+                    z_nrm.save(rbx_dir / f"T_{clean_name}_{zn}_NormalMap.png", compress_level=2)
+                    z_mtl.save(rbx_dir / f"T_{clean_name}_{zn}_MetalnessMap.png", compress_level=2)
+                    z_rgh.save(rbx_dir / f"T_{clean_name}_{zn}_RoughnessMap.png", compress_level=2)
                     zm = z_baked["mesh_lod0"].copy()
                     zm.apply_scale(scale_k)
                     zm.visual = trimesh.visual.TextureVisuals(uv=np.asarray(z_baked["mesh_lod0"].visual.uv, dtype=np.float64), material=z_mat)
-                    sc_rbx.add_geometry(zm, node_name=f"{clean_name}_{zname}", geom_name=f"{clean_name}_{zname}")
-                    rbx_hd_zones[zname] = int(len(zm.faces))
+                    return zn, zm
+
+                with ThreadPoolExecutor(max_workers=2) as zpool:
+                    for zname, zm in zpool.map(_bake_zone_worker, [("Blade", blade_parts), ("Hilt", hilt_parts)]):
+                        sc_rbx.add_geometry(zm, node_name=f"{clean_name}_{zname}", geom_name=f"{clean_name}_{zname}")
+                        rbx_hd_zones[zname] = int(len(zm.faces))
 
         if not rbx_hd_zones:
             rbx_body = lod0_mesh.copy()
@@ -1186,7 +1260,7 @@ def export_game_package(
                 rbx_raw = decimate_mesh_clean(low_base, ROBLOX_MAX_TRIS_PER_PART - 200)
                 rbx_body = bake_high_to_low(
                     high_body, v_alb, v_rgh, v_mtl, rbx_raw,
-                    high_vertex_mat_id=v_mid, ai_views=ai_views,
+                    high_vertex_mat_id=v_mid, ai_views=ai_views, hp_cache=hp_cache,
                     tex_size=rbx_res, weathering=use_weather,
                     delight_pass=bool(delight_pass), decal_strength=decal_strength,
                 )["mesh_lod0"]
@@ -1280,9 +1354,9 @@ def export_game_package(
     if "unreal" in engines:
         ue_dir = out_path / "unreal"
         ue_dir.mkdir(exist_ok=True)
-        baked["albedo"].save(ue_dir / f"T_{clean_name}_BC.png")
-        baked["orm"].save(ue_dir / f"T_{clean_name}_ORM.png")
-        baked["normal_dx"].save(ue_dir / f"T_{clean_name}_N.png")  # DirectX -Y !
+        baked["albedo"].save(ue_dir / f"T_{clean_name}_BC.png", compress_level=2)
+        baked["orm"].save(ue_dir / f"T_{clean_name}_ORM.png", compress_level=2)
+        baked["normal_dx"].save(ue_dir / f"T_{clean_name}_N.png", compress_level=2)  # DirectX -Y !
         sc_ue = _assemble_lod_scene(lod0_mesh, include_colliders="unreal")
         ue_glb = ue_dir / f"SM_{clean_name}.glb"
         mk.export_glb_pbr(sc_ue, str(ue_glb), webp=False)
@@ -1296,9 +1370,9 @@ def export_game_package(
     if "unity" in engines:
         un_dir = out_path / "unity"
         un_dir.mkdir(exist_ok=True)
-        baked["albedo"].save(un_dir / f"T_{clean_name}_BaseMap.png")
-        baked["unity_mask"].save(un_dir / f"T_{clean_name}_MaskMap.png")
-        baked["normal_gl"].save(un_dir / f"T_{clean_name}_NormalGL.png")
+        baked["albedo"].save(un_dir / f"T_{clean_name}_BaseMap.png", compress_level=2)
+        baked["unity_mask"].save(un_dir / f"T_{clean_name}_MaskMap.png", compress_level=2)
+        baked["normal_gl"].save(un_dir / f"T_{clean_name}_NormalGL.png", compress_level=2)
         exported_profiles["unity"] = {
             "prefab_glb": str(glb_main),
             "base_map": str(un_dir / f"T_{clean_name}_BaseMap.png"),
@@ -1316,26 +1390,25 @@ def export_game_package(
 
     pv.build_preview(str(out_path), title=f"{clean_name} — Game-Ready LOD0 ({len(lod0_mesh.faces)} tris)", glb=str(glb_main))
 
-    # Planche de contrôle Technical Artist `qa_game_sheet.png` (6 panneaux comparatifs HD)
+    # Planche de contrôle Technical Artist `qa_game_sheet.png` rendue en parallèle sur 4 threads !
     az, el = renderer.DEFAULT_VIEWS["three_quarter"]
     hi_vis = high_body.copy()
     hi_vis.visual.vertex_colors = np.column_stack([
         (np.clip(v_alb, 0.0, 1.0) * 255).astype(np.uint8),
         np.full(len(v_alb), 255, dtype=np.uint8),
     ])
-    im_hi = renderer.render_view(trimesh.Scene([hi_vis]), az, el, size=560)
-    im_lod0 = renderer.render_view(sc_lod0, az, el, size=560)
-    im_lod2 = renderer.render_view(sc_lod2, az, el, size=560)
-
-    # Rendu superposé du maillage `LOD0` + enveloppes de collision convexes `UCX_*` vertes translucides !
     sc_col_vis = _assemble_lod_scene(lod0_mesh, include_colliders="unreal")
-    im_col = renderer.render_view(sc_col_vis, az, el, size=560)
+    with ThreadPoolExecutor(max_workers=4) as rpool:
+        im_hi, im_lod0, im_lod2, im_col = rpool.map(
+            lambda sc_in: renderer.render_view(sc_in, az, el, size=480),
+            [trimesh.Scene([hi_vis]), sc_lod0, sc_lod2, sc_col_vis],
+        )
     draw_c = ImageDraw.Draw(im_col)
     draw_c.rectangle((10, 10, 310, 38), fill=(18, 28, 22))
     draw_c.text((18, 16), f"{len(colliders)} hulls UCX ({sum(len(h.faces) for h in colliders)} tris) + {len(sockets)} sockets", fill=(110, 245, 165))
 
-    im_nrm = baked["normal_gl"].resize((560, 560), Image.BILINEAR)
-    im_orm = baked["orm"].resize((560, 560), Image.BILINEAR)
+    im_nrm = baked["normal_gl"].resize((480, 480), Image.BILINEAR)
+    im_orm = baked["orm"].resize((480, 480), Image.BILINEAR)
 
     qa_sheet = out_path / "qa_game_sheet.png"
     renderer.contact_sheet(
@@ -1405,7 +1478,10 @@ def main(argv=None) -> int:
     } or None
 
     if args.source in recipes.REGISTRY:
-        b = recipes.get(args.source)["builder"]()
+        import inspect
+        mk.set_quality(1.0)
+        fn_b = recipes.get(args.source)["builder"]
+        b = fn_b(textured=False) if "textured" in inspect.signature(fn_b).parameters else fn_b()
         asset_name = args.name or args.source
         src = b
     else:
