@@ -4,6 +4,23 @@
 
 ![Vitrine Technique 3d-forge v5.1 — Ultra Design & Texture Engine](docs/img/v5_1_ultra_showcase.png)
 
+## 🤖 Utiliser avec un Agent IA — Prompt Copier-Coller en 1 clic (`< 90 s`)
+
+Ce dépôt inclut :
+- **Chargement automatique zéro-config** dès qu'un agent ouvre ce repo : **[`AGENTS.md`](AGENTS.md)** *(Arena, Codex, Cursor, Windsurf, Cline, OpenCode)* · **[`CLAUDE.md`](CLAUDE.md)** *(Claude Code)* · **[`.github/copilot-instructions.md`](.github/copilot-instructions.md)** *(GitHub Copilot)* · **[`SKILL.md`](SKILL.md)** *(Skill complet)*.
+- **[`PROMPT_AGENT_IA.md`](PROMPT_AGENT_IA.md)** : 3 prompts prêts à copier-coller en 1 clic (Universel, Court, et Spécial Peinture GPU Z-Buffer).
+
+**Clique sur l'icône 📋 en haut à droite de ce bloc pour le coller dans n'importe quel Agent IA :**
+
+```markdown
+Utilise le skill `3d-forge v5.1 Turbo` depuis `https://github.com/DimalaxYT/3F` (clone le repo si besoin et lis `AGENTS.md` + `SKILL.md`) pour générer un asset 3D réaliste prêt pour **Roblox Studio** (`roblox/<nom>_roblox.glb` en PNG Studs + `setup_<nom>.lua`) et **Unreal Engine 5** (`unreal/SM_<nom>.glb`) en **< 90 secondes** :
+1. Hard-Surface / Arme / Véhicule : écris `custom_<nom>.py` (`def build() -> mk.Builder`) avec de vraies formes profilées (`meshkit.py` + boulons/évents/rails/loquets/poignées étanches de `scripts/greebles.py`). Organique / Créature : génère `front.png` + `side.png` en parallèle (`offer_options=False`).
+2. Lance UNE SEULE commande : `python3 scripts/turbo_forge.py ... -o out/<nom>` (zéro `research.py fetch`, zéro `--faces all`, zéro boucle de 30 min !).
+3. Vérifie uniquement `out/<nom>/qa_game_sheet.png` (max 1 retouche si besoin) et livre-moi l'aperçu + les fichiers `roblox/` et `unreal/`.
+
+DEMANDE : [DÉCRIS TON MODÈLE 3D ICI]
+```
+
 > ### Nouveautés Majeures `3d-forge v5.1 — Ultra Design & Texture Engine`
 > 1. **Bibliothèque Mécanique Hard-Surface 100 % Étanche (`scripts/greebles.py`)** : `hex_bolt` (empreinte 6-pans creuse BTR), `bolt_array`, `toggle_latch` (loquet à étrier acier cintré `tube_sweep`), `louver_vent` (persiennes d'aération inclinées), `picatinny_rail` (rail cranté MIL-STD-1913), `ribbed_conduit`, `ergonomic_handle` et `corner_armor_cap` — zéro simple boîte cubique sur `sci_fi_crate` (`44` pièces mécaniques profilées -> **`3` Draw Calls** temps réel !).
 > 2. **Peinture Texture Multi-Vues GPU Datacenter à Z-Buffer Exact (`gpu_bridge.py` + `--ai-front/--ai-side/--ai-top`)** : génère des guides orthographiques millimétrés (`ortho_meta.json`), peint les pochoirs industriels (`CARGO BAY 04`, `CR-04`), micro-rayures et joints sur le GPU Datacenter, supprime l'éclairage studio (`delight.py`), puis reprojette dans l'UV avec **test d'occultation Z-buffer par caméra** (zéro bavure sur les faces cachées, couvercle articulé `lid` aligné au sous-pixel !).
