@@ -359,12 +359,23 @@ def _compute_tangent_frame(verts_cam: np.ndarray, faces: np.ndarray,
     return T, B
 
 
+# v5.7 — encodage/décodage sRGB par LUT : `np.power` coûtait à lui seul près de
+# 1 s par vue sur une image 2048², puisqu'il est désormais appliqué à l'image
+# entière (et non plus aux seuls fragments couverts). La LUT 4096 entrées est
+# exacte au 1/4096 d'un niveau 8 bits, et ~6x plus rapide.
+_SRGB_LUT_N = 4096
+_SRGB_TO_LIN_LUT = np.power(np.linspace(0.0, 1.0, _SRGB_LUT_N), 2.2).astype(np.float32)
+_LIN_TO_SRGB_LUT = np.power(np.linspace(0.0, 1.0, _SRGB_LUT_N), 1.0 / 2.2).astype(np.float32)
+
+
 def _srgb_to_linear(c):
-    return np.power(np.clip(c, 0.0, 1.0), 2.2)
+    idx = (np.clip(c, 0.0, 1.0) * (_SRGB_LUT_N - 1)).astype(np.int32)
+    return _SRGB_TO_LIN_LUT[idx]
 
 
 def _linear_to_srgb(c):
-    return np.power(np.clip(c, 0.0, 1.0), 1.0 / 2.2)
+    idx = (np.clip(c, 0.0, 1.0) * (_LIN_TO_SRGB_LUT_N := _SRGB_LUT_N - 1)).astype(np.int32)
+    return _LIN_TO_SRGB_LUT[idx]
 
 
 def _tone(c):
@@ -578,11 +589,16 @@ def _shade_fragments(fi, w0, w1, w2, depth, verts_cam, vn_cam, fn_cam,
     k_g = ((rough_c + 1.0) ** 2) * 0.125
     g1_v = ndv / (ndv * (1.0 - k_g) + k_g)
 
-    L_key, L_fill, L_rim, _ = lights
+    L_key, L_fill, L_rim, I_l = lights
+    # chromaticités de plateau (octabox chaude, strip-box froide, rim bleutée)
+    c_key = np.array([1.000, 0.970, 0.925])
+    c_fill = np.array([0.758, 0.842, 1.000])
+    c_rim = np.array([0.824, 0.883, 1.000])
+    _KN = 3.05 / max(float(I_l[0]), 1e-6)      # la clé garde son exposition
     light_defs = (
-        (L_key,  np.array([[3.05, 2.96, 2.82]]), key_vis),
-        (L_fill, np.array([[0.72, 0.80, 0.95]]), 1.0),
-        (L_rim,  np.array([[1.55, 1.66, 1.88]]), 1.0),
+        (L_key,  (c_key * I_l[0] * _KN)[None, :], key_vis),
+        (L_fill, (c_fill * I_l[1] * _KN)[None, :], 1.0),
+        (L_rim,  (c_rim * I_l[2] * _KN)[None, :], 1.0),
     )
 
     lo = np.zeros((len(fi), 3), dtype=np.float64)
@@ -667,7 +683,9 @@ def _shade_fragments(fi, w0, w1, w2, depth, verts_cam, vn_cam, fn_cam,
         emissive_lin = _srgb_to_linear(chroma) * (peak ** 0.85) * 1.35
     else:
         emissive_lin = 0.0
-    return _tone((lo * (0.35 + 0.65 * ao) + ibl + cc_lin + emissive_lin) * 1.06)
+    # v5.7 — retour en LINÉAIRE : la tonemap est appliquée une seule fois en fin
+    # d'image, après calcul de l'exposition sur la silhouette réelle.
+    return (lo * (0.35 + 0.65 * ao) + ibl + cc_lin + emissive_lin) * 1.06
 
 
 def _post_finish(img: Image.Image, bloom: bool = True, vignette: bool = True,
@@ -707,7 +725,8 @@ def _post_finish(img: Image.Image, bloom: bool = True, vignette: bool = True,
 
 
 def render_view(scene: trimesh.Scene, azimuth_deg=42.0, elevation_deg=22.0,
-                size=1024, fov=38.0, ssaa=2, shadow=True, post=True) -> Image.Image:
+                size=1024, fov=38.0, ssaa=2, shadow=True, post=True,
+                return_mask=False) -> Image.Image:
     parts = _gather(scene)
     if not parts:
         raise ValueError("scène vide")
@@ -730,13 +749,18 @@ def render_view(scene: trimesh.Scene, azimuth_deg=42.0, elevation_deg=22.0,
     L_key = np.array([0.35, 0.45, 0.83]); L_key /= np.linalg.norm(L_key)
     L_fill = np.array([-0.62, 0.18, 0.55]); L_fill /= np.linalg.norm(L_fill)
     L_rim = np.array([0.05, -0.72, 0.25]); L_rim /= np.linalg.norm(L_rim)
-    # v5.6 — key/fill ratio augmenté (1.05/0.38 -> 1.35/0.26) : la separation
-    # plan clair / plan sombre est ce qui distingue un rendu produit d'une
-    # image plate ; l'IBL ambiante est réduite d'autant pour ne pas compenser.
+    # Intensités clé / remplissage / contre (v5.7).
+    # BUG CORRIGÉ : ce vecteur était construit puis JAMAIS utilisé (`_` dans
+    # `light_defs`), les radiances restant codées en dur à 3.05 / 2.15 / 1.75 —
+    # soit un remplissage à 70 % de la clé. Trois lumières quasi égales ne
+    # produisent aucun modelé sur une forme lisse : le pion d'échecs se mesurait
+    # à une luminance de 0.945 avec une dynamique de 0.09, une surface morte.
+    # `I` pilote désormais réellement l'énergie, normalisée pour que la clé
+    # conserve l'étalonnage d'exposition (3.05).
     I = np.array([1.35, 0.26, 0.46])
     lights = (L_key, L_fill, L_rim, I)
 
-    img = np.zeros((H, W, 3))
+    img = np.zeros((H, W, 3), dtype=np.float32)   # espace LINÉAIRE (v5.7)
     zbuf = np.full((H, W), np.inf)
 
     # ---- fond dégradé studio ----
@@ -748,7 +772,8 @@ def render_view(scene: trimesh.Scene, azimuth_deg=42.0, elevation_deg=22.0,
     rad_bg = np.sqrt(((xx - W * 0.5) / (W * 0.74)) ** 2
                      + ((yy - H * 0.44) / (H * 0.74)) ** 2)
     pool = np.clip(1.0 - 0.34 * rad_bg ** 1.7, 0.5, 1.0)[..., None]
-    img[:] = (BG_TOP * (1 - grad) + BG_BOTTOM * grad) * pool
+    bg_lin = (BG_TOP * (1 - grad) + BG_BOTTOM * grad) * pool
+    img[:] = _srgb_to_linear(bg_lin).astype(np.float32)
 
     # ---- ombre de contact : projection C via PIL.ImageDraw + flou Gaussien ----
     if shadow:
@@ -911,9 +936,9 @@ def render_view(scene: trimesh.Scene, azimuth_deg=42.0, elevation_deg=22.0,
             xi, yi = xs[idx], ys[idx]
             sx = np.clip(xi + rx_off[idx], 0, W - 1)
             sy = np.clip(yi + ry_off[idx], 0, H - 1)
-            bg_lin = _srgb_to_linear(img[sy, sx])
+            bg_lin = img[sy, sx]
             L_glass = bg_lin * beer[idx] * tir_atten[idx] * (1.0 - fres[idx]) + refl_lin[idx]
-            img[yi, xi] = _linear_to_srgb(np.clip(L_glass, 0.0, 1.0) * 0.92 + 0.08 * np.clip(spec_o[idx], 0.0, 2.0))
+            img[yi, xi] = np.clip(L_glass, 0.0, None) * 0.92 + 0.08 * np.clip(spec_o[idx], 0.0, 2.0)
             rem = np.ones(len(flat), dtype=bool)
             rem[idx] = False
             flat = flat[rem]
@@ -922,9 +947,45 @@ def render_view(scene: trimesh.Scene, azimuth_deg=42.0, elevation_deg=22.0,
             beer, fres, tir_atten = beer[rem], fres[rem], tir_atten[rem]
             refl_lin, spec_o = refl_lin[rem], spec_o[rem]
 
+    # ---- Auto-exposition sur la silhouette (v5.7) --------------------------
+    # Sans ça, un albédo clair (pion d'échecs 0.94, saladier, assiette) partait
+    # à ~2.1 en linéaire : ACES y est plat, la surface se mesurait à une
+    # luminance de 0.945 avec une dynamique de 0.09 -> blanc sans modelé.
+    # On n'expose JAMAIS au-dessus de 1.0 (aucun asset déjà correct ne bouge) et
+    # on vise un point blanc à 0.90 en linéaire.
+    exposure = 1.0
+    cov_px = np.isfinite(zbuf)
+    if cov_px.sum() > 256:
+        lum_obj = (img @ np.array([0.2126, 0.7152, 0.0722]))[cov_px]
+        lum_obj = lum_obj[np.isfinite(lum_obj)]
+        if lum_obj.size > 256:
+            p95 = float(np.percentile(lum_obj, 95))
+            if p95 > 0.62:
+                exposure = float(np.clip(0.62 / p95, 0.38, 1.0))
+    # L'exposition ne s'applique qu'au SUJET : le cyclorama reste identique d'un
+    # asset à l'autre (catalogue homogène). Raccord doux par un masque flouté
+    # pour éviter une couture sur l'anticrénelage de la silhouette.
+    toned_obj = _tone(img * exposure)
+    if exposure < 0.999:
+        toned_bg = _tone(img)
+        m_cov = cov_px.astype(np.float64)
+        m_cov = np.asarray(Image.fromarray((m_cov * 255).astype(np.uint8)).filter(
+            ImageFilter.GaussianBlur(radius=1.2)), dtype=np.float64) / 255.0
+        img = toned_obj * m_cov[..., None] + toned_bg * (1.0 - m_cov[..., None])
+    else:
+        img = toned_obj
+
     out = Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8))
+    # Masque de silhouette exact (z-buffer, avant réduction) : indispensable pour
+    # mesurer la matière d'un asset sans compter le cyclorama comme du sujet.
+    mask = None
+    if return_mask:
+        cov = np.isfinite(zbuf)
+        mask = Image.fromarray((cov * 255).astype(np.uint8)).resize(
+            (int(size), int(size)), Image.LANCZOS)
     out = out.resize((int(size), int(size)), Image.LANCZOS)
-    return _post_finish(out) if post else out
+    res = _post_finish(out) if post else out
+    return (res, mask) if return_mask else res
 
 
 def render_views(scene, outdir, stem, views=None, size=1024, prefix="") -> list:

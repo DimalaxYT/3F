@@ -356,3 +356,61 @@ Objectif : la qualité *visuelle* des assets, mesurée puis corrigée là où el
 mesure `metallic 0.54` (la soie devrait être à 0). L'atlas est sain (ratio UV 0.947) et la
 contrainte unitaire fonctionne : le chemin de bake de cette zone reste à élucider (piste :
 la région d'atlas n'est pas classée `MAT_TSUKA_WRAP` au pixel, alors qu'elle l'est au sommet).
+
+
+---
+
+## Vague v5.7 — qualité de design, passe 2 (audit des 20 recettes)
+
+Cette vague part d'un **audit complet du catalogue** (20 recettes rendues et mesurées),
+pas de deux assets choisis. Trois familles de défauts sont sorties.
+
+### A. Éclairage : le vecteur d'intensités n'était pas branché
+
+| # | Défaut mesuré | Correction |
+|---|---|---|
+| E1 | `I = [key, fill, rim]` était **construit puis jamais utilisé** (`_` dans `light_defs`) : les radiances restaient codées en dur à **3.05 / 2.15 / 1.75**, soit un remplissage à **70 %** de la clé. Trois lumières quasi égales ne sculptent aucune forme lisse. | `I` pilote réellement l'énergie (clé normalisée pour garder l'exposition). |
+| E2 | aucune adaptation aux albédos clairs : un sujet blanc partait cramé | **auto-exposition** mesurée sur la silhouette (p95 visé 0.62), appliquée **au sujet seulement** (le cyclorama reste identique d'un asset à l'autre). |
+| E3 | le rendu était tonemappé **par fragment**, donc impossible d'exposer l'image globalement | rendu en **linéaire**, une seule tonemap ACES en fin de chaîne + LUT sRGB (coût `np.power` évité). |
+
+**Résultat mesuré sur le pion d'échecs** : luminance médiane **0.945 → 0.80**, dynamique
+p95-p05 **0.091 → 0.173**. Saladier 0.107 → 0.213, assiette 0.099 → 0.191.
+
+### B. Matière : l'albédo n'avait aucune réserve
+
+| # | Défaut mesuré | Correction |
+|---|---|---|
+| M1 | albédo du pion à **0.94** de luminance médiane (p99 = 1.00) : grain et macro-variations étaient **clippés à 1.0**, la moitié de la dynamique perdue | **budget d'albédo** : compression C1 au-dessus de 0.72, plafond 0.86 (`compress_albedo_headroom`), appliquée à l'entrée ET en invariant de sortie. p99 **0.94 → 0.84** |
+| M2 | la crasse était identique sur toutes les matières : une porcelaine blanche virait au beige sale | la crasse est **dosée par la clarté** de la matière (`dirt_scale`) : pleine sur les matières sombres/métaux, −62 % sur les blancs |
+| M3 | l'usure d'arêtes posait de l'**acier gris** sur une peinture saturée : la jonction cône/fût de la fusée sortait en gris neutre 0.787 au milieu d'un rouge 0.68/0.61/0.60 | l'éclat est interpolé vers un **éclaircissement de la teinte** selon la saturation de la peinture |
+
+### C. Robustesse : un asset entier ne se construisait pas
+
+| # | Défaut mesuré | Correction |
+|---|---|---|
+| R1 | **`wine_glass` était incassable** : toutes ses pièces partent dans `glass_parts`, `static_meshes` reste vide et `np.concatenate([])` lève | un asset 100 % verre cuit désormais son atlas de support, garde `alphaMode: BLEND` et passe les gates |
+| R2 | `uv_fill` / `uv_overlap` mesuraient **le plus gros mesh**, qui peut être une pièce émissive sans UV (abat-jour) → `invalid index to scalar variable` | les gates mesurent le mesh **texturé** le plus lourd |
+| R3 | `all_glass_asset` non défini sur le chemin « fichier externe » → `UnboundLocalError` (fixture d'eval) | initialisé pour tous les chemins d'entrée |
+
+### D. Gates : deux faux positifs supprimés, une vraie gate ajoutée
+
+- `albedo_design` (v5.6) rejetait une **porcelaine blanche** (sat 0.02) et un aplat émaillé :
+  faux positifs. Elle mesure maintenant la **réserve de dynamique** (p99 ≤ 0.92, cramés ≤ 2 %),
+  c'est-à-dire le défaut réel.
+- **`shading_modeled`** (nouvelle, 25 gates pour la caisse) : rend la vue de face et vérifie que
+  la lumière **sculpte** l'objet — dynamique p95-p05 ≥ 0.12 et médiane ≤ 0.90, mesurées **sur la
+  silhouette exacte** (masque z-buffer, `render_view(return_mask=True)`).
+  C'est cette gate qui aurait attrapé le bug E1.
+- **57 tests** (6 nouveaux dans `tests/test_v5_7_design.py`) + mutant d'albédo cramé.
+
+### Limites connues (assumées, mesurées)
+
+- **Fusée** : à la jonction cône/fût, le bake choisit parfois le capuchon blanc du fût, qui est
+  *enterré* sous le cône rouge mais à distance nulle. Un filtre « surfaces enterrées » a été
+  écrit puis **retiré** : il retirait 63 % des échantillons d'un bol aux parois fines (faux
+  positifs). Le défaut est passé d'une **déchirure large** à un **liseré fin et régulier**, qui
+  se lit comme une ligne de joint. Correctif propre à faire : rastériser le bake par région UV
+  plutôt que par plus proche voisin 3D.
+- **`stl_watertight` de la fusée et de la voiture** : préexistant à cette vague, non traité ici.
+- Les durées `bench` sont **indicatives** : la même recette mesure 11 s ou 17 s selon la machine
+  (vérifié en rejouant la base v5.6 sur cette machine : 17.25 s).

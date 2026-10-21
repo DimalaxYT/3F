@@ -18,12 +18,13 @@ Objet demandé : [ÉCRIS TON IDÉE ICI — ex: un sabre laser gravé noir et arg
 ```
 
 > ### Nouveautés `v5.2 → v5.7 — QA mesurable, vitesse, reproductibilité, design`
-> - **24 gates mesurables** (`scripts/gates.py`) au lieu d'une checklist humaine : budget de tris par cible (`hero`/`ugc`/`print`), cohérence des cartes PBR, anims, normales `DirectX -Y`, silhouette LOD0↔LOD2, UV, structure Luau, budget UCX, néon émissif. Chaque gate a un **test « mutant »** (`tests/test_gates_mutants.py`) qui casse volontairement un package et vérifie qu'elle passe au rouge.
+> - **25 gates mesurables** (`scripts/gates.py`) au lieu d'une checklist humaine : budget de tris par cible (`hero`/`ugc`/`print`), cohérence des cartes PBR, anims, normales `DirectX -Y`, silhouette LOD0↔LOD2, UV, structure Luau, budget UCX, néon émissif. Chaque gate a un **test « mutant »** (`tests/test_gates_mutants.py`) qui casse volontairement un package et vérifie qu'elle passe au rouge.
 > - **`turbo_forge` : ~12 s** (contre ~19 s) — le patch PNG de trimesh ne s'appliquait jamais (PIL fige sa table de dispatch à l'import), cache d'encodage des textures ré-encodées, colliders convexes réécrits (4,4 s → 70 ms) et planche QA rendue en un seul pool (`ssaa=1.5`).
 > - **Reproductibilité** : deux runs identiques donnent désormais des octets identiques — `trimesh.sample.sample_surface` ignorait le seed global, l'AO variait donc à chaque exécution (jusqu'à 8 octets de GLB et des pixels différents).
 > - **Confort agent** : `--dry-run` (plan sans exécuter), `--resume` (re-run identique en **0,8 s**), `--gif` (turntable), `scripts/serve_preview.py` (live preview du `preview.html`).
 > - **CI visuelle** : `scripts/visual_regression.py` compare l'IoU de silhouette des recettes à un baseline commité — une proportion cassée qui passe tous les tests unitaires échoue ici.
 > - **Qualité de rendu (v5.6-5.7)** : éclairage clé/remplissage réellement contrasté, ombre de contact à deux couches, bloom émissif, vignettage, netteté ; l'usure d'arêtes était déclenchée sur **80 % des sommets** (seuil de courbure trop bas : médiane 0.71) — recalibrée à 40 % ; ajout de variations à grande échelle (dérive de teinte par panneau, poussière verticale) ; le néon perdait son intensité à l'export (glTF borne `emissiveFactor` à 1) — exporté via `KHR_materials_emissive_strength` ; fond plat remplacé par un **cyclorama** (une lame à 0.886 de luminance était invisible sur un fond à 0.99) et trempe du katana remise à l'endroit (le tranchant trempé était plus spéculaire que le corps, ce qui écrasait le `hamon` sous la courbe ACES).
+> - **Modelé (v5.7)** : le vecteur d'intensités clé/remplissage/contre était construit puis **jamais utilisé** — trois lumières quasi égales (3.05 / 2.15 / 1.75) ne sculptaient aucune forme lisse. Le rendu passe en **linéaire** avec **auto-exposition** sur la silhouette et une seule tonemap : la dynamique du pion d'échecs passe de **0.09 à 0.17**. L'albédo reçoit un **budget** (plafond 0.86) sans lequel grain et variations étaient clippés, la crasse est dosée selon la clarté de la matière, et un asset **100 % verre** (`wine_glass`) se construit enfin.
 > - **Dépôt allégé** : `examples/` **174 Mo → 1,1 Mo** dans l'arbre ; les 5 packs lourds restent dans l'historique et se restaurent avec `python3 scripts/fetch_examples.py`.
 
 > ### Nouveautés Majeures `3d-forge v5.1 — Ultra Design & Texture Engine`
@@ -94,8 +95,8 @@ python3 scripts/turbo_forge.py mon_arme_custom.py --lod0-tris 4200 -o out/mon_ar
 <!-- BENCH:START -->
 | asset | high-poly | LOD0 (poids) | LOD1 | LOD2 | draw calls | turbo CPU (indicatif) |
 |---|---|---|---|---|---|---|
-| `katana` | 6,508 tris | **6,840 tris** (965 Ko) | 3,129 tris | 1,228 tris | 10 ➔ 1 | 11.99 s |
-| `sci_fi_crate` | 13,076 tris | **3,796 tris** (1063 Ko) | 1,520 tris | 836 tris | 44 ➔ 3 | 11.27 s |
+| `katana` | 6,508 tris | **6,846 tris** (945 Ko) | 3,127 tris | 1,228 tris | 10 ➔ 1 | 15.94 s |
+| `sci_fi_crate` | 13,076 tris | **3,796 tris** (1040 Ko) | 1,520 tris | 836 tris | 44 ➔ 3 | 15.64 s |
 <!-- BENCH:END -->
 
 > Mesures reproductibles : `python3 scripts/bench.py` (régénère `docs/bench.json`

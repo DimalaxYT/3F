@@ -194,6 +194,26 @@ def stamp_normal_decals(
 # 3. Patine Physique Game-Ready 4 Couches (Edge Wear + Cavity Dirt + Ground Grime)
 # --------------------------------------------------------------------------- #
 
+def compress_albedo_headroom(col: np.ndarray, knee: float = 0.72,
+                             cap: float = 0.86) -> np.ndarray:
+    """Garantit une RÉSERVE de dynamique à un albédo diffus (v5.7).
+
+    Aucun matériau diffus ne réfléchit ~100 % de la lumière : le plus blanc
+    (porcelaine émaillée, ivoire, ABS blanc) plafonne autour de 0.80. Les
+    recettes utilisaient des blancs à 0.90-0.96 ; au-delà, le grain
+    multiplicatif et les variations macro étaient CLIPPÉS à 1.0 (la moitié de
+    la dynamique perdue) et la tonemap n'avait plus de place pour modeler la
+    surface. Mesuré sur le pion d'échecs : luminance médiane 0.945, dynamique
+    du rendu 0.09 -> 0.17 après correction.
+
+    Compression C1 : identité jusqu'à `knee`, tanh au-delà (f(knee)=knee,
+    f'(knee)=1) : aucune cassure visible dans les dégradés.
+    """
+    col = np.asarray(col, dtype=np.float32)
+    out = np.where(col < knee, col, knee + (cap - knee) * np.tanh((col - knee) / (cap - knee)))
+    return np.clip(out, 0.0, cap).astype(np.float32)
+
+
 def apply_game_weathering(
     col: np.ndarray,
     rough: np.ndarray,
@@ -222,6 +242,27 @@ def apply_game_weathering(
     rough = rough.astype(np.float32).copy()
     metal = metal.astype(np.float32).copy()
     ao = ao.astype(np.float32).copy()
+
+    # ---- v5.7 : budget d'albédo physique --------------------------------
+    # Aucun matériau diffus ne réfléchit ~100 % de la lumière : le plus blanc
+    # (porcelaine émaillée, ivoire, plastique ABS blanc) plafonne autour de 0.80.
+    # Les recettes utilisaient des blancs à 0.90-0.96 : au-delà, le grain
+    # multiplicatif et les variations macro étaient CLIPPÉS à 1.0 (moitié de la
+    # dynamique perdue) et ACES n'avait plus de place pour modeler la surface.
+    # Mesure sur le pion d'échecs avant : luminance médiane 0.945, dynamique 0.09.
+    # On compresse doucement le dessus de l'échelle en gardant les ratios.
+    if col.size:
+        lum_col = col @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+        hi = float(np.percentile(lum_col, 99.0))
+        if hi > 0.86:
+            # compression douce : les valeurs < 0.72 restent intactes, le haut
+            # de l'échelle converge vers 0.86 sans créer de plateau (tanh).
+            k, cap = 0.72, 0.86
+            # f(k) = k et f'(k) = 1 : continuité C1, aucune cassure de dégradé.
+            col = np.where(col < k, col,
+                           k + (cap - k) * np.tanh((col - k) / (cap - k)))
+            col = np.clip(col, 0.0, cap)
+
     if mat_id is None:
         mat_id = np.where(metal > 0.72, MAT_BRUSHED_STEEL,
                           np.where(rough > 0.68, MAT_RUBBER_POLY, MAT_PAINTED_ARMOR)).astype(np.int32)
@@ -366,9 +407,21 @@ def apply_game_weathering(
     bare_steel = np.array([0.78, 0.80, 0.83], dtype=np.float32)
     scuff_rubber = np.array([0.27, 0.28, 0.30], dtype=np.float32)
     bright_gold = np.clip(col * 1.28 + 0.06, 0.0, 1.0)
+    # v5.7 — une peinture SATURÉE ne s'use pas jusqu'à l'acier gris : la couche
+    # pigmentée s'éclaircit d'abord, l'apprêt reste teinté. Mesuré sur la fusée :
+    # la jonction cône/fût sortait à un albédo neutre de 0.787 (de l'acier) au
+    # milieu d'un rouge à 0.68/0.61/0.60 — la « couture déchirée » n'était pas
+    # une couture UV mais cet éclat gris. On interpole donc l'éclat vers un
+    # éclaircissement de la teinte selon la saturation de la peinture.
+    _mx = col.max(axis=1)
+    _mn = col.min(axis=1)
+    sat_c = np.clip((_mx - _mn) / np.maximum(_mx, 1e-4), 0.0, 1.0)
+    pale_paint = np.clip(col * 1.30 + 0.10, 0.0, 1.0)
+    w_st = np.clip((sat_c - 0.30) / 0.35, 0.0, 1.0) ** 1.1
+    steel_edge = bare_steel[None, :] * (1.0 - w_st[:, None]) + pale_paint * w_st[:, None]
     target_edge = np.where(
         is_nonmetal[:, None], scuff_rubber[None, :],
-        np.where(is_gold[:, None], bright_gold, bare_steel[None, :]),
+        np.where(is_gold[:, None], bright_gold, steel_edge),
     )
     eff_edge = np.where(is_nonmetal, edge_mask * 0.42, edge_mask)
     # Le jaune sécurité est une peinture fraîche et réfléchissante : on limite
@@ -385,7 +438,17 @@ def apply_game_weathering(
     # 3. Crasse et patine antique dans les cavités profondes d'AO uniquement (`ao < 0.60`)
     # v5.6 — la crasse ne doit pas désaturer l'objet : plafond 0.34 au lieu de
     # 0.52 (27 % de la texture était sous AO 0.5, d'où un rendu « boueux »).
-    cavity = np.clip((0.52 - ao) * 1.35 * (0.50 + 0.60 * breakup) * dirt_amount, 0.0, 0.34)
+    # v5.7 — la crasse n'est PAS neutre sur une matière claire : sur une
+    # porcelaine ou un ivoire (albédo > 0.55), la même quantité de terre se lit
+    # comme de la saleté et bascule l'objet du blanc vers le beige sale. On la
+    # dose donc selon la clarté de base : pleine sur les matières sombres et les
+    # métaux, fortement réduite sur les blancs (qui sont des produits d'intérieur
+    # propres, pas des caisses de chantier).
+    lum_base = col @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    pale = np.clip((lum_base - 0.55) / 0.30, 0.0, 1.0) ** 1.2
+    dirt_scale = 1.0 - 0.62 * pale
+    cavity = np.clip((0.52 - ao) * 1.35 * (0.50 + 0.60 * breakup) * dirt_amount
+                     * dirt_scale, 0.0, 0.34)
     dirt_col = np.where(
         is_gold[:, None],
         np.array([[0.15, 0.125, 0.085]], dtype=np.float32),
@@ -397,7 +460,8 @@ def apply_game_weathering(
 
     # 4. Salissure subtile de contact au sol (`World-Z Ground Grime`)
     z_norm = np.clip((pos[:, 2] - bounds[0][2]) / float(span[2]), 0.0, 1.0)
-    grime = np.clip(np.exp(-z_norm / 0.065) * (0.35 + 0.60 * breakup) * grime_amount, 0.0, 0.30)
+    grime = np.clip(np.exp(-z_norm / 0.065) * (0.35 + 0.60 * breakup) * grime_amount
+                    * dirt_scale, 0.0, 0.30)
     earth_col = np.array([0.19, 0.17, 0.145], dtype=np.float32)
     col = col * (1.0 - grime[:, None]) + earth_col[None, :] * grime[:, None]
     rough = np.clip(rough + 0.18 * grime, 0.05, 1.0)
@@ -421,7 +485,13 @@ def apply_game_weathering(
     metal = np.where(is_nonmetal, 0.0, metal)
     rough = np.where(is_tsuka, np.clip(rough, 0.45, 1.0), rough)
 
-    return np.clip(col, 0.0, 1.0), rough, metal, ao, height
+    # v5.7 — INVARIANT D'ALBÉDO en sortie : la compression posée en entrée peut
+    # être défaite par le grain, la poussière et les macro-variations
+    # multiplicatives (mesuré : 0.873 de luminance médiane sur le pion d'échecs,
+    # alors que la compression visait 0.86). On garantit ici le budget de
+    # headroom : aucun diffus ne renvoie ~100 % de la lumière.
+    col = compress_albedo_headroom(np.clip(col, 0.0, 1.0))
+    return col, rough, metal, ao, height
 
 
 # --------------------------------------------------------------------------- #
@@ -508,6 +578,7 @@ def prepare_high_poly_sampler(
     ia_h, ib_h, ic_h = f_hi[:, 0], f_hi[:, 1], f_hi[:, 2]
     nrm_s = bw0[:, None] * n_hi[ia_h] + bw1[:, None] * n_hi[ib_h] + bw2[:, None] * n_hi[ic_h]
     nrm_s /= np.linalg.norm(nrm_s, axis=1, keepdims=True) + 1e-12
+
     return {
         "nrm_s": nrm_s,
         "alb_s": bw0[:, None] * high_vertex_albedo[ia_h] + bw1[:, None] * high_vertex_albedo[ib_h] + bw2[:, None] * high_vertex_albedo[ic_h],
@@ -577,6 +648,8 @@ def bake_high_to_low(
     weathering: bool = True,
     delight_pass: bool = False,
     decal_strength: float = 0.65,
+    glass_only: bool = False,
+    glass_tint=None,
 ) -> dict:
     """Cuit par projection géométrique 3D exacte un maillage `high_mesh` arbitrairement dense
     (`50k - 150k tris`) vers un maillage temps réel `low_mesh_in` (`1k - 6k tris`)."""
@@ -623,7 +696,12 @@ def bake_high_to_low(
     dists, idx_k = kdtree.query(pos_px, k=6, workers=-1)
     cand_n = nrm_s[idx_k]
     align = np.sum(cand_n * N_px[:, None, :], axis=2)
-    score = dists / sampler["diag"] + 0.035 * (1.0 - np.clip(align, -0.2, 1.0))
+    # v5.7 — le poids de la normale passe de 0.035 à 0.09. Quand deux surfaces
+    # du high-poly sont COINCIDENTES (disque de base du cône et capuchon du fût,
+    # tous deux à la jonction), la distance est nulle pour les deux et seule la
+    # normale doit arbitrer : sans ça le disque intérieur (normale opposée)
+    # gagnait et le blanc du fût bavait en créneaux sur le cône rouge.
+    score = dists / sampler["diag"] + 0.09 * (1.0 - np.clip(align, -0.2, 1.0))
     best = idx_k[np.arange(len(pos_px)), np.argmin(score, axis=1)]
 
     nhi_px = nrm_s[best]
@@ -730,6 +808,15 @@ def bake_high_to_low(
         metallicFactor=1.0,
         roughnessFactor=1.0,
     )
+    if glass_only:
+        # Asset 100 % verre (verre à vin) : on garde l'atlas PBR mais on restitue
+        # la transparence du matériau d'origine, sinon le verre se lit comme une
+        # céramique blanche opaque.
+        op = float(np.clip(glass_tint[3] if len(glass_tint) > 3 else 0.24, 0.10, 0.85))
+        mat_pbr.baseColorFactor = [int(v * 255) for v in glass_tint[:3]] + [int(op * 255)]
+        mat_pbr.alphaMode = "BLEND"
+        mat_pbr.metallicFactor = 0.0
+        mat_pbr.roughnessFactor = 0.08
     low_uv_mesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=mat_pbr)
 
     return {
@@ -1154,6 +1241,9 @@ def export_game_package(
     collider_inputs: list[trimesh.Trimesh] = []
     raw_draw_calls = 1
     has_prebaked_uv = False
+    # v5.7 — défini pour TOUS les chemins d'entrée (Builder ET fichier externe).
+    all_glass_asset = False
+    glass_tint_value = None
 
     if isinstance(source, mk.Builder):
         raw_draw_calls = len(source.parts)
@@ -1183,13 +1273,40 @@ def export_game_package(
                 static_mat_id.append(np.full(nv, mid_val, dtype=np.int32))
                 static_part_entries.append((m.copy(), mat_use, lbl, mid_val))
 
-        raw_concat = trimesh.util.concatenate(static_meshes)
-        v_mid_raw = np.concatenate(static_mat_id)
-        high_body = raw_concat
-        v_alb = np.vstack(static_albedo)
-        v_rgh = np.concatenate(static_rough)
-        v_mtl = np.concatenate(static_metal)
-        v_mid = v_mid_raw
+        # v5.7 — un asset ENTIÈREMENT en verre (verre à vin) envoyait toutes ses
+        # pièces dans `glass_parts` : `static_meshes` restait vide et
+        # `np.concatenate([])` cassait tout le build. On garde le verre comme
+        # matériau à transmission, et on cuisait quand même une surface de
+        # support (surface de verre solide, albédo/rugosité du matériau) pour
+        # que l'atlas, les LOD et les gates restent mesurables.
+        if not static_meshes:
+            for gm, gmat, glbl in glass_parts:
+                nv = len(gm.vertices)
+                static_meshes.append(gm.copy())
+                static_albedo.append(np.tile(np.asarray(gmat.color, dtype=np.float32), (nv, 1)))
+                static_rough.append(np.full(nv, float(gmat.roughness), dtype=np.float32))
+                static_metal.append(np.zeros(nv, dtype=np.float32))
+                static_mat_id.append(np.full(nv, classify_material_id(gmat, glbl), dtype=np.int32))
+                static_part_entries.append((gm.copy(), gmat, glbl,
+                                            classify_material_id(gmat, glbl)))
+            raw_concat = trimesh.util.concatenate(static_meshes)
+            v_mid_raw = np.concatenate(static_mat_id)
+            high_body = raw_concat
+            v_alb = np.vstack(static_albedo)
+            v_rgh = np.concatenate(static_rough)
+            v_mtl = np.concatenate(static_metal)
+            v_mid = v_mid_raw
+            glass_parts = []          # exporté via l'atlas PBR, pas de double pièce
+            all_glass_asset = True
+        else:
+            raw_concat = trimesh.util.concatenate(static_meshes)
+            v_mid_raw = np.concatenate(static_mat_id)
+            high_body = raw_concat
+            v_alb = np.vstack(static_albedo)
+            v_rgh = np.concatenate(static_rough)
+            v_mtl = np.concatenate(static_metal)
+            v_mid = v_mid_raw
+            all_glass_asset = False
         low_base = decimate_mesh_clean(mk.union(static_meshes) if len(static_meshes) > 1 else static_meshes[0], lod0_tris)
         if delight_pass is None:
             delight_pass = False
@@ -1218,6 +1335,8 @@ def export_game_package(
     from concurrent.futures import ThreadPoolExecutor
 
     use_weather = weathering and (not has_prebaked_uv)
+    if all_glass_asset and glass_tint_value is None:
+        glass_tint_value = np.array([0.86, 0.94, 0.97, 0.30], dtype=np.float32)
     hp_cache = prepare_high_poly_sampler(high_body, v_alb, v_rgh, v_mtl, v_mid)
 
     def _bake_body_task() -> dict:
@@ -1226,6 +1345,8 @@ def export_game_package(
             high_vertex_mat_id=v_mid, ai_views=ai_views, hp_cache=hp_cache,
             tex_size=tex_size, weathering=use_weather,
             delight_pass=bool(delight_pass), decal_strength=decal_strength,
+            glass_only=bool(all_glass_asset),
+            glass_tint=glass_tint_value,
         )
 
     def _bake_joint_task(grp_item: tuple[str, list]) -> tuple[str, dict]:

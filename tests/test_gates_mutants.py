@@ -198,16 +198,21 @@ def test_gate_uv_overlap_detecte_atlas_superpose(valid_pkg, tmp_path):
     assert not g["uv_overlap"]["pass"], "un atlas superposé doit être détecté"
 
 
-def test_gate_albedo_design_detecte_texture_grise(valid_pkg, tmp_path):
-    """Albédo désaturé (rendu « plastique gris ») : la gate doit le voir."""
+def test_gate_albedo_design_detecte_albedo_crame(valid_pkg, tmp_path):
+    """Albédo cramé (toute la réserve de dynamique perdue) : la gate doit le voir.
+
+    C'est le défaut réel mesuré sur le pion d'échecs v5.6 : luminance médiane
+    0.94, p99 1.00, dynamique du rendu 0.09. Un simple aplat gris n'est PAS un
+    défaut (une porcelaine ou un aplat émaillé sont des designs valides), donc
+    le mutant cible le cramage : tout monter à blanc.
+    """
     import numpy as np
     from PIL import Image
 
     pkg = clone(valid_pkg, tmp_path / "m_alb")
     fp = pkg / "unreal" / f"T_{NAME}_BC.png"
     a = np.asarray(Image.open(fp).convert("RGB"), dtype=np.float32) / 255.0
-    lum = (a @ np.array([0.2126, 0.7152, 0.0722]))[..., None]
-    flat = np.repeat(lum * 0.35 + 0.45, 3, axis=2)      # gris uniforme sans couleur
-    Image.fromarray((np.clip(flat, 0, 1) * 255).astype(np.uint8)).save(fp)
+    blown = np.clip(a * 0.25 + 0.78, 0, 1)               # > 0.78 partout, p99 = 1.0
+    Image.fromarray((blown * 255).astype(np.uint8)).save(fp)
     g = gate_map(pkg)
-    assert not g["albedo_design"]["pass"], "un albédo gris et plat doit être détecté"
+    assert not g["albedo_design"]["pass"], "un albédo cramé doit être détecté"

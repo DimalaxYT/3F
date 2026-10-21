@@ -5,7 +5,7 @@ description: >-
   creature bust, printable STL, or an export for Roblox Studio / Unreal Engine 5
   (or Unity/Godot/AR). Roblox Studio (Primary) + Unreal Engine 5 (Secondary)
   Realistic 3D Asset Engine + Hybrid Exact CAD + Organic GPU Sculpture toolkit
-  (v5.7): generates plug-and-play
+  (v5.8): generates plug-and-play
   realistic 3D assets engineered for **Roblox Studio** (`PNG`-embedded `.glb`, exact
   `Studs` scaling `1 Stud = 0.28 m`, budget `< 9 800 tris`/`MeshPart` (plafond moteur
   20 000), `SurfaceAppearance` `1024²` avec AO baked, `Neon_*` auto-split,
@@ -144,7 +144,7 @@ python3 scripts/critique.py verdict --dir out/<nom> --iter 1 --note 8.9 \
 python3 scripts/critique.py status --dir out/<nom>
 ```
 
-**24 gates** (`--target hero|ugc|print`) — budget : tris/MeshPart ≤ 9 800 (hero) /
+**25 gates** (`--target hero|ugc|print`) — budget : tris/MeshPart ≤ 9 800 (hero) /
 4 000 (ugc) et ≤ plafond moteur 20 000 ; contenu : `roblox/*.glb` = PNG pur sans
 `EXT_texture_webp`, textures ≤ 1024², Studs ∈ [0.1, 2048], LOD0 > LOD1 > LOD2,
 STL watertight + volume > 0, `UCX_*` + BC/ORM/N côté Unreal, planche QA ;

@@ -163,7 +163,15 @@ def _uv_fill(man: dict) -> tuple[bool, str]:
     import numpy as np
     import trimesh
     from PIL import Image, ImageDraw
-    g0 = max(trimesh.load(man["lods"]["LOD0"]["path"]).geometry.values(), key=lambda g: len(g.faces))
+    # v5.7 — on mesurait le plus gros mesh, qui peut être une pièce émissive
+    # sans UV (abat-jour de la lampe) : la gate levait « invalid index to scalar
+    # variable ». On prend le mesh TEXTURÉ le plus lourd, celui que l'atlas décrit.
+    _geoms = list(trimesh.load(man["lods"]["LOD0"]["path"]).geometry.values())
+    _with_uv = [g for g in _geoms
+                if getattr(g.visual, "uv", None) is not None and len(np.asarray(g.visual.uv))]
+    if not _with_uv:
+        return False, "pas d'UV"
+    g0 = max(_with_uv, key=lambda g: len(g.faces))
     uv = np.asarray(g0.visual.uv, dtype=np.float64)
     if uv.size == 0:
         return False, "pas d'UV"
@@ -253,8 +261,12 @@ def _uv_overlap(man: dict, max_ratio: float = 1.05) -> tuple[bool, str]:
     import numpy as np
     import trimesh
     from PIL import Image, ImageDraw
-    g0 = max(trimesh.load(man["lods"]["LOD0"]["path"]).geometry.values(),
-             key=lambda g: len(g.faces))
+    _geoms = list(trimesh.load(man["lods"]["LOD0"]["path"]).geometry.values())
+    _with_uv = [g for g in _geoms
+                if getattr(g.visual, "uv", None) is not None and len(np.asarray(g.visual.uv))]
+    if not _with_uv:
+        return False, "pas d'UV"
+    g0 = max(_with_uv, key=lambda g: len(g.faces))
     uv = np.asarray(g0.visual.uv, dtype=np.float64)
     if uv.size == 0:
         return False, "pas d'UV"
@@ -296,14 +308,62 @@ def _albedo_design(out_p: Path, name: str) -> tuple[bool, str]:
     std = float(a.reshape(-1, 3).std(axis=0).mean())
     lum = a @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
     whites = float((lum > 0.85).mean())
-    # Un aplat de couleur riche (vase émaillé, sat 0.66 / contraste 0.04) est un
-    # choix de design valide ; un métal bruité sans couleur (sat 0.03 / std 0.30)
-    # aussi. Le défaut réel est « gris ET plat » : on ne rejette que la conjonction.
-    rich_or_detailed = (sat >= 0.12) or (std >= 0.08)
-    details = (f"sat {sat:.2f} / contraste {std:.3f} (au moins un des deux requis) | "
-               f"blancs {whites * 100:.1f} % (<= 15 %)")
-    ok = rich_or_detailed and whites <= 0.15
+    # v5.7 — la version v5.6 jugeait la saturation et le contraste absolus : elle
+    # rejetait une porcelaine blanche (sat 0.02, contraste 0.015) et un aplat
+    # émaillé riche, qui sont des designs VALIDES. Le défaut réel mesuré sur le
+    # pion d'échecs était autre : un albédo à 0.94 de luminance médiane, donc
+    # C RAMÉ — au-delà, grain et variations étaient clippés à 1.0 (headroom
+    # perdu) et la lumière n'avait plus de place pour modeler la surface.
+    # On vérifie donc la RÉSERVE de dynamique, pas le style.
+    p99 = float(np.percentile(lum, 99))
+    clipped = float((lum > 0.995).mean())
+    details = (f"p99 {p99:.2f} (<= 0.92) | cramés {clipped * 100:.1f} % (<= 2 %) | "
+               f"sat {sat:.2f} / contraste {std:.3f}")
+    ok = (clipped <= 0.02) and (p99 <= 0.92)
     return ok, details
+
+
+
+def _shading_modeled(man: dict) -> tuple[bool, str]:
+    """Modelé du rendu : la lumière doit réellement sculpter l'objet.
+
+    Trois défauts vécus, tous invisibles sur l'albédo seul :
+      - pion d'échecs mesuré à une luminance médiane de 0.945 avec une
+        dynamique de 0.09 : surface cramée, aucune forme lisible ;
+      - `I = [key, fill, rim]` construit puis jamais utilisé, les radiances
+        restant à 3.05 / 2.15 / 1.75 (remplissage à 70 % de la clé) ;
+      - exposition globale qui cramait les albédos clairs.
+    On rend la vue de face du LOD0 et on mesure la dynamique de luminance
+    p95-p05 SUR LA SILHOUETTE (jamais sur le cyclorama).
+    """
+    import numpy as np
+    import trimesh
+    from renderer import render_view
+    g0_path = man["lods"]["LOD0"]["path"]
+    sc = trimesh.load(g0_path, process=False, force="scene")
+    # Le verre est rendu par une passe dédiée hors z-buffer : sur un asset 100 %
+    # verre la silhouette serait vide. On juge donc le modèle DIFFUS (opacité
+    # forcée) — c'est lui qu'on veut voir sculpté par la lumière.
+    for gg in sc.geometry.values():
+        mm = getattr(gg.visual, "material", None)
+        if mm is not None:
+            # l'opacité vient de `baseColorFactor[3]` (alpha 0.30 sur le verre),
+            # pas seulement d'`alphaMode` : on force les deux.
+            bcf = getattr(mm, "baseColorFactor", None)
+            if bcf is not None and len(bcf) > 3 and (bcf[3] > 1.0 and bcf[3] < 255.0):
+                bcf[3] = 255
+            mm.alphaMode = "OPAQUE"
+    img, mask = render_view(sc, size=320, ssaa=1, post=False, return_mask=True)
+    a = np.asarray(img, dtype=np.float32) / 255.0
+    mk = np.asarray(mask) > 128
+    if mk.sum() < 200:
+        return False, "silhouette vide"
+    lum = (a @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32))[mk]
+    p05, p95 = float(np.percentile(lum, 5)), float(np.percentile(lum, 95))
+    dyn = p95 - p05
+    med = float(np.median(lum))
+    details = f"dynamique {dyn:.3f} (>= 0.12) | médiane {med:.2f} (<= 0.90)"
+    return (dyn >= 0.12 and med <= 0.90), details
 
 
 def check_package(out_dir: str | Path, target: str = "hero") -> dict:
@@ -412,9 +472,17 @@ def check_package(out_dir: str | Path, target: str = "hero") -> dict:
     try:
         ok, val = _albedo_design(out_p, name)
         g.add("albedo_design", "albédo : saturation, contraste et blancs maîtrisés",
-              ok, val, "sat >= 0.12 OU contraste >= 0.08 ; blancs <= 15 %")
+              ok, val, "p99 <= 0.92 ; cramés <= 2 %")
     except Exception as exc:
         g.add("albedo_design", "albédo mesurable", False, str(exc), "mesure ok")
+
+    # --- modelé du rendu (v5.7) ---------------------------------------------
+    try:
+        ok, val = _shading_modeled(man)
+        g.add("shading_modeled", "rendu modelé : la lumière sculpte le volume",
+              ok, val, "dynamique >= 0.12, médiane <= 0.90")
+    except Exception as exc:
+        g.add("shading_modeled", "rendu modelable", False, str(exc), "mesure ok")
 
     # --- contenu des textures & émission néon (v5.4) -------------------------
     try:
