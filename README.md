@@ -1,4 +1,4 @@
-# 3d-forge v5.4 🎮🟥⚔️🐉✨
+# 3d-forge v5.5 🎮🟥⚔️🐉✨
 
 **Moteur Ultra Design & Texture PBR photoréaliste pensé en priorité pour Roblox Studio (`SurfaceAppearance` Dual-`1024²` + `Studs` + `< 10k tris` + `Neon` + `Luau`) et Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`) — propulsé par Kitbash Mécanique Hard-Surface (`greebles.py`) + Peinture Multi-Vues GPU Z-Buffer (`gpu_bridge.py`) + Sculpture Organique GPU (`gpu_sculpt.py`), zéro GPU requis côté utilisateur.**
 
@@ -17,9 +17,10 @@ Utilise le skill 3D de ce dépôt GitHub : https://github.com/DimalaxYT/3F
 Objet demandé : [ÉCRIS TON IDÉE ICI — ex: un sabre laser gravé noir et argent de 28 cm prêt pour Roblox Studio et l'impression 3D]
 ```
 
-> ### Nouveautés `v5.2 → v5.4 — QA mesurable, vitesse, dépôt léger`
-> - **21 gates mesurables** (`scripts/gates.py`) au lieu d'une checklist humaine : budget de tris par cible (`hero`/`ugc`/`print`), cohérence des cartes PBR, anims, normales `DirectX -Y`, silhouette LOD0↔LOD2, UV, structure Luau, budget UCX, néon émissif. Chaque gate a un **test « mutant »** (`tests/test_gates_mutants.py`) qui casse volontairement un package et vérifie qu'elle passe au rouge.
-> - **`turbo_forge` : ~16 s** (contre ~19 s) — le patch PNG de trimesh ne s'appliquait jamais (PIL fige sa table de dispatch à l'import : 5,6 s → 2,7 s) et les colliders convexes ont été réécrits (4,4 s → 70 ms).
+> ### Nouveautés `v5.2 → v5.5 — QA mesurable, vitesse, reproductibilité, dépôt léger`
+> - **23 gates mesurables** (`scripts/gates.py`) au lieu d'une checklist humaine : budget de tris par cible (`hero`/`ugc`/`print`), cohérence des cartes PBR, anims, normales `DirectX -Y`, silhouette LOD0↔LOD2, UV, structure Luau, budget UCX, néon émissif. Chaque gate a un **test « mutant »** (`tests/test_gates_mutants.py`) qui casse volontairement un package et vérifie qu'elle passe au rouge.
+> - **`turbo_forge` : ~12 s** (contre ~19 s) — le patch PNG de trimesh ne s'appliquait jamais (PIL fige sa table de dispatch à l'import), cache d'encodage des textures ré-encodées, colliders convexes réécrits (4,4 s → 70 ms) et planche QA rendue en un seul pool (`ssaa=1.5`).
+> - **Reproductibilité** : deux runs identiques donnent désormais des octets identiques — `trimesh.sample.sample_surface` ignorait le seed global, l'AO variait donc à chaque exécution (jusqu'à 8 octets de GLB et des pixels différents).
 > - **Confort agent** : `--dry-run` (plan sans exécuter), `--resume` (re-run identique en **0,8 s**), `--gif` (turntable), `scripts/serve_preview.py` (live preview du `preview.html`).
 > - **CI visuelle** : `scripts/visual_regression.py` compare l'IoU de silhouette des recettes à un baseline commité — une proportion cassée qui passe tous les tests unitaires échoue ici.
 > - **Dépôt allégé** : `examples/` **174 Mo → 1,1 Mo** dans l'arbre ; les 5 packs lourds restent dans l'historique et se restaurent avec `python3 scripts/fetch_examples.py`.
@@ -66,7 +67,7 @@ Objet demandé : [ÉCRIS TON IDÉE ICI — ex: un sabre laser gravé noir et arg
 >    - **Binaire `.glb` compacté (`EXT_texture_webp`)** : purge complète des buffers morts -> **`dragon_buste_LOD2.glb` = `630 tris` en `108 Ko` (`×42` plus léger que le High-Poly !)**.
 > 5. **Colliders Physiques Convexes (`UCX_*`), Sockets Gameplay (`SOCKET_*`) & Animations `gltf.animations`** : décomposition convexe multi-pièces pour PhysX / Chaos / Jolt, points d'attache gameplay (`SOCKET_grip`, `SOCKET_tip`, `SOCKET_lid_latch`, `SOCKET_top_mount`, etc.), animations quaternions standards (`Idle_Action` lue nativement par Unreal, Unity, Godot, Blender et Three.js) et **20e recette `sci_fi_crate`** (caisse de ravitaillement blindée articulée).
 
-### Démarrage Rapide — Pipeline Turbo Express (`10 à 20 s` CPU au lieu de `30+ min` !)
+### Démarrage Rapide — Pipeline Turbo Express (`10 à 14 s` CPU au lieu de `30+ min` !)
 
 ```bash
 # 1. Pipeline Express TOUT-EN-UN (`scripts/turbo_forge.py`) — 1 seule commande = Géométrie + LOD0/1/2 + Roblox + UE5 + QA !
@@ -92,8 +93,8 @@ python3 scripts/turbo_forge.py mon_arme_custom.py --lod0-tris 4200 -o out/mon_ar
 <!-- BENCH:START -->
 | asset | high-poly | LOD0 (poids) | LOD1 | LOD2 | draw calls | turbo CPU (indicatif) |
 |---|---|---|---|---|---|---|
-| `katana` | 6,508 tris | **6,840 tris** (984 Ko) | 3,129 tris | 1,228 tris | 10 ➔ 1 | 11.8 s |
-| `sci_fi_crate` | 13,076 tris | **3,796 tris** (1128 Ko) | 1,520 tris | 836 tris | 44 ➔ 3 | 16.32 s |
+| `katana` | 6,508 tris | **6,840 tris** (986 Ko) | 3,129 tris | 1,228 tris | 10 ➔ 1 | 10.24 s |
+| `sci_fi_crate` | 13,076 tris | **3,796 tris** (1126 Ko) | 1,520 tris | 836 tris | 44 ➔ 3 | 11.99 s |
 <!-- BENCH:END -->
 
 > Mesures reproductibles : `python3 scripts/bench.py` (régénère `docs/bench.json`

@@ -239,13 +239,12 @@ def compute_ambient_occlusion(mesh: trimesh.Trimesh, k_neighbors: int = 32) -> n
 
     ext = v.max(0) - v.min(0)
     diag = max(float(np.linalg.norm(ext)), 1e-6)
-    # Nuage d'occulteurs surfaciques déterministe : capture aussi les grandes faces planes CSG !
-    rng_state = np.random.get_state()
-    np.random.seed(42)
-    try:
-        surf_pts, _ = trimesh.sample.sample_surface(mesh, 1536)
-    finally:
-        np.random.set_state(rng_state)
+    # Nuage d'occulteurs surfaciques déterministe : capture aussi les grandes faces
+    # planes CSG ! ⚠️ `sample_surface` utilise son PROPRE générateur : semer
+    # `np.random` globalement ne suffit pas (bug de reproductibilité mesuré :
+    # deux appels sur le même maillage donnaient des AO différentes, donc des
+    # octets de GLB différents d'un run à l'autre). On passe `seed=` explicitement.
+    surf_pts, _ = trimesh.sample.sample_surface(mesh, 1536, seed=42)
     occ_pts = np.vstack([v, surf_pts])
 
     tree = cKDTree(occ_pts)

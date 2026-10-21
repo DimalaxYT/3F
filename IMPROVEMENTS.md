@@ -312,3 +312,21 @@ de ces chemins est assurée par les evals (reconstruction fraîche) et l'E2E CI.
 
 **Bilan perf mesuré** : `sci_fi_crate` 19,0 s → **16,2 s** (−15 %), `katana` 13,8 s → **11,8 s** (−14 %).
 **Bilan qualité** : 21 gates + 7 tests de mutants + 10 evals + CI visuelle.
+
+---
+
+## Vague v5.5 — reproductibilité + nouveau palier de vitesse (2026-10-21)
+
+| # | Amélioration | Statut | Preuve |
+|---|---|---|---|
+| B14 | cache d'encodage PNG par contenu | ✅ | 46 encodages → 18 images distinctes ; 24 hits, ~1 s gagné |
+| B15 | planche QA rendue en **un seul pool** (les vues face/profil étaient séquentielles) + `ssaa=1.5` + workers plafonnés aux cœurs | ✅ | 6 rendus : 8,5 s → ~4,8 s de mur ; comparaison visuelle à l'œil nu identique |
+| **R1** | **bug de reproductibilité** : `trimesh.sample.sample_surface` ignore `np.random.seed()` (générateur propre) ⇒ l'AO variait à chaque run | ✅ | même maillage, deux AO différentes (Δ 0.03) ; `seed=42` explicite ⇒ **deux runs = octets identiques** |
+| A10 | gate `lod1_silhouette` (LOD intermédiaire cassé) | ✅ | 23 gates |
+| A11 | gate `uv_overlap` (îlots superposés = bavage de texture) | ✅ | métrique aire UV / aire couverte, insensible aux arêtes partagées (sain : 0.91-0.98) |
+| T1 | tests de mutants étendus (LOD1, UV) | ✅ | 9 tests |
+| T2 | **test de déterminisme** | ✅ | `tests/test_determinism.py` : mêmes entrées ⇒ mêmes tris ET mêmes octets (GLB inclus) |
+| — | titre de la planche QA | ✅ | « v5.2 » → « v5.5 » |
+
+**Bilan perf** : `sci_fi_crate` **19,0 s → 12,1 s** (−36 %), `katana` **13,8 → 10,2 s** (−26 %).
+**Bilan qualité** : 23 gates, 9 mutants, 10 evals, CI visuelle, déterminisme prouvé.

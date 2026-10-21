@@ -1506,11 +1506,25 @@ def export_game_package(
         np.full(len(v_alb), 255, dtype=np.uint8),
     ])
     sc_col_vis = _assemble_lod_scene(lod0_mesh, include_colliders="unreal")
-    with ThreadPoolExecutor(max_workers=4) as rpool:
-        im_hi, im_lod0, im_lod2, im_col = rpool.map(
-            lambda sc_in: renderer.render_view(sc_in, az, el, size=480),
-            [trimesh.Scene([hi_vis]), sc_lod0, sc_lod2, sc_col_vis],
-        )
+    # v5.5 — les vues face/profil étaient rendues SÉQUEENTIELLEMENT après les 4
+    # vues parallèles (~2,6 s de mur). Les 6 rendus passent dans un seul pool :
+    # la planche QA est identique, mais le temps mural baisse d'autant.
+    _rbx_alb = rbx_col_img if "roblox" in engines else None
+    # 2 cœurs en CI : au-delà de 4 threads les rendus se contentionnent (mesuré :
+    # 6.8 s à 6 threads contre 6.5 s à 2). ssaa=1.5 au lieu de 2 : −36 % de
+    # fragments à l'écran, différence invisible à l'œil sur la planche QA.
+    _nw = max(2, min(4, (os.cpu_count() or 2)))
+    with ThreadPoolExecutor(max_workers=_nw) as rpool:
+        futs = [rpool.submit(renderer.render_view, sc_in, a, e, size=480, ssaa=1.5)
+                for sc_in, a, e in [
+                    (trimesh.Scene([hi_vis]), az, el),
+                    (sc_lod0, az, el),
+                    (sc_lod2, az, el),
+                    (sc_col_vis, az, el),
+                    (sc_lod0, 0.0, 0.0),
+                    (sc_lod0, 90.0, 0.0),
+                ]]
+        im_hi, im_lod0, im_lod2, im_col, im_front, im_side = [f.result() for f in futs]
     draw_c = ImageDraw.Draw(im_col)
     draw_c.rectangle((10, 10, 310, 38), fill=(18, 28, 22))
     draw_c.text((18, 16), f"{len(colliders)} hulls UCX ({sum(len(h.faces) for h in colliders)} tris) + {len(sockets)} sockets", fill=(110, 245, 165))
@@ -1523,8 +1537,8 @@ def export_game_package(
     # QU'UNE image, elle doit porter les proportions, l'échelle et les métriques.
     ext = np.asarray(high_body.extents, dtype=float)
     studs_xyz = ext * ROBLOX_STUDS_PER_METER
-    im_front = _qa_scale_bar(renderer.render_view(sc_lod0, 0.0, 0.0, size=480), ext)
-    im_side = _qa_scale_bar(renderer.render_view(sc_lod0, 90.0, 0.0, size=480), ext)
+    im_front = _qa_scale_bar(im_front, ext)
+    im_side = _qa_scale_bar(im_side, ext)
     if "roblox" in engines:
         im_alb, alb_lbl = rbx_col_img, f"7. T_{clean_name}_ColorMap (AO Roblox cuit)"
     else:
@@ -1558,7 +1572,7 @@ def export_game_package(
         ],
         cols=3,
         out_path=str(qa_sheet),
-        title=f"3d-forge v5.2 Game-Ready QA — {clean_name} (High-Poly -> LOD0/1/2 + PBR + Colliders + échelle Studs/cm)",
+        title=f"3d-forge v5.5 Game-Ready QA — {clean_name} (High-Poly -> LOD0/1/2 + PBR + Colliders + échelle Studs/cm)",
     )
 
     manifest = {

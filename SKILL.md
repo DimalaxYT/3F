@@ -5,7 +5,7 @@ description: >-
   creature bust, printable STL, or an export for Roblox Studio / Unreal Engine 5
   (or Unity/Godot/AR). Roblox Studio (Primary) + Unreal Engine 5 (Secondary)
   Realistic 3D Asset Engine + Hybrid Exact CAD + Organic GPU Sculpture toolkit
-  (v5.4): generates plug-and-play
+  (v5.5): generates plug-and-play
   realistic 3D assets engineered for **Roblox Studio** (`PNG`-embedded `.glb`, exact
   `Studs` scaling `1 Stud = 0.28 m`, budget `< 9 800 tris`/`MeshPart` (plafond moteur
   20 000), `SurfaceAppearance` `1024²` avec AO baked, `Neon_*` auto-split,
@@ -17,7 +17,7 @@ description: >-
 
 > ## ⚡ CONTRAT DE VITESSE & PROFILS D'EXÉCUTION
 > Le chemin par défaut est **`turbo`** : **UNE** commande (`scripts/turbo_forge.py`,
-> 10–20 s CPU), **UNE** image lue (`qa_game_sheet.png`), gates mesurées (`gates.json`),
+> 9–15 s CPU), **UNE** image lue (`qa_game_sheet.png`), gates mesurées (`gates.json`),
 > **max 1 retouche**. Trois profils, définis ici une seule fois :
 >
 > | profil | recherche web | vues lues | boucle notée | usage |
@@ -54,7 +54,7 @@ meubles) — `meshkit.py` (CAO exacte) ou `greebles.py` (kitbash étanche) uniqu
 ## 2. Le protocole 1 commande (`turbo_forge.py`)
 
 ```bash
-# recette du catalogue (~12-20 s, tous livrables + gates)
+# recette du catalogue (~10-14 s, tous livrables + gates)
 python3 scripts/turbo_forge.py katana --lod0-tris 8200 -o out/katana
 
 # hard-surface inédit : d'abord write_file custom_<nom>.py (cheatsheet §3), puis :
@@ -144,12 +144,13 @@ python3 scripts/critique.py verdict --dir out/<nom> --iter 1 --note 8.9 \
 python3 scripts/critique.py status --dir out/<nom>
 ```
 
-**21 gates** (`--target hero|ugc|print`) — budget : tris/MeshPart ≤ 9 800 (hero) /
+**23 gates** (`--target hero|ugc|print`) — budget : tris/MeshPart ≤ 9 800 (hero) /
 4 000 (ugc) et ≤ plafond moteur 20 000 ; contenu : `roblox/*.glb` = PNG pur sans
 `EXT_texture_webp`, textures ≤ 1024², Studs ∈ [0.1, 2048], LOD0 > LOD1 > LOD2,
 STL watertight + volume > 0, `UCX_*` + BC/ORM/N côté Unreal, planche QA ;
 comportement : animations (`Idle_Action` si joints), normales `G_unreal = 255 −
-G_roblox`, silhouette LOD0↔LOD2, couverture UV, structure Luau, budget UCX,
+G_roblox`, silhouette LOD0↔LOD2 et LOD0↔LOD1, couverture UV, chevauchement d'îlots,
+structure Luau, budget UCX,
 cartes PBR non plates, néon émissif. Chaque gate a un test « mutant » qui prouve
 qu'elle échoue quand on casse le package (`tests/test_gates_mutants.py`).
 Anti-complaisance codée : note ≥ seuil avec issues ouvertes = refusé ; note < seuil

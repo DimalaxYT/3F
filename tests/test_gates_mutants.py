@@ -162,3 +162,37 @@ def test_gate_stl_watertight_detecte_trou(valid_pkg, tmp_path):
     holes.export(stl)
     g = gate_map(pkg)
     assert not g["stl_watertight"]["pass"], "un STL percé doit faire échouer stl_watertight"
+
+
+def test_gate_lod1_silhouette_detecte_lod_intermediaire_casse(valid_pkg, tmp_path):
+    """LOD1 déformé (sommets dilatés de 15 %) : l'écart LOD0↔LOD1 doit exploser."""
+    import numpy as np
+    import trimesh
+
+    pkg = clone(valid_pkg, tmp_path / "m_lod1")
+    man = json.loads((pkg / "game_manifest.json").read_text(encoding="utf-8"))
+    lod1 = Path(man["lods"]["LOD1"]["path"])
+    scene = trimesh.load(lod1, force="scene")
+    for geom in scene.geometry.values():
+        geom.vertices = np.asarray(geom.vertices) * 1.15
+    scene.export(lod1)
+    g = gate_map(pkg)
+    assert not g["lod1_silhouette"]["pass"], "un LOD1 déformé doit être détecté"
+
+
+def test_gate_uv_overlap_detecte_atlas_superpose(valid_pkg, tmp_path):
+    """UV multipliées puis repliées : les îlots se superposent."""
+    import numpy as np
+    import trimesh
+
+    pkg = clone(valid_pkg, tmp_path / "m_uv")
+    man = json.loads((pkg / "game_manifest.json").read_text(encoding="utf-8"))
+    lod0 = Path(man["lods"]["LOD0"]["path"])
+    scene = trimesh.load(lod0, force="scene")
+    for geom in scene.geometry.values():
+        if getattr(geom.visual, "uv", None) is not None:
+            uv = np.asarray(geom.visual.uv, dtype=np.float64)
+            geom.visual.uv = (uv * 2.5) % 1.0
+    scene.export(lod0)
+    g = gate_map(pkg)
+    assert not g["uv_overlap"]["pass"], "un atlas superposé doit être détecté"

@@ -139,14 +139,15 @@ def _normals_cross_ok(rbx_n: Path, ue_n: Path) -> tuple[bool, str]:
         return False, f"erreur : {exc}"
 
 
-def _lod_silhouette(man: dict, tol_mean_pct: float = 1.0, tol_p95_pct: float = 3.0) -> tuple[bool, str]:
+def _lod_silhouette(man: dict, lod: str = "LOD2", tol_mean_pct: float = 1.0,
+                    tol_p95_pct: float = 3.0) -> tuple[bool, str]:
     """Écart géométrique LOD0↔LOD2 (proximity trimesh) : une décimation ne doit
     pas détruire la silhouette — mesurable sans lire une seule image.
     Seuils calibrés sur sci_fi_crate sain : moy 0.27 %, p95 1.6 %."""
     import numpy as np
     import trimesh
     g0 = max(trimesh.load(man["lods"]["LOD0"]["path"]).geometry.values(), key=lambda g: len(g.faces))
-    g2 = max(trimesh.load(man["lods"]["LOD2"]["path"]).geometry.values(), key=lambda g: len(g.faces))
+    g2 = max(trimesh.load(man["lods"][lod]["path"]).geometry.values(), key=lambda g: len(g.faces))
     dists, _faces = trimesh.proximity.ProximityQuery(g0).vertex(np.asarray(g2.vertices))
     d = np.abs(np.asarray(dists, dtype=np.float64))
     diag = float(np.linalg.norm(g0.extents)) + 1e-9
@@ -238,6 +239,39 @@ def _emissive_ok(glb: Path | None, man: dict) -> tuple[bool, str]:
     emis = [m.get("name", "?") for m in g.get("materials", [])
             if max(m.get("emissiveFactor") or [0.0]) > 0.3]
     return bool(emis), f"{len(emis)} matériau(x) émissif(s) pour {len(neon)} pièce(s) Neon"
+
+
+
+def _uv_overlap(man: dict, max_ratio: float = 1.05) -> tuple[bool, str]:
+    """Détecte un atlas UV qui superpose des îlots (bavage de texture).
+
+    Métrique insensible aux arêtes partagées : aire totale des triangles en
+    espace UV / aire réellement couverte. Sans chevauchement, le ratio vaut
+    <= 1 (la rastérisation perd les triangles fins). Mesuré sain : 0.91-0.98 ;
+    un atlas dupliqué monte au-delà de 1.2.
+    """
+    import numpy as np
+    import trimesh
+    from PIL import Image, ImageDraw
+    g0 = max(trimesh.load(man["lods"]["LOD0"]["path"]).geometry.values(),
+             key=lambda g: len(g.faces))
+    uv = np.asarray(g0.visual.uv, dtype=np.float64)
+    if uv.size == 0:
+        return False, "pas d'UV"
+    f = np.asarray(g0.faces)
+    S = 512
+    p = np.clip(uv, 0, 1) * (S - 1)
+    area = 0.5 * np.abs(
+        (p[f[:, 1], 0] - p[f[:, 0], 0]) * (p[f[:, 2], 1] - p[f[:, 0], 1])
+        - (p[f[:, 2], 0] - p[f[:, 0], 0]) * (p[f[:, 1], 1] - p[f[:, 0], 1])
+    )
+    im = Image.new("L", (S, S), 0)
+    dr = ImageDraw.Draw(im)
+    for tri in f:
+        dr.polygon([tuple(p[tri[0]]), tuple(p[tri[1]]), tuple(p[tri[2]])], fill=255)
+    cov = int((np.asarray(im) > 0).sum())
+    ratio = float(area.sum()) / max(cov, 1)
+    return ratio <= max_ratio, f"ratio aire UV/couverture {ratio:.3f} (<= {max_ratio})"
 
 
 def check_package(out_dir: str | Path, target: str = "hero") -> dict:
@@ -379,11 +413,22 @@ def check_package(out_dir: str | Path, target: str = "hero") -> dict:
     # silhouette LOD2 vs LOD0
     if lods.get("LOD0") and lods.get("LOD2"):
         try:
-            ok, val = _lod_silhouette(man)
+            ok, val = _lod_silhouette(man, "LOD2")
             g.add("lod_silhouette", "écart LOD0↔LOD2 : moy <= 1 % / p95 <= 3 % diagonale",
                   ok, val, "moy <= 1 % / p95 <= 3 %")
         except Exception as exc:
             g.add("lod_silhouette", "écart LOD0↔LOD2 mesurable", False, str(exc), "mesure ok")
+
+    # silhouette LOD1 (LOD intermédiaire cassé = popping visible en jeu)
+    if lods.get("LOD0") and lods.get("LOD1"):
+        try:
+            # Mêmes bornes que LOD2 : un LOD1 peut légitimement dévier un peu plus
+            # qu'un LOD2 (bake d'atlas différent) ; cette gate attrape un LOD1 cassé.
+            ok, val = _lod_silhouette(man, "LOD1")
+            g.add("lod1_silhouette", "écart LOD0↔LOD1 : moy <= 1 % / p95 <= 3 %",
+                  ok, val, "moy <= 1 % / p95 <= 3 %")
+        except Exception as exc:
+            g.add("lod1_silhouette", "écart LOD0↔LOD1 mesurable", False, str(exc), "mesure ok")
 
     # densité texel / bornes UV
     if lods.get("LOD0"):
@@ -392,6 +437,15 @@ def check_package(out_dir: str | Path, target: str = "hero") -> dict:
             g.add("uv_fill", "couverture d'atlas UV >= 0.5 et UV dans [0, 1]", ok, val, ">= 0.5")
         except Exception as exc:
             g.add("uv_fill", "UV mesurables", False, str(exc), "mesure ok")
+
+    # chevauchement d'îlots UV (bavage de texture)
+    if lods.get("LOD0"):
+        try:
+            ok, val = _uv_overlap(man)
+            g.add("uv_overlap", "îlots UV sans superposition (aire/couverture <= 1.05)",
+                  ok, val, "<= 1.05")
+        except Exception as exc:
+            g.add("uv_overlap", "chevauchement UV mesurable", False, str(exc), "mesure ok")
 
     # structure du script Luau
     lua_p = rbx.get("luau_setup_script")
