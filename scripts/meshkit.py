@@ -87,7 +87,23 @@ class Material:
         self.metallic = float(np.clip(metallic, 0.0, 1.0))
         self.roughness = float(np.clip(roughness, 0.02, 1.0))
         self.opacity = float(np.clip(opacity, 0.02, 1.0))
-        self.emissive = hex_rgb(emissive) if emissive is not None else None
+        # v5.6 — `hex_rgb` borne à [0,1] : une LED `emissive(color, 2.6)` perdait
+        # son intensité dès la construction. On stocke la chromaticité bornée ET
+        # la force à part (exportée en KHR_materials_emissive_strength).
+        if emissive is not None:
+            # `emissive` peut être un hex ("#00e5ff") OU un triplet scalaire
+            # (mk.mat.emissive fait `hex_rgb(color) * strength`).
+            if isinstance(emissive, str):
+                _raw = hex_rgb(emissive)
+            else:
+                _raw = np.asarray(emissive, dtype=float)
+                if _raw.max() > 16.0:
+                    _raw = _raw / 255.0
+            self._emissive_strength = float(max(_raw.max(), 1.0))
+            self.emissive = hex_rgb(_raw / max(_raw.max(), 1.0))
+        else:
+            self._emissive_strength = 1.0
+            self.emissive = None
         self.ior = float(np.clip(ior, 1.0, 2.5))
         self.transmission = float(np.clip(transmission, 0.0, 1.0))
         self.clearcoat = float(np.clip(clearcoat, 0.0, 1.0))
@@ -118,9 +134,12 @@ class Material:
         if alpha < 0.999 or self.transmission > 0.001:
             mat_pbr.alphaMode = "BLEND"
         if self.emissive is not None:
+            # glTF : facteur borné à [0,1] ; l'intensité part dans
+            # KHR_materials_emissive_strength (sinon un néon 2.6 sort à 1.0).
             mat_pbr.emissiveFactor = [float(self.emissive[0]),
                                       float(self.emissive[1]),
                                       float(self.emissive[2])]
+            mat_pbr._forge_emissive_strength = float(self._emissive_strength)
         mat_pbr._forge_ior = self.ior
         mat_pbr._forge_transmission = self.transmission
         mat_pbr._forge_clearcoat = self.clearcoat
@@ -1098,20 +1117,14 @@ def export_glb_pbr(scene: trimesh.Scene, glb_path: str, webp: bool = False) -> s
     import io
     import json
     import struct
-    from PIL import PngImagePlugin
 
-    # Encodage PNG sans perte ultra-rapide (`compress_level=1` -> 15x plus rapide dans `trimesh.export_glb` !)
-    _orig_png_save = PngImagePlugin._save
+    from pngio import fast_png
 
-    def _fast_png_save(im, fp, filename, chunk=PngImagePlugin.putchunk, save_all=False):
-        im.encoderinfo.setdefault("compress_level", 1)
-        return _orig_png_save(im, fp, filename, chunk=chunk, save_all=save_all)
-
-    PngImagePlugin._save = _fast_png_save
-    try:
+    # PIL fige son handler PNG dans Image.SAVE à l'import : patcher
+    # `PngImagePlugin._save` (ancienne version de ce fichier) ne faisait RIEN —
+    # les textures étaient ré-encodées en niveau 6 à chaque export GLB (~3 s/run).
+    with fast_png():
         scene.export(glb_path, include_normals=True)
-    finally:
-        PngImagePlugin._save = _orig_png_save
     mat_exts = {}
     for geom in scene.geometry.values():
         m = getattr(geom.visual, "material", None)
@@ -1130,6 +1143,16 @@ def export_glb_pbr(scene: trimesh.Scene, glb_path: str, webp: bool = False) -> s
                 "clearcoatFactor": round(cc, 4),
                 "clearcoatRoughnessFactor": round(ccr, 4),
             }
+        # v5.6 — glTF borne `emissiveFactor` à [0,1] : une LED à 2.6 sortait
+        # blanche et plate. L'intensité se transmet par l'extension officielle
+        # `KHR_materials_emissive_strength` (lue par Blender/three.js/UE).
+        ef = getattr(m, "emissiveFactor", None)
+        if ef is not None and max(float(x) for x in ef[:3]) > 0.0:
+            peak = max(float(x) for x in ef[:3])
+            strength = float(getattr(m, "_forge_emissive_strength", 0.0) or 0.0)
+            if strength > 1.001:
+                ext["KHR_materials_emissive_strength"] = {
+                    "emissiveStrength": round(strength, 4)}
         if ext:
             mat_exts[m.name] = ext
 

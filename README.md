@@ -1,4 +1,4 @@
-# 3d-forge v5.1 🎮🟥⚔️🐉✨
+# 3d-forge v5.7 🎮🟥⚔️🐉✨
 
 **Moteur Ultra Design & Texture PBR photoréaliste pensé en priorité pour Roblox Studio (`SurfaceAppearance` Dual-`1024²` + `Studs` + `< 10k tris` + `Neon` + `Luau`) et Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`) — propulsé par Kitbash Mécanique Hard-Surface (`greebles.py`) + Peinture Multi-Vues GPU Z-Buffer (`gpu_bridge.py`) + Sculpture Organique GPU (`gpu_sculpt.py`), zéro GPU requis côté utilisateur.**
 
@@ -16,6 +16,16 @@ Utilise le skill 3D de ce dépôt GitHub : https://github.com/DimalaxYT/3F
 
 Objet demandé : [ÉCRIS TON IDÉE ICI — ex: un sabre laser gravé noir et argent de 28 cm prêt pour Roblox Studio et l'impression 3D]
 ```
+
+> ### Nouveautés `v5.2 → v5.7 — QA mesurable, vitesse, reproductibilité, design`
+> - **25 gates mesurables** (`scripts/gates.py`) au lieu d'une checklist humaine : budget de tris par cible (`hero`/`ugc`/`print`), cohérence des cartes PBR, anims, normales `DirectX -Y`, silhouette LOD0↔LOD2, UV, structure Luau, budget UCX, néon émissif. Chaque gate a un **test « mutant »** (`tests/test_gates_mutants.py`) qui casse volontairement un package et vérifie qu'elle passe au rouge.
+> - **`turbo_forge` : ~12 s** (contre ~19 s) — le patch PNG de trimesh ne s'appliquait jamais (PIL fige sa table de dispatch à l'import), cache d'encodage des textures ré-encodées, colliders convexes réécrits (4,4 s → 70 ms) et planche QA rendue en un seul pool (`ssaa=1.5`).
+> - **Reproductibilité** : deux runs identiques donnent désormais des octets identiques — `trimesh.sample.sample_surface` ignorait le seed global, l'AO variait donc à chaque exécution (jusqu'à 8 octets de GLB et des pixels différents).
+> - **Confort agent** : `--dry-run` (plan sans exécuter), `--resume` (re-run identique en **0,8 s**), `--gif` (turntable), `scripts/serve_preview.py` (live preview du `preview.html`).
+> - **CI visuelle** : `scripts/visual_regression.py` compare l'IoU de silhouette des recettes à un baseline commité — une proportion cassée qui passe tous les tests unitaires échoue ici.
+> - **Qualité de rendu (v5.6-5.7)** : éclairage clé/remplissage réellement contrasté, ombre de contact à deux couches, bloom émissif, vignettage, netteté ; l'usure d'arêtes était déclenchée sur **80 % des sommets** (seuil de courbure trop bas : médiane 0.71) — recalibrée à 40 % ; ajout de variations à grande échelle (dérive de teinte par panneau, poussière verticale) ; le néon perdait son intensité à l'export (glTF borne `emissiveFactor` à 1) — exporté via `KHR_materials_emissive_strength` ; fond plat remplacé par un **cyclorama** (une lame à 0.886 de luminance était invisible sur un fond à 0.99) et trempe du katana remise à l'endroit (le tranchant trempé était plus spéculaire que le corps, ce qui écrasait le `hamon` sous la courbe ACES).
+> - **Modelé (v5.7)** : le vecteur d'intensités clé/remplissage/contre était construit puis **jamais utilisé** — trois lumières quasi égales (3.05 / 2.15 / 1.75) ne sculptaient aucune forme lisse. Le rendu passe en **linéaire** avec **auto-exposition** sur la silhouette et une seule tonemap : la dynamique du pion d'échecs passe de **0.09 à 0.17**. L'albédo reçoit un **budget** (plafond 0.86) sans lequel grain et variations étaient clippés, la crasse est dosée selon la clarté de la matière, et un asset **100 % verre** (`wine_glass`) se construit enfin.
+> - **Dépôt allégé** : `examples/` **174 Mo → 1,1 Mo** dans l'arbre ; les 5 packs lourds restent dans l'historique et se restaurent avec `python3 scripts/fetch_examples.py`.
 
 > ### Nouveautés Majeures `3d-forge v5.1 — Ultra Design & Texture Engine`
 > 1. **Bibliothèque Mécanique Hard-Surface 100 % Étanche (`scripts/greebles.py`)** : `hex_bolt` (empreinte 6-pans creuse BTR), `bolt_array`, `toggle_latch` (loquet à étrier acier cintré `tube_sweep`), `louver_vent` (persiennes d'aération inclinées), `picatinny_rail` (rail cranté MIL-STD-1913), `ribbed_conduit`, `ergonomic_handle` et `corner_armor_cap` — zéro simple boîte cubique sur `sci_fi_crate` (`44` pièces mécaniques profilées -> **`3` Draw Calls** temps réel !).
@@ -59,43 +69,42 @@ Objet demandé : [ÉCRIS TON IDÉE ICI — ex: un sabre laser gravé noir et arg
 >    - **Binaire `.glb` compacté (`EXT_texture_webp`)** : purge complète des buffers morts -> **`dragon_buste_LOD2.glb` = `630 tris` en `108 Ko` (`×42` plus léger que le High-Poly !)**.
 > 5. **Colliders Physiques Convexes (`UCX_*`), Sockets Gameplay (`SOCKET_*`) & Animations `gltf.animations`** : décomposition convexe multi-pièces pour PhysX / Chaos / Jolt, points d'attache gameplay (`SOCKET_grip`, `SOCKET_tip`, `SOCKET_lid_latch`, `SOCKET_top_mount`, etc.), animations quaternions standards (`Idle_Action` lue nativement par Unreal, Unity, Godot, Blender et Three.js) et **20e recette `sci_fi_crate`** (caisse de ravitaillement blindée articulée).
 
-### Démarrage Rapide — Pipeline Turbo Express (`12 à 20 s` CPU au lieu de `30+ min` !)
+### Démarrage Rapide — Pipeline Turbo Express (`10 à 14 s` CPU au lieu de `30+ min` !)
 
 ```bash
 # 1. Pipeline Express TOUT-EN-UN (`scripts/turbo_forge.py`) — 1 seule commande = Géométrie + LOD0/1/2 + Roblox + UE5 + QA !
 #    • Katana Dual-1024² (Blade + Hilt) : 67.91 s -> 12.66 s (x5,4 plus rapide !)
-python3 scripts/turbo_forge.py katana --lod0-tris 8200 -o examples/katana/game_ready
+python3 scripts/turbo_forge.py katana --lod0-tris 8200 -o out/katana
 
 #    • Caisse blindée Sci-Fi articulée + Peinture Z-Buffer GPU : 60.54 s -> 20.46 s (x3,0 plus rapide !)
-python3 scripts/turbo_forge.py sci_fi_crate --lod0-tris 3800 \
-  --ai-front examples/sci_fi_crate/ortho_guides/ai_paint_front.png \
-  --ai-side  examples/sci_fi_crate/ortho_guides/ai_paint_side.png \
-  --ai-top   examples/sci_fi_crate/ortho_guides/ai_paint_top.png \
-  -o examples/sci_fi_crate/game_ready
+python3 scripts/turbo_forge.py sci_fi_crate --lod0-tris 3800 --emit-guides -o out/sci_fi_crate
+# puis peinture GPU des guides : generate_image(..., images=[out/sci_fi_crate/ortho_guides/...])
+# et re-run avec --ai-front/--ai-side/--ai-top pointant sur tes peintures
 
 #    • Buste de Dragon 3-Vues GPU -> Sculpture 123k tris + STL étanche + Pack Roblox & UE5 : 102.11 s -> 18.85 s (x5,4 plus rapide !)
 python3 scripts/turbo_forge.py \
   --front assets/ai_multiview/dragon_front.png \
   --side  assets/ai_multiview/dragon_side.png \
   --back  assets/ai_multiview/dragon_back.png \
-  --name dragon_buste --lod0-tris 4800 -o examples/dragon_buste/game_ready
+  --name dragon_buste --lod0-tris 4800 -o out/dragon_buste
 
 # 2. Objet 3D 100 % inédit écrit par l'IA (`def build() -> mk.Builder`) en 1 seule passe (< 15 s CPU) :
 python3 scripts/turbo_forge.py mon_arme_custom.py --lod0-tris 4200 -o out/mon_arme
 ```
 
-| Benchmark Vitesse `v5.1 Turbo` | Avant (`v5.1` initial) | Après (`v5.1 Turbo`) | Gain Mesuré |
-|---|---|---|---|
-| **`katana`** *(Dual-`1024²` Roblox + UE5 + LOD0/1/2 + QA)* | `67,91 s` | **`12,66 s`** | **`×5,4` plus rapide** |
-| **`dragon_buste`** *(Sculpt GPU `123k` tris + STL + Roblox + UE5)* | `102,11 s` | **`18,85 s`** | **`×5,4` plus rapide** |
-| **`sci_fi_crate`** *(`44` pièces CSG + Z-Buffer GPU + Lid + Roblox + UE5)* | `60,54 s` | **`20,46 s`** | **`×3,0` plus rapide** |
-| **Workflow complet d'un Agent IA (bout en bout)** | `30 à 40 min` *(5 boucles `9.5`)* | **`~60 à 90 s`** *(1 passe `turbo_forge`)* | **`×20+` plus rapide** |
+<!-- BENCH:START -->
+| asset | high-poly | LOD0 (poids) | LOD1 | LOD2 | draw calls | turbo CPU (indicatif) |
+|---|---|---|---|---|---|---|
+| `katana` | 6,508 tris | **6,840 tris** (965 Ko) | 3,129 tris | 1,228 tris | 10 ➔ 1 | 15.94 s |
+| `sci_fi_crate` | 13,076 tris | **3,796 tris** (1063 Ko) | 1,520 tris | 836 tris | 44 ➔ 3 | 15.64 s |
+<!-- BENCH:END -->
 
-| Asset Vitrine `v5` | Source High-Poly | `LOD0` (`1024²`) | `LOD1` (`512²`) | `LOD2` (`256²`) | Draw Calls | Colliders `UCX_*` | Sockets & Animations |
-|---|---|---|---|---|---|---|---|
-| **`sci_fi_crate`** *(Prop Hard-Surface)* | `4 824 tris` | **`2 800 tris`** (`608 Ko`) | **`1 120 tris`** (`235 Ko`) | **`420 tris`** (`108 Ko`) | `25` ➔ **`2`** *(Body + Lid)* | `6` hulls (`164 tris`) | `SOCKET_lid_latch`, `SOCKET_top_mount` + `Idle_Action` |
-| **`katana`** *(Arme Temps Réel)* | `5 032 tris` | **`2 598 tris`** (`521 Ko`) | **`1 040 tris`** (`207 Ko`) | **`740 tris`** (`94 Ko`) | `8` ➔ **`1`** | `6` hulls (`748 tris`) | `SOCKET_grip`, `SOCKET_tip`, `SOCKET_trail_mid` |
-| **`dragon_buste`** *(Sculpture IA)* | `50 200 tris` (`4.5 Mo`) | **`4 200 tris`** (`761 Ko`) | **`1 680 tris`** (`285 Ko`) | **`630 tris`** (`108 Ko`, **`-98.7 %`**) | **`1`** | `1` hull (`164 tris`) | SH De-Lit (`-70 %` ombre) + `SOCKET_interact` |
+> Mesures reproductibles : `python3 scripts/bench.py` (régénère `docs/bench.json`
+> + cette table) et `python3 scripts/bench.py --check` en CI. Les durées sont
+> indicatives (machine dépendante) ; **tris et octets sont déterministes** et
+> toute dérive doc/code fait échouer la CI. Gain historique v5.1 → v5.1 Turbo :
+> ×3 à ×5,4 sur ces mêmes assets (boucles de critique incluses : ×20+ bout en bout).
+
 
 ---
 
@@ -136,8 +145,8 @@ notée après.**
         ▼
  PHOTOS DES 6 FACES + TURNTABLE → AUTOCRITIQUE NOTÉE /10
         │
-        ├─ note < 9.5  ► paufiner : corriger la spec, régénérer, re-critiquer
-        └─ note ≥ 9.5  ► LIVRAISON : GLB · OBJ+MTL · STL étanche · USDZ · photos
+        ├─ note < seuil  ► paufiner : corriger la spec, régénérer, re-critiquer
+        └─ note ≥ seuil  ► LIVRAISON : GLB · OBJ+MTL · STL étanche · USDZ · photos
 ```
 
 ---
@@ -208,12 +217,12 @@ Les workflows se combinent librement : un objet paramétrique `meshkit` précis 
 
 **C — Génération multi-vues v2 (`meshgen.py`)** : vues vectorielles 2D continues sans marche d'escalier (`spline`, `poly`, `rect`, `ellipse`, `capsule`, ajourages `void`) ou vues ASCII classiques, grille SDF 3D anisotrope (`dims` + `grid`) préservant les lames de 4–8 mm, unwrap `xatlas`, puis bake PBR glTF 2.0 complet (`baseColorTexture` + `metallicRoughnessTexture` + `normalTexture`). Exemple de référence : [`specs/epee_rouillee.json`](specs/epee_rouillee.json) — 15 000 tris, **étanche**, **IoU moyen = 0,9152** (`face 0,928` · `profil 0,873` · `dessus 0,945`).
 
-### Stage 3 — l'autocritique notée (la boucle 9.5, obligatoire)
+### Stage 3 — l'autocritique notée (seuil & budget : `critique.py policy`)
 
 C'est la règle de qualité du skill, appliquée **verbatim** par l'agent après
 chaque génération :
 
-> **Tu t'autocritique sur une note de 1/10. Si la note est inférieure à 9.5,
+> **Tu t'autocritique sur une note de 1/10. Si la note est inférieure au seuil (`critique.py policy`),
 > continue à paufiner. Sinon, envoie-moi le résultat.**
 
 Le prompt intégral à copier dans le contexte d'un agent vit dans
@@ -232,8 +241,8 @@ python3 scripts/critique.py verdict --dir out/epee --iter 1 \
     --note 7.2 --justification "proportions ok, détails manquants" \
     --issue "S|pointe trop fine|mangée par le lissage : res 80->96, smooth 10->7" \
     --issue "D|gouttière invisible de profil|peindre le fuller dans side aussi"
-#    → REFINE  (note < 9.5 : corriger, régénérer dans iter_2, re-critiquer)
-#      DELIVER (note ≥ 9.5 avec --deliver : seulement maintenant on livre)
+#    → REFINE  (note < seuil : corriger, régénérer dans iter_2, re-critiquer)
+#      DELIVER (note ≥ seuil avec --deliver : seulement maintenant on livre)
 
 # 3. STATUS — historique des notes et tendance
 python3 scripts/critique.py status --dir out/epee
@@ -411,7 +420,7 @@ b.export_glb("table_basse.glb")
 │   └── recipes/              ← catalogue 18 recettes (registry + furniture/containers/props)
 ├── specs/epee_rouillee.json  ← exemple de référence du workflow C
 ├── references/               ← cookbook.md (méthode sur mesure) + materials.md
-├── examples/                 ← modèles générés prêts à télécharger (épée, motocross…)
+├── examples/                 ← exemples légers (CI visuelle) ; packs complets via fetch_examples.py
 ├── tests/                    ← pytest : smoke 18/18, meshgen, img2mesh, motocross
 ├── evals/evals.json          ← prompts d'évaluation du skill
 ├── docs/img/                 ← galerie générée par le pipeline lui-même
@@ -424,13 +433,15 @@ Galerie générée par le pipeline (rendus `three_quarter`, qualité 0.75) :
 
 ![galerie](docs/img/gallery.png)
 
-Des modèles finis, prêts à télécharger, vivent dans [`examples/`](examples/) :
+Des modèles finis vivent dans [`examples/`](examples/) : 3 exemples légers en
+arbre (références de la CI visuelle), packs complets (~174 Mo : katana, épée,
+moto, caisse, dragon) restaurables via `python3 scripts/fetch_examples.py` :
 
 | Exemple | Workflow | Points forts |
 |---|---|---|
-| [`examples/katana/`](examples/katana/) | D — multi-parties | 5 parties vectorielles générées **en parallèle** (`kashira`, `tsuka` losanges *tsuka-maki*, `tsuba` *sukashi* ajourée, `habaki` laiton, `blade` courbée *sori* + *hamon*), **STL union 100 % étanche**, `preview.html` WebGL hors-ligne |
-| [`examples/epee_rouillee/`](examples/epee_rouillee/) | C — multi-vues v2 | GLB **texturé PBR** (rouille multi-octaves piquée, normal map tangente, cuir spiralé, pommeau or), **IoU moyen = 0.9152** (`profil = 0.8725`), 6 faces + turntable + `preview.html` hors-ligne |
-| [`examples/motocross/`](examples/motocross/) | A/B — CAD + photo | 154 pièces, moteur & cadre twin-spar en relief 3D, union étanche en **0.19 s**, overlay silhouette sans ombre au sol (`IoU = 0.7468`, bas `0.7936`) |
+| `examples/katana/` *(fetch)* | D — multi-parties | 5 parties vectorielles générées **en parallèle** (`kashira`, `tsuka` losanges *tsuka-maki*, `tsuba` *sukashi* ajourée, `habaki` laiton, `blade` courbée *sori* + *hamon*), **STL union 100 % étanche**, `preview.html` WebGL hors-ligne |
+| `examples/epee_rouillee/` *(fetch)* | C — multi-vues v2 | GLB **texturé PBR** (rouille multi-octaves piquée, normal map tangente, cuir spiralé, pommeau or), **IoU moyen = 0.9152** (`profil = 0.8725`), 6 faces + turntable + `preview.html` hors-ligne |
+| `examples/motocross/` *(fetch)* | A/B — CAD + photo | 154 pièces, moteur & cadre twin-spar en relief 3D, union étanche en **0.19 s**, overlay silhouette sans ombre au sol (`IoU = 0.7468`, bas `0.7936`) |
 | [`examples/chaise_scandinave/`](examples/chaise_scandinave/) · [`vase/`](examples/vase/) · [`rocket/`](examples/rocket/) | A — recettes | paramétrique, STL prêts impression |
 
 Sorties d'une génération complète d'épée (workflow C + Stage 0 + boucle 9.5) :

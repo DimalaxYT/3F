@@ -43,8 +43,8 @@ un 9.5+. Ne cherche pas à le contourner — c'est ça, la qualité.
 - **Le code garde l'historique** (`critique_log.json`) : notes par itération,
   issues, correctifs, métriques. La tendance (`status`) montre si tu progresses
   ou si tu tournes en rond.
-- **Le seuil 9.5 est volontairement exigeant** : il force en pratique 2-3
-  itérations — exactement comme Meshy, qui re-verifie la cohérence de ses
+- **Le seuil (`critique.py policy`) est volontairement exigeant** : il force en
+  pratique 1-2 itérations — exactement comme Meshy, qui re-verifie la cohérence de ses
   textures multi-vues avant d'afficher le preview. La note est bornée
   mécaniquement (T technique, IoU) : une boucle saine termine typiquement
   en FORCE_DELIVER entre 8.5 et 9.2 — c'est le dénouement normal, pas un
@@ -60,8 +60,8 @@ Stage 0  recherche web (research.py)          -> references/ (détails à respec
 Stage 1  spec JSON (vues ASCII + palette)     -> spec v1
 Stage 2  meshgen.py --faces all --references  -> iter_1/ (mesh + photos)
 Stage 3  AUTOCRITIQUE (ce prompt)             -> critique.py brief/verdict
-            note < 9.5  -> corrige le spec -> retour Stage 2 (iter_2, iter_3…)
-            note >= 9.5 -> verdict --deliver -> LIVRAISON
+            note < seuil   -> corrige le spec -> retour Stage 2 (iter_2, …)
+            note >= seuil  -> verdict --deliver -> LIVRAISON
 ```
 
 Exemple de boucle réelle (épée médiévale rouillée, pommeau en or) :

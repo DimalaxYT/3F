@@ -1,0 +1,28 @@
+{
+  "generated_by": "scripts/bench.py",
+  "note": "durées indicatives (machine dépendante) ; tris déterministes (comparés strictement en CI), octets à ±5 % (encodeur webp versionné)",
+  "rows": [
+    {
+      "asset": "katana",
+      "high_poly_tris": 6508,
+      "lod0_tris": 6840,
+      "lod0_bytes": 988304,
+      "lod1_tris": 3129,
+      "lod2_tris": 1228,
+      "draw_calls_before": 10,
+      "draw_calls_after": 1,
+      "duration_s": 15.94
+    },
+    {
+      "asset": "sci_fi_crate",
+      "high_poly_tris": 13076,
+      "lod0_tris": 3796,
+      "lod0_bytes": 1088092,
+      "lod1_tris": 1520,
+      "lod2_tris": 836,
+      "draw_calls_before": 44,
+      "draw_calls_after": 3,
+      "duration_s": 15.64
+    }
+  ]
+}

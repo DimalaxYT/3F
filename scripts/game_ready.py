@@ -194,6 +194,26 @@ def stamp_normal_decals(
 # 3. Patine Physique Game-Ready 4 Couches (Edge Wear + Cavity Dirt + Ground Grime)
 # --------------------------------------------------------------------------- #
 
+def compress_albedo_headroom(col: np.ndarray, knee: float = 0.72,
+                             cap: float = 0.86) -> np.ndarray:
+    """Garantit une RÉSERVE de dynamique à un albédo diffus (v5.7).
+
+    Aucun matériau diffus ne réfléchit ~100 % de la lumière : le plus blanc
+    (porcelaine émaillée, ivoire, ABS blanc) plafonne autour de 0.80. Les
+    recettes utilisaient des blancs à 0.90-0.96 ; au-delà, le grain
+    multiplicatif et les variations macro étaient CLIPPÉS à 1.0 (la moitié de
+    la dynamique perdue) et la tonemap n'avait plus de place pour modeler la
+    surface. Mesuré sur le pion d'échecs : luminance médiane 0.945, dynamique
+    du rendu 0.09 -> 0.17 après correction.
+
+    Compression C1 : identité jusqu'à `knee`, tanh au-delà (f(knee)=knee,
+    f'(knee)=1) : aucune cassure visible dans les dégradés.
+    """
+    col = np.asarray(col, dtype=np.float32)
+    out = np.where(col < knee, col, knee + (cap - knee) * np.tanh((col - knee) / (cap - knee)))
+    return np.clip(out, 0.0, cap).astype(np.float32)
+
+
 def apply_game_weathering(
     col: np.ndarray,
     rough: np.ndarray,
@@ -222,6 +242,27 @@ def apply_game_weathering(
     rough = rough.astype(np.float32).copy()
     metal = metal.astype(np.float32).copy()
     ao = ao.astype(np.float32).copy()
+
+    # ---- v5.7 : budget d'albédo physique --------------------------------
+    # Aucun matériau diffus ne réfléchit ~100 % de la lumière : le plus blanc
+    # (porcelaine émaillée, ivoire, plastique ABS blanc) plafonne autour de 0.80.
+    # Les recettes utilisaient des blancs à 0.90-0.96 : au-delà, le grain
+    # multiplicatif et les variations macro étaient CLIPPÉS à 1.0 (moitié de la
+    # dynamique perdue) et ACES n'avait plus de place pour modeler la surface.
+    # Mesure sur le pion d'échecs avant : luminance médiane 0.945, dynamique 0.09.
+    # On compresse doucement le dessus de l'échelle en gardant les ratios.
+    if col.size:
+        lum_col = col @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+        hi = float(np.percentile(lum_col, 99.0))
+        if hi > 0.86:
+            # compression douce : les valeurs < 0.72 restent intactes, le haut
+            # de l'échelle converge vers 0.86 sans créer de plateau (tanh).
+            k, cap = 0.72, 0.86
+            # f(k) = k et f'(k) = 1 : continuité C1, aucune cassure de dégradé.
+            col = np.where(col < k, col,
+                           k + (cap - k) * np.tanh((col - k) / (cap - k)))
+            col = np.clip(col, 0.0, cap)
+
     if mat_id is None:
         mat_id = np.where(metal > 0.72, MAT_BRUSHED_STEEL,
                           np.where(rough > 0.68, MAT_RUBBER_POLY, MAT_PAINTED_ARMOR)).astype(np.int32)
@@ -255,7 +296,9 @@ def apply_game_weathering(
         weave = 0.5 + 0.5 * np.sin((turns * 46.0 + ang * 18.0) * math.pi)
         pearls = 0.5 + 0.5 * np.sin(px_t * 2100.0) * np.sin(pz_t * 2100.0 + py_t * 1700.0)
         silk_col = np.array([0.075, 0.082, 0.105], dtype=np.float32)[None, :] * (0.82 + 0.36 * weave[:, None])
-        same_col = np.array([0.86, 0.84, 0.78], dtype=np.float32)[None, :] * (0.80 + 0.25 * pearls[:, None])
+        # ivoire vieilli (0.72) plutôt que blanc pur : à l'échelle de rendu, un
+        # galuchat à 0.86 se lisait comme du plastique blanc.
+        same_col = np.array([0.72, 0.70, 0.64], dtype=np.float32)[None, :] * (0.80 + 0.22 * pearls[:, None])
         # Ombre portée réaliste sous le ruban au bord des fenêtres de galuchat !
         window_ao = np.clip(0.52 + 0.48 * np.minimum(np.abs(u1 - 0.50), np.abs(u2 - 0.50)) / 0.22, 0.52, 1.0)
         col[is_tsuka] = same_col * window_ao[:, None] * (1.0 - silk_mask[:, None]) + silk_col * silk_mask[:, None]
@@ -270,14 +313,22 @@ def apply_game_weathering(
         edge_dist = bx + wave  # > 0 côté tranchant `ha` !
         yakiba = np.clip((edge_dist - 0.0032) / 0.0022, 0.0, 1.0)
         habuchi = np.exp(-(((edge_dist - 0.0032) / 0.0014) ** 2))  # liseré blanc laiteux `nioi` !
-        ji_col = np.array([0.66, 0.69, 0.73], dtype=np.float32)[None, :]
-        ha_col = np.array([0.85, 0.87, 0.90], dtype=np.float32)[None, :]
-        nioi_col = np.array([0.96, 0.97, 0.99], dtype=np.float32)[None, :]
+        # Physique de la trempe : le `ji` (corps non trempé) est un miroir, le `ha`
+        # (tranchant martensitique) est plus mat et moins métallique. Les deux valeurs
+        # étaient inversées (tranchant metal 0.95 / rough 0.10) : la lame réfléchissait
+        # l'environnement à pleine énergie, ACES écrasait tout à ~0.89 et le `hamon`
+        # devenait invisible (écart-type de luminance mesuré : 0.04).
+        ji_col = np.array([0.58, 0.61, 0.65], dtype=np.float32)[None, :]
+        ha_col = np.array([0.80, 0.82, 0.85], dtype=np.float32)[None, :]
+        nioi_col = np.array([0.93, 0.94, 0.96], dtype=np.float32)[None, :]
         c_bl = ji_col * (1.0 - yakiba[:, None]) + ha_col * yakiba[:, None]
         col[is_blade] = np.clip(c_bl * (1.0 - 0.55 * habuchi[:, None]) + nioi_col * (0.55 * habuchi[:, None]), 0.0, 1.0)
-        rough[is_blade] = np.clip(0.24 * (1.0 - yakiba) + 0.10 * yakiba + 0.12 * habuchi, 0.07, 0.45)
-        metal[is_blade] = 0.95
-        extra_h[is_blade] = 0.05 * habuchi
+        # Laminage : ondulation lente de teinte le long de la soie (acier plié).
+        fold = 1.0 + 0.045 * np.sin(bz * 34.0) + 0.022 * np.sin(bz * 91.0 + 0.7)
+        col[is_blade] *= fold[:, None]
+        rough[is_blade] = np.clip(0.17 * (1.0 - yakiba) + 0.40 * yakiba + 0.10 * habuchi, 0.10, 0.55)
+        metal[is_blade] = np.clip(0.96 * (1.0 - yakiba) + 0.80 * yakiba, 0.0, 1.0)
+        extra_h[is_blade] = 0.16 * habuchi + 0.035 * yakiba
 
     # 0. Motifs graphiques procéduraux nets : chevrons diagonaux 45° sur `MAT_HAZARD_STRIPE` !
     if is_hazard.any():
@@ -305,21 +356,77 @@ def apply_game_weathering(
         col[is_steel] *= (0.92 + 0.16 * aniso[:, None])
         rough[is_steel] = np.clip(rough[is_steel] * (1.12 - 0.26 * aniso), 0.06, 0.65)
 
-    # 2. Usure d'arêtes par courbure (`curv > 0.56` : fine, nette et réaliste !)
-    breakup = pbr.fbm(pos[:, 0] * (32.0 / tile_m), pos[:, 1] * (32.0 / tile_m),
-                      pos[:, 2] * (32.0 / tile_m), octaves=3, seed=71).astype(np.float32)
+    # 1bis. VARIATION À GRANDE ÉCHELLE (v5.6) — un émail uniforme fait « objet
+    #       imprimé ». Trois couches physiquement motivées, toutes très basse
+    #       fréquence pour ne pas concurrencer les micro-détails :
+    #         a) dérive de teinte : les panneaux peints séparément ne sortent
+    #            jamais exactement du même bain (LOT / UV sun-fade) ;
+    #         b) poussière verticale : elle se dépose sur les surfaces tournées
+    #            vers le haut (+Z) et jamais sous l'objet ;
+    #         c) micro-nuance de peinture : très légère, casse l'aplat.
+    macro = pbr.fbm(pos[:, 0] * (2.6 / tile_m), pos[:, 1] * (2.6 / tile_m),
+                    pos[:, 2] * (1.7 / tile_m), octaves=3, seed=91).astype(np.float32)
+    lot = np.clip(0.5 + (macro - 0.5) * 1.15, 0.0, 1.0)
+    tint_drift = np.stack([0.94 + 0.13 * lot,
+                           0.96 + 0.09 * lot,
+                           0.92 + 0.10 * (1.0 - lot)], axis=1).astype(np.float32)
+    col = np.where(is_nonmetal[:, None], col, np.clip(col * tint_drift, 0.0, 1.0))
+
+    up_facing = np.clip(nrm[:, 2], 0.0, 1.0) ** 1.35
+    dust_fbm = pbr.fbm(pos[:, 0] * (3.4 / tile_m), pos[:, 1] * (3.4 / tile_m),
+                       pos[:, 2] * (9.0 / tile_m), octaves=3, seed=23).astype(np.float32)
+    dust = np.clip(up_facing * (0.35 + 0.85 * dust_fbm) * 0.16, 0.0, 0.20)
+    dust_col = np.array([0.33, 0.315, 0.285], dtype=np.float32)
+    col = col * (1.0 - dust[:, None]) + dust_col[None, :] * dust[:, None]
+    rough = np.clip(rough + 0.14 * dust, 0.05, 1.0)
+
+    micro = pbr.fbm(pos[:, 0] * (11.0 / tile_m), pos[:, 1] * (11.0 / tile_m),
+                    pos[:, 2] * (11.0 / tile_m), octaves=2, seed=53).astype(np.float32)
+    col *= np.clip(0.955 + 0.09 * micro[:, None], 0.88, 1.06)
+
+    # 2. Usure d'arêtes par courbure — v5.6 : usure COHÉRENTE sur les arêtes
+    #    EXPOSÉES. Deux défauts corrigés (mesurés : 6,3 % de pixels blancs
+    #    dispersés sur des panneaux plats) :
+    #      a) le `breakup` était à 32 cycles/tile_m -> moucheture haute fréquence
+    #         (« neige » blanche) au lieu d'éclats reliés ; on descend à 7 + 22 ;
+    #      b) la courbure est forte sur TOUS les chanfreins d'un union CSG, y
+    #         compris ceux enterrés dans les cavités : on gate par l'exposition
+    #         (AO), donc l'usure n'apparaît que sur les arêtes qui voient le jour.
+    breakup = pbr.fbm(pos[:, 0] * (7.0 / tile_m), pos[:, 1] * (7.0 / tile_m),
+                      pos[:, 2] * (7.0 / tile_m), octaves=3, seed=71).astype(np.float32)
+    breakup_fine = pbr.fbm(pos[:, 0] * (22.0 / tile_m), pos[:, 1] * (22.0 / tile_m),
+                           pos[:, 2] * (22.0 / tile_m), octaves=2, seed=17).astype(np.float32)
+    breakup = np.clip(0.60 * breakup + 0.40 * breakup_fine, 0.0, 1.0)
     sharp_edge = np.clip((curv - 0.54) / 0.34, 0.0, 1.0) ** 1.6
-    edge_mask = np.clip(sharp_edge * (0.30 + 0.95 * breakup) * wear_amount, 0.0, 0.78)
+    exposure = np.clip((ao - 0.42) / 0.58, 0.0, 1.0) ** 1.15
+    edge_mask = np.clip(sharp_edge * exposure
+                        * np.clip(0.25 + 1.05 * breakup, 0.0, 1.0) * wear_amount,
+                        0.0, 0.62)
 
     # Sur métal peint / chevrons : éclats d'acier poli ; sur caoutchouc : frottement mat gris sombre (`metal=0`) !
     bare_steel = np.array([0.78, 0.80, 0.83], dtype=np.float32)
     scuff_rubber = np.array([0.27, 0.28, 0.30], dtype=np.float32)
     bright_gold = np.clip(col * 1.28 + 0.06, 0.0, 1.0)
+    # v5.7 — une peinture SATURÉE ne s'use pas jusqu'à l'acier gris : la couche
+    # pigmentée s'éclaircit d'abord, l'apprêt reste teinté. Mesuré sur la fusée :
+    # la jonction cône/fût sortait à un albédo neutre de 0.787 (de l'acier) au
+    # milieu d'un rouge à 0.68/0.61/0.60 — la « couture déchirée » n'était pas
+    # une couture UV mais cet éclat gris. On interpole donc l'éclat vers un
+    # éclaircissement de la teinte selon la saturation de la peinture.
+    _mx = col.max(axis=1)
+    _mn = col.min(axis=1)
+    sat_c = np.clip((_mx - _mn) / np.maximum(_mx, 1e-4), 0.0, 1.0)
+    pale_paint = np.clip(col * 1.30 + 0.10, 0.0, 1.0)
+    w_st = np.clip((sat_c - 0.30) / 0.35, 0.0, 1.0) ** 1.1
+    steel_edge = bare_steel[None, :] * (1.0 - w_st[:, None]) + pale_paint * w_st[:, None]
     target_edge = np.where(
         is_nonmetal[:, None], scuff_rubber[None, :],
-        np.where(is_gold[:, None], bright_gold, bare_steel[None, :]),
+        np.where(is_gold[:, None], bright_gold, steel_edge),
     )
     eff_edge = np.where(is_nonmetal, edge_mask * 0.42, edge_mask)
+    # Le jaune sécurité est une peinture fraîche et réfléchissante : on limite
+    # fortement l'éclat d'usure dessus, sinon il vire au brun sale.
+    eff_edge = np.where(is_hazard, eff_edge * 0.35, eff_edge)
     col = col * (1.0 - eff_edge[:, None]) + target_edge * eff_edge[:, None]
     metal = np.where(is_nonmetal, 0.0, np.clip(metal + eff_edge * 0.82, 0.0, 1.0))
     rough = np.where(
@@ -329,7 +436,19 @@ def apply_game_weathering(
     )
 
     # 3. Crasse et patine antique dans les cavités profondes d'AO uniquement (`ao < 0.60`)
-    cavity = np.clip((0.60 - ao) * 1.55 * (0.50 + 0.60 * breakup) * dirt_amount, 0.0, 0.52)
+    # v5.6 — la crasse ne doit pas désaturer l'objet : plafond 0.34 au lieu de
+    # 0.52 (27 % de la texture était sous AO 0.5, d'où un rendu « boueux »).
+    # v5.7 — la crasse n'est PAS neutre sur une matière claire : sur une
+    # porcelaine ou un ivoire (albédo > 0.55), la même quantité de terre se lit
+    # comme de la saleté et bascule l'objet du blanc vers le beige sale. On la
+    # dose donc selon la clarté de base : pleine sur les matières sombres et les
+    # métaux, fortement réduite sur les blancs (qui sont des produits d'intérieur
+    # propres, pas des caisses de chantier).
+    lum_base = col @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    pale = np.clip((lum_base - 0.55) / 0.30, 0.0, 1.0) ** 1.2
+    dirt_scale = 1.0 - 0.62 * pale
+    cavity = np.clip((0.52 - ao) * 1.35 * (0.50 + 0.60 * breakup) * dirt_amount
+                     * dirt_scale, 0.0, 0.34)
     dirt_col = np.where(
         is_gold[:, None],
         np.array([[0.15, 0.125, 0.085]], dtype=np.float32),
@@ -341,7 +460,8 @@ def apply_game_weathering(
 
     # 4. Salissure subtile de contact au sol (`World-Z Ground Grime`)
     z_norm = np.clip((pos[:, 2] - bounds[0][2]) / float(span[2]), 0.0, 1.0)
-    grime = np.clip(np.exp(-z_norm / 0.065) * (0.35 + 0.60 * breakup) * grime_amount, 0.0, 0.30)
+    grime = np.clip(np.exp(-z_norm / 0.065) * (0.35 + 0.60 * breakup) * grime_amount
+                    * dirt_scale, 0.0, 0.30)
     earth_col = np.array([0.19, 0.17, 0.145], dtype=np.float32)
     col = col * (1.0 - grime[:, None]) + earth_col[None, :] * grime[:, None]
     rough = np.clip(rough + 0.18 * grime, 0.05, 1.0)
@@ -358,7 +478,20 @@ def apply_game_weathering(
         chevron_h[is_hazard] = 0.08
     height = (0.24 * (grain - 1.0) - 0.15 * eff_edge + dh + chevron_h + extra_h).astype(np.float32)
 
-    return np.clip(col, 0.0, 1.0), rough, metal, ao, height
+    # v5.6 — contrainte DURE en sortie : les additifs (éclats, decals, boosts)
+    # pouvaient rendre métallique une famille qui ne doit jamais l'être. Mesuré
+    # sur le katana : soie `tsuka` à metallic 0.54 dans l'ORM -> la poignée
+    # reflétait le studio en gris argenté au lieu de rester de la soie noire.
+    metal = np.where(is_nonmetal, 0.0, metal)
+    rough = np.where(is_tsuka, np.clip(rough, 0.45, 1.0), rough)
+
+    # v5.7 — INVARIANT D'ALBÉDO en sortie : la compression posée en entrée peut
+    # être défaite par le grain, la poussière et les macro-variations
+    # multiplicatives (mesuré : 0.873 de luminance médiane sur le pion d'échecs,
+    # alors que la compression visait 0.86). On garantit ici le budget de
+    # headroom : aucun diffus ne renvoie ~100 % de la lumière.
+    col = compress_albedo_headroom(np.clip(col, 0.0, 1.0))
+    return col, rough, metal, ao, height
 
 
 # --------------------------------------------------------------------------- #
@@ -388,7 +521,19 @@ def decimate_mesh_clean(mesh: trimesh.Trimesh, target_tris: int) -> trimesh.Trim
         v_out, f_out = fast_simplification.simplify(v_in, f_in, target_reduction=ratio, agg=agg_val)
         if len(f_out) <= target_tris * 1.12:
             break
+    # v5.2 — garde-fous anti-artefacts : aux ratios extrêmes (LOD2 ~15 %), le
+    # décimiteur C++ peut sortir des pointes/slivers hors de la surface d'origine
+    # (facettes noires visibles sur la planche QA). On re-clippe les sommets dans
+    # le bbox source (un LOD ne doit jamais dépasser son high-poly) et on purge
+    # les faces dégénérées, sans rouvrir le maillage.
+    v_out = np.clip(np.asarray(v_out, dtype=np.float64),
+                    v_in.min(axis=0) - 1e-4, v_in.max(axis=0) + 1e-4)
     out = trimesh.Trimesh(vertices=v_out, faces=f_out, process=True)
+    try:
+        out.update_faces(out.nondegenerate_faces(height=1e-5))
+        out.remove_unreferenced_vertices()
+    except Exception:
+        pass
     return out
 
 
@@ -433,6 +578,7 @@ def prepare_high_poly_sampler(
     ia_h, ib_h, ic_h = f_hi[:, 0], f_hi[:, 1], f_hi[:, 2]
     nrm_s = bw0[:, None] * n_hi[ia_h] + bw1[:, None] * n_hi[ib_h] + bw2[:, None] * n_hi[ic_h]
     nrm_s /= np.linalg.norm(nrm_s, axis=1, keepdims=True) + 1e-12
+
     return {
         "nrm_s": nrm_s,
         "alb_s": bw0[:, None] * high_vertex_albedo[ia_h] + bw1[:, None] * high_vertex_albedo[ib_h] + bw2[:, None] * high_vertex_albedo[ic_h],
@@ -447,7 +593,7 @@ def prepare_high_poly_sampler(
     }
 
 
-def build_shared_atlas_lod(lod0_mesh: trimesh.Trimesh, baked_lod0: dict, low_raw: trimesh.Trimesh, mip_size: int) -> trimesh.Trimesh:
+def build_shared_atlas_lod(lod0_mesh: trimesh.Trimesh, baked_lod0: dict, low_raw: trimesh.Trimesh, mip_size: int, use_normal: bool = True) -> trimesh.Trimesh:
     """Construit `LOD1` ou `LOD2` en transférant instantanément (`< 0.05 s`, zéro `xatlas`)
     les coordonnées UV exactes du `LOD0` par voisinage surface+normale + mipmap dédiée !"""
     v0 = np.asarray(lod0_mesh.vertices, dtype=np.float32)
@@ -468,8 +614,11 @@ def build_shared_atlas_lod(lod0_mesh: trimesh.Trimesh, baked_lod0: dict, low_raw
     uv_lod = uv0[best_v]
     alb_m = baked_lod0["albedo"].resize((mip_size, mip_size), Image.Resampling.BILINEAR)
     orm_m = baked_lod0["orm"].resize((mip_size, mip_size), Image.Resampling.BILINEAR)
-    nrm_m = baked_lod0["normal_gl"].resize((mip_size, mip_size), Image.Resampling.BILINEAR)
     out_m = low_raw.copy()
+    # `use_normal=False` (LOD2) : une normale tangente bakée pour la surface LOD0
+    # produit des artefacts d'ombrage sur un maillage décimé à 15 % — le LOD
+    # lointain garde un PBR plat (albédo + ORM), sans carte de normales.
+    nrm_m = baked_lod0["normal_gl"].resize((mip_size, mip_size), Image.Resampling.BILINEAR) if use_normal else None
     pbr_m = trimesh.visual.material.PBRMaterial(
         name="game_lod_pbr",
         baseColorFactor=[255, 255, 255, 255],
@@ -499,6 +648,8 @@ def bake_high_to_low(
     weathering: bool = True,
     delight_pass: bool = False,
     decal_strength: float = 0.65,
+    glass_only: bool = False,
+    glass_tint=None,
 ) -> dict:
     """Cuit par projection géométrique 3D exacte un maillage `high_mesh` arbitrairement dense
     (`50k - 150k tris`) vers un maillage temps réel `low_mesh_in` (`1k - 6k tris`)."""
@@ -545,7 +696,12 @@ def bake_high_to_low(
     dists, idx_k = kdtree.query(pos_px, k=6, workers=-1)
     cand_n = nrm_s[idx_k]
     align = np.sum(cand_n * N_px[:, None, :], axis=2)
-    score = dists / sampler["diag"] + 0.035 * (1.0 - np.clip(align, -0.2, 1.0))
+    # v5.7 — le poids de la normale passe de 0.035 à 0.09. Quand deux surfaces
+    # du high-poly sont COINCIDENTES (disque de base du cône et capuchon du fût,
+    # tous deux à la jonction), la distance est nulle pour les deux et seule la
+    # normale doit arbitrer : sans ça le disque intérieur (normale opposée)
+    # gagnait et le blanc du fût bavait en créneaux sur le cône rouge.
+    score = dists / sampler["diag"] + 0.09 * (1.0 - np.clip(align, -0.2, 1.0))
     best = idx_k[np.arange(len(pos_px)), np.argmin(score, axis=1)]
 
     nhi_px = nrm_s[best]
@@ -652,6 +808,15 @@ def bake_high_to_low(
         metallicFactor=1.0,
         roughnessFactor=1.0,
     )
+    if glass_only:
+        # Asset 100 % verre (verre à vin) : on garde l'atlas PBR mais on restitue
+        # la transparence du matériau d'origine, sinon le verre se lit comme une
+        # céramique blanche opaque.
+        op = float(np.clip(glass_tint[3] if len(glass_tint) > 3 else 0.24, 0.10, 0.85))
+        mat_pbr.baseColorFactor = [int(v * 255) for v in glass_tint[:3]] + [int(op * 255)]
+        mat_pbr.alphaMode = "BLEND"
+        mat_pbr.metallicFactor = 0.0
+        mat_pbr.roughnessFactor = 0.08
     low_uv_mesh.visual = trimesh.visual.TextureVisuals(uv=uv, material=mat_pbr)
 
     return {
@@ -686,7 +851,7 @@ def transfer_uv_to_lod(lod0_uv_mesh: trimesh.Trimesh, decimated_mesh: trimesh.Tr
 def generate_convex_colliders(
     source_meshes: list[trimesh.Trimesh],
     max_hulls: int = 6,
-    max_tris_per_hull: int = 28,
+    max_tris_per_hull: int = 64,
 ) -> list[trimesh.Trimesh]:
     """Décompose un objet en `<= max_hulls` coques convexes propres (`<= max_tris_per_hull` tris)
     préservant les ouvertures (sous une table, embrasure de porte, passages de roues, garde d'épée)."""
@@ -720,7 +885,53 @@ def generate_convex_colliders(
             continue
         hull = trimesh.convex.convex_hull(pts)
         if len(hull.faces) > max_tris_per_hull:
-            hull = trimesh.convex.convex_hull(decimate_mesh_clean(hull, max_tris_per_hull).vertices)
+            # v5.3 — garantie dure du budget + englobement au millimètre.
+            # `fast_simplification` ne converge pas sur une coque convexe (résidu
+            # mesuré : 108 faces pour une cible de 28), et gonfler les plans d'un
+            # polytope explose la triangulation (facettes polygonales). La seule
+            # garantie simple est SIMPLICIALE : un hull de V points génériques a
+            # au plus 2V-4 triangles, donc V = (max_tris+4)//2 points suffisent.
+            #  1) farthest-point sampling sélectionne V sommets extrêmes sources ;
+            #  2) raffinement glouton : tant qu'un point source viole le hull, on
+            #     remplace le point sélectionné dont l'échange réduit le plus la
+            #     violation maximale. Budget invariant (toujours V points),
+            #     englobement convergé (<= 1 mm) en quelques itérations.
+            max_v = max(4, (max_tris_per_hull + 4) // 2)
+            if len(pts) > max_v:
+                sel = [0]
+                dmin = np.linalg.norm(pts - pts[0], axis=1)
+                while len(sel) < max_v:
+                    i = int(np.argmax(dmin))
+                    sel.append(i)
+                    dmin = np.minimum(dmin, np.linalg.norm(pts - pts[i], axis=1))
+
+                from scipy.spatial import ConvexHull
+
+                def _worst_excess(idx: list[int]):
+                    # scipy brut : pas de construction de Trimesh ni de fix_normals
+                    # (cf. profil : trimesh.convex_hull = 2× plus lent).
+                    eq = ConvexHull(pts[idx]).equations  # n·x + off <= 0 à l'intérieur
+                    ex = (pts @ eq[:, :3].T + eq[:, 3]).max(axis=1)
+                    return float(ex.max()), int(np.argmax(ex))
+
+                viol, p_star = _worst_excess(sel)
+                for _ in range(12):
+                    if viol <= 1e-3:
+                        break
+                    best = None
+                    for r in range(len(sel)):
+                        if sel[r] == p_star:
+                            continue
+                        trial = list(sel)
+                        trial[r] = p_star
+                        v, _ = _worst_excess(trial)
+                        if best is None or v < best[1]:
+                            best = (trial, v)
+                    if best is None or best[1] >= viol:
+                        break  # aucun progrès possible
+                    sel, viol = best[0], best[1]
+                    _, p_star = _worst_excess(sel)
+                hull = trimesh.convex.convex_hull(pts[sel])
         hulls.append(hull)
     return hulls
 
@@ -931,6 +1142,44 @@ def _extract_uv_pbr_vertices(mesh_in: trimesh.Trimesh) -> tuple[np.ndarray, np.n
     return v_a, v_r, v_m
 
 
+def _qa_scale_bar(im: Image.Image, extents_m) -> Image.Image:
+    """Barre d'échelle calibrée sur le cadrage auto de `renderer.render_view`
+    (sphère englobante de rayon r à d = 3.1 r, fov 38° => ~93.7 % de la hauteur)."""
+    import math as _m
+    d = ImageDraw.Draw(im)
+    W, H = im.size
+    r = float(np.linalg.norm(extents_m)) / 2.0
+    px_per_m = (0.937 * H) / (2.0 * r) if r > 1e-9 else 0.0
+    target = 0.32 * W / max(px_per_m, 1e-9)
+    k = 10.0 ** _m.floor(_m.log10(max(target, 1e-9)))
+    bar_m = max([c * k for c in (0.1, 0.2, 0.5, 1.0) if c * k <= target * 1.05] or [k])
+    x0, y0 = int(0.06 * W), H - int(0.07 * H)
+    x1 = x0 + max(int(bar_m * px_per_m), 4)
+    d.line((x0, y0, x1, y0), fill=(15, 15, 15), width=7)
+    d.line((x0, y0, x1, y0), fill=(252, 252, 252), width=3)
+    for xx in (x0, x1):
+        d.line((xx, y0 - 8, xx, y0 + 8), fill=(252, 252, 252), width=3)
+    lbl = f"{bar_m * 100:.0f} cm | {bar_m * ROBLOX_STUDS_PER_METER:.2f} Stud"
+    f = renderer._font(15)
+    tw = int(d.textlength(lbl, font=f)) + 10
+    d.rectangle((x0, y0 - 30, x0 + tw, y0 - 10), fill=(16, 20, 16))
+    d.text((x0 + 5, y0 - 28), lbl, fill=(140, 240, 170), font=f)
+    return im
+
+
+def _qa_metrics_card(clean_name: str, lines: list) -> Image.Image:
+    card = Image.new("RGB", (480, 480), (16, 18, 22))
+    d = ImageDraw.Draw(card)
+    d.text((14, 12), f"Carte QA — {clean_name}", fill=(235, 235, 240), font=renderer._font(20))
+    y = 52
+    for ln in lines:
+        d.text((14, y), ln, fill=(205, 210, 220), font=renderer._font(15))
+        y += 23
+    d.text((14, 448), "gates complètes : python3 scripts/gates.py <dossier>",
+           fill=(140, 240, 170), font=renderer._font(15))
+    return card
+
+
 def export_game_package(
     source: mk.Builder | trimesh.Trimesh | str | Path,
     out_dir: str | Path,
@@ -992,6 +1241,9 @@ def export_game_package(
     collider_inputs: list[trimesh.Trimesh] = []
     raw_draw_calls = 1
     has_prebaked_uv = False
+    # v5.7 — défini pour TOUS les chemins d'entrée (Builder ET fichier externe).
+    all_glass_asset = False
+    glass_tint_value = None
 
     if isinstance(source, mk.Builder):
         raw_draw_calls = len(source.parts)
@@ -1021,13 +1273,40 @@ def export_game_package(
                 static_mat_id.append(np.full(nv, mid_val, dtype=np.int32))
                 static_part_entries.append((m.copy(), mat_use, lbl, mid_val))
 
-        raw_concat = trimesh.util.concatenate(static_meshes)
-        v_mid_raw = np.concatenate(static_mat_id)
-        high_body = raw_concat
-        v_alb = np.vstack(static_albedo)
-        v_rgh = np.concatenate(static_rough)
-        v_mtl = np.concatenate(static_metal)
-        v_mid = v_mid_raw
+        # v5.7 — un asset ENTIÈREMENT en verre (verre à vin) envoyait toutes ses
+        # pièces dans `glass_parts` : `static_meshes` restait vide et
+        # `np.concatenate([])` cassait tout le build. On garde le verre comme
+        # matériau à transmission, et on cuisait quand même une surface de
+        # support (surface de verre solide, albédo/rugosité du matériau) pour
+        # que l'atlas, les LOD et les gates restent mesurables.
+        if not static_meshes:
+            for gm, gmat, glbl in glass_parts:
+                nv = len(gm.vertices)
+                static_meshes.append(gm.copy())
+                static_albedo.append(np.tile(np.asarray(gmat.color, dtype=np.float32), (nv, 1)))
+                static_rough.append(np.full(nv, float(gmat.roughness), dtype=np.float32))
+                static_metal.append(np.zeros(nv, dtype=np.float32))
+                static_mat_id.append(np.full(nv, classify_material_id(gmat, glbl), dtype=np.int32))
+                static_part_entries.append((gm.copy(), gmat, glbl,
+                                            classify_material_id(gmat, glbl)))
+            raw_concat = trimesh.util.concatenate(static_meshes)
+            v_mid_raw = np.concatenate(static_mat_id)
+            high_body = raw_concat
+            v_alb = np.vstack(static_albedo)
+            v_rgh = np.concatenate(static_rough)
+            v_mtl = np.concatenate(static_metal)
+            v_mid = v_mid_raw
+            glass_parts = []          # exporté via l'atlas PBR, pas de double pièce
+            all_glass_asset = True
+        else:
+            raw_concat = trimesh.util.concatenate(static_meshes)
+            v_mid_raw = np.concatenate(static_mat_id)
+            high_body = raw_concat
+            v_alb = np.vstack(static_albedo)
+            v_rgh = np.concatenate(static_rough)
+            v_mtl = np.concatenate(static_metal)
+            v_mid = v_mid_raw
+            all_glass_asset = False
         low_base = decimate_mesh_clean(mk.union(static_meshes) if len(static_meshes) > 1 else static_meshes[0], lod0_tris)
         if delight_pass is None:
             delight_pass = False
@@ -1056,6 +1335,8 @@ def export_game_package(
     from concurrent.futures import ThreadPoolExecutor
 
     use_weather = weathering and (not has_prebaked_uv)
+    if all_glass_asset and glass_tint_value is None:
+        glass_tint_value = np.array([0.86, 0.94, 0.97, 0.30], dtype=np.float32)
     hp_cache = prepare_high_poly_sampler(high_body, v_alb, v_rgh, v_mtl, v_mid)
 
     def _bake_body_task() -> dict:
@@ -1064,6 +1345,8 @@ def export_game_package(
             high_vertex_mat_id=v_mid, ai_views=ai_views, hp_cache=hp_cache,
             tex_size=tex_size, weathering=use_weather,
             delight_pass=bool(delight_pass), decal_strength=decal_strength,
+            glass_only=bool(all_glass_asset),
+            glass_tint=glass_tint_value,
         )
 
     def _bake_joint_task(grp_item: tuple[str, list]) -> tuple[str, dict]:
@@ -1100,7 +1383,16 @@ def export_game_package(
     lod1_raw = decimate_mesh_clean(low_base, min(len(low_base.faces) - 2, max(int(lod0_tris * 0.40), 64)))
     lod2_raw = decimate_mesh_clean(lod1_raw, min(len(lod1_raw.faces) - 2, max(int(lod0_tris * 0.15), 32)))
     lod1_mesh = build_shared_atlas_lod(lod0_mesh, baked, lod1_raw, max(tex_size // 2, 256))
-    lod2_mesh = build_shared_atlas_lod(lod0_mesh, baked, lod2_raw, max(tex_size // 4, 128))
+    # v5.2 : le LOD2 reçoit SON PROPRE bake 128² (atlas, AO et normales cohérents
+    # avec sa surface décimée). Partager l'atlas du LOD0 avec des triangles géants
+    # fait interpoler les UV à travers les charts (« vitrage brisé » sur la QA).
+    lod2_baked = bake_high_to_low(
+        high_body, v_alb, v_rgh, v_mtl, lod2_raw,
+        high_vertex_mat_id=v_mid, ai_views=None, hp_cache=hp_cache,
+        tex_size=max(tex_size // 4, 128), weathering=use_weather,
+        delight_pass=False, decal_strength=decal_strength,
+    )
+    lod2_mesh = lod2_baked["mesh_lod0"]
 
     # Construit la scène principale `LOD0` fusionnée en Draw Calls minimaux !
     def _assemble_lod_scene(body_mesh: trimesh.Trimesh, include_colliders: str | None = None) -> trimesh.Scene:
@@ -1144,7 +1436,7 @@ def export_game_package(
         np.min([m.bounds[0] for m in collider_inputs], axis=0),
         np.max([m.bounds[1] for m in collider_inputs], axis=0),
     ])
-    colliders = generate_convex_colliders(collider_inputs, max_hulls=6, max_tris_per_hull=28)
+    colliders = generate_convex_colliders(collider_inputs, max_hulls=6, max_tris_per_hull=64)
     sockets = infer_gameplay_sockets(clean_name, all_bounds, joints=joints, declared=declared_sockets)
 
     sc_lod0 = _assemble_lod_scene(lod0_mesh)
@@ -1398,11 +1690,25 @@ def export_game_package(
         np.full(len(v_alb), 255, dtype=np.uint8),
     ])
     sc_col_vis = _assemble_lod_scene(lod0_mesh, include_colliders="unreal")
-    with ThreadPoolExecutor(max_workers=4) as rpool:
-        im_hi, im_lod0, im_lod2, im_col = rpool.map(
-            lambda sc_in: renderer.render_view(sc_in, az, el, size=480),
-            [trimesh.Scene([hi_vis]), sc_lod0, sc_lod2, sc_col_vis],
-        )
+    # v5.5 — les vues face/profil étaient rendues SÉQUEENTIELLEMENT après les 4
+    # vues parallèles (~2,6 s de mur). Les 6 rendus passent dans un seul pool :
+    # la planche QA est identique, mais le temps mural baisse d'autant.
+    _rbx_alb = rbx_col_img if "roblox" in engines else None
+    # 2 cœurs en CI : au-delà de 4 threads les rendus se contentionnent (mesuré :
+    # 6.8 s à 6 threads contre 6.5 s à 2). ssaa=1.5 au lieu de 2 : −36 % de
+    # fragments à l'écran, différence invisible à l'œil sur la planche QA.
+    _nw = max(2, min(4, (os.cpu_count() or 2)))
+    with ThreadPoolExecutor(max_workers=_nw) as rpool:
+        futs = [rpool.submit(renderer.render_view, sc_in, a, e, size=480, ssaa=1.5)
+                for sc_in, a, e in [
+                    (trimesh.Scene([hi_vis]), az, el),
+                    (sc_lod0, az, el),
+                    (sc_lod2, az, el),
+                    (sc_col_vis, az, el),
+                    (sc_lod0, 0.0, 0.0),
+                    (sc_lod0, 90.0, 0.0),
+                ]]
+        im_hi, im_lod0, im_lod2, im_col, im_front, im_side = [f.result() for f in futs]
     draw_c = ImageDraw.Draw(im_col)
     draw_c.rectangle((10, 10, 310, 38), fill=(18, 28, 22))
     draw_c.text((18, 16), f"{len(colliders)} hulls UCX ({sum(len(h.faces) for h in colliders)} tris) + {len(sockets)} sockets", fill=(110, 245, 165))
@@ -1410,23 +1716,52 @@ def export_game_package(
     im_nrm = baked["normal_gl"].resize((480, 480), Image.BILINEAR)
     im_orm = baked["orm"].resize((480, 480), Image.BILINEAR)
 
+    # Planche QA v2 : vues orthogonales cadrées + barre d'échelle (cm & Studs),
+    # carte moteur (ColorMap Roblox à AO cuit) et carte de gates — l'agent ne lit
+    # QU'UNE image, elle doit porter les proportions, l'échelle et les métriques.
+    ext = np.asarray(high_body.extents, dtype=float)
+    studs_xyz = ext * ROBLOX_STUDS_PER_METER
+    im_front = _qa_scale_bar(im_front, ext)
+    im_side = _qa_scale_bar(im_side, ext)
+    if "roblox" in engines:
+        im_alb, alb_lbl = rbx_col_img, f"7. T_{clean_name}_ColorMap (AO Roblox cuit)"
+    else:
+        im_alb, alb_lbl = baked["albedo"], f"7. T_{clean_name}_BC (albédo de-lit)"
+    im_card = _qa_metrics_card(clean_name, [
+        f"LOD0 {len(lod0_mesh.faces):,} tris | LOD1 {len(lod1_mesh.faces):,} | LOD2 {len(lod2_mesh.faces):,}",
+        f"draw calls {raw_draw_calls} -> {final_draw_calls}",
+        f"dims {ext[0] * 100:.0f} x {ext[1] * 100:.0f} x {ext[2] * 100:.0f} cm",
+        f"Studs {studs_xyz[0]:.2f} x {studs_xyz[1]:.2f} x {studs_xyz[2]:.2f}",
+        f"colliders UCX {len(colliders)} ({sum(len(h.faces) for h in colliders)} tris)",
+        f"sockets {len(sockets)} | textures {tex_size}² | webp={bool(webp)}",
+        f"high-poly {len(high_body.faces):,} tris "
+        f"(-{round(100.0 * (1.0 - len(lod0_mesh.faces) / max(len(high_body.faces), 1)))} %)",
+    ])
+
     qa_sheet = out_path / "qa_game_sheet.png"
     renderer.contact_sheet(
         [
             (im_hi, f"1. Source High-Poly ({len(high_body.faces):,} tris, {raw_draw_calls} draw calls)"),
             (im_lod0, f"2. Game LOD0 ({len(lod0_mesh.faces):,} tris, {final_draw_calls} draw calls)"),
-            (im_lod2, f"3. Far LOD2 ({len(lod2_mesh.faces):,} tris, même atlas UV)"),
+            (im_lod2, f"3. Far LOD2 ({len(lod2_mesh.faces):,} tris, bake dédié 128²)"),
             (im_col, f"4. Colliders Physiques UCX ({sum(len(h.faces) for h in colliders)} tris) & Sockets"),
-            (im_nrm, "5. Tangent-Space Normal Map (Mikk VEC4)"),
-            (im_orm, "6. Packed ORM (R=AO, G=Roughness, B=Metallic)"),
+            (im_front, f"5. Face — {ext[0] * 100:.0f} x {ext[2] * 100:.0f} cm | "
+                       f"{studs_xyz[0]:.2f} x {studs_xyz[2]:.2f} Studs"),
+            (im_side, f"6. Profil — {ext[1] * 100:.0f} x {ext[2] * 100:.0f} cm | "
+                      f"{studs_xyz[1]:.2f} x {studs_xyz[2]:.2f} Studs"),
+            (im_alb.resize((480, 480), Image.BILINEAR), alb_lbl),
+            (im_nrm, "8. Tangent-Space Normal Map (Mikk VEC4)"),
+            (im_orm, "9. Packed ORM (R=AO, G=Roughness, B=Metallic)"),
+            (im_card, "10. Carte QA & gates"),
         ],
         cols=3,
         out_path=str(qa_sheet),
-        title=f"3d-forge v5 Game-Ready QA — {clean_name} (High-Poly -> LOD0/1/2 + PBR + Colliders + Unreal/Unity/Godot)",
+        title=f"3d-forge v5.5 Game-Ready QA — {clean_name} (High-Poly -> LOD0/1/2 + PBR + Colliders + échelle Studs/cm)",
     )
 
     manifest = {
         "asset_name": clean_name,
+        "lod0_target_tris": int(lod0_tris),
         "high_poly_tris": int(len(high_body.faces)),
         "lods": {
             "LOD0": {"tris": int(len(lod0_mesh.faces)), "path": str(glb_main), "bytes": glb_main.stat().st_size},
@@ -1441,6 +1776,7 @@ def export_game_package(
             "total_tris": int(sum(len(h.faces) for h in colliders)),
             "path": str(col_glb),
         },
+        "joints": joints,
         "sockets": sockets,
         "has_explicit_mikk_tangents": True,
         "webp_compressed": bool(webp),

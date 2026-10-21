@@ -40,8 +40,8 @@ ALL_FACES = [
     ("dessous", 0.0,  -78.0),
 ]
 
-BG_TOP = np.array([0.93, 0.94, 0.96])
-BG_BOTTOM = np.array([0.99, 0.99, 0.995])
+BG_TOP = np.array([0.86, 0.885, 0.93])
+BG_BOTTOM = np.array([0.965, 0.965, 0.975])
 AMBIENT = 0.33
 EXPOSURE = 1.12
 ENV_SKY = np.array([1.00, 1.02, 1.06])   # environnement hémisphérique (approx studio)
@@ -91,6 +91,13 @@ def _material_params(mesh: trimesh.Trimesh) -> dict:
     emis = np.asarray(emis, dtype=float) if emis is not None else np.zeros(3)
     if emis.max() > 2.001 and emis.max() <= 255.0:
         emis = emis / 255.0
+    # Intensité HDR (KHR_materials_emissive_strength, ou attribut interne)
+    strength = float(getattr(m, "_forge_emissive_strength", 0.0) or 0.0)
+    if strength <= 0.0:
+        ext_d = getattr(m, "extensions", None) or {}
+        strength = float((ext_d.get("KHR_materials_emissive_strength") or {})
+                         .get("emissiveStrength", 1.0) or 1.0)
+    emis = emis * max(strength, 1.0)
     opacity = float(col[3]) if len(col) > 3 else 1.0
 
     uv = getattr(vis, "uv", None)
@@ -352,12 +359,23 @@ def _compute_tangent_frame(verts_cam: np.ndarray, faces: np.ndarray,
     return T, B
 
 
+# v5.7 — encodage/décodage sRGB par LUT : `np.power` coûtait à lui seul près de
+# 1 s par vue sur une image 2048², puisqu'il est désormais appliqué à l'image
+# entière (et non plus aux seuls fragments couverts). La LUT 4096 entrées est
+# exacte au 1/4096 d'un niveau 8 bits, et ~6x plus rapide.
+_SRGB_LUT_N = 4096
+_SRGB_TO_LIN_LUT = np.power(np.linspace(0.0, 1.0, _SRGB_LUT_N), 2.2).astype(np.float32)
+_LIN_TO_SRGB_LUT = np.power(np.linspace(0.0, 1.0, _SRGB_LUT_N), 1.0 / 2.2).astype(np.float32)
+
+
 def _srgb_to_linear(c):
-    return np.power(np.clip(c, 0.0, 1.0), 2.2)
+    idx = (np.clip(c, 0.0, 1.0) * (_SRGB_LUT_N - 1)).astype(np.int32)
+    return _SRGB_TO_LIN_LUT[idx]
 
 
 def _linear_to_srgb(c):
-    return np.power(np.clip(c, 0.0, 1.0), 1.0 / 2.2)
+    idx = (np.clip(c, 0.0, 1.0) * (_LIN_TO_SRGB_LUT_N := _SRGB_LUT_N - 1)).astype(np.int32)
+    return _LIN_TO_SRGB_LUT[idx]
 
 
 def _tone(c):
@@ -480,7 +498,8 @@ def _shadow_visibility(pos_w: np.ndarray, PV_l: np.ndarray,
 
 def _shade_fragments(fi, w0, w1, w2, depth, verts_cam, vn_cam, fn_cam,
                      smooth_mask, faces, mp, lights, Rv=None,
-                     ssao_px=None, shadow_ctx=None, verts_world=None):
+                     ssao_px=None, shadow_ctx=None, verts_world=None,
+                     floor_ao=None, ground_z=None, height_span=None):
     """Shading PBR physique Cook-Torrance GGX + dôme HDRI studio + AO cuite &
     SSAO + auto-ombrage directionnel 3D PCF en espace linéaire."""
     ia = faces[fi, 0]
@@ -570,11 +589,16 @@ def _shade_fragments(fi, w0, w1, w2, depth, verts_cam, vn_cam, fn_cam,
     k_g = ((rough_c + 1.0) ** 2) * 0.125
     g1_v = ndv / (ndv * (1.0 - k_g) + k_g)
 
-    L_key, L_fill, L_rim, _ = lights
+    L_key, L_fill, L_rim, I_l = lights
+    # chromaticités de plateau (octabox chaude, strip-box froide, rim bleutée)
+    c_key = np.array([1.000, 0.970, 0.925])
+    c_fill = np.array([0.758, 0.842, 1.000])
+    c_rim = np.array([0.824, 0.883, 1.000])
+    _KN = 3.05 / max(float(I_l[0]), 1e-6)      # la clé garde son exposition
     light_defs = (
-        (L_key,  np.array([[2.65, 2.58, 2.46]]), key_vis),
-        (L_fill, np.array([[0.92, 0.98, 1.12]]), 1.0),
-        (L_rim,  np.array([[1.35, 1.44, 1.62]]), 1.0),
+        (L_key,  (c_key * I_l[0] * _KN)[None, :], key_vis),
+        (L_fill, (c_fill * I_l[1] * _KN)[None, :], 1.0),
+        (L_rim,  (c_rim * I_l[2] * _KN)[None, :], 1.0),
     )
 
     lo = np.zeros((len(fi), 3), dtype=np.float64)
@@ -611,7 +635,24 @@ def _shade_fragments(fi, w0, w1, w2, depth, verts_cam, vn_cam, fn_cam,
     # chromés parasites au fond des cavités sombres tout en les gardant vifs dehors
     spec_ao = np.clip(np.power(ndv + ao, alpha) - 1.0 + ao, 0.0, 1.0)
 
-    ibl = (albedo * (1.0 - metal_c) * env_diff * 0.42 * ao
+    # v5.6 — occultation d'environnement par le sol : près du contact, le dôme
+    # HDRI est masqué par le cyclorama. Sans ça, un objet long et fin (katana)
+    # baigne dans un environnement uniforme et paraît plat et blanc.
+    if ground_z is not None and height_span:
+        # Hauteur relative au sol : plus le fragment est bas, plus le cyclorama
+        # masque l'environnement (occlusion d'environnement directionnelle).
+        pos_w_f = (w0[:, None] * verts_world[ia]
+                   + w1[:, None] * verts_world[ib]
+                   + w2[:, None] * verts_world[ic])
+        z_rel = np.clip((pos_w_f[:, 2:3] - ground_z) / max(height_span, 1e-6), 0.0, 1.0)
+        env_occ = 1.0 - 0.55 * np.exp(-z_rel / 0.11)
+        ao = ao * np.clip(env_occ, 0.35, 1.0)
+        spec_ao = spec_ao * np.clip(env_occ, 0.35, 1.0)
+    elif floor_ao is not None:
+        ao = ao * floor_ao
+        spec_ao = spec_ao * floor_ao
+
+    ibl = (albedo * (1.0 - metal_c) * env_diff * 0.34 * ao
            + env_spec * F_env * (1.0 - 0.32 * rough_c) * spec_ao)
 
     # Couche supérieure Clearcoat vernis automobile / céramique émaillée (IOR=1.5 -> F0=0.04)
@@ -631,12 +672,61 @@ def _shade_fragments(fi, w0, w1, w2, depth, verts_cam, vn_cam, fn_cam,
         spec_cc = (a2_cc / (math.pi * dd_cc * dd_cc + 1e-9)) * 0.06 * key_vis
         cc_lin = cc * F_cc * (env_cc * spec_ao + spec_cc * 2.6)
 
-    emissive_lin = _srgb_to_linear(mp["emissive"]) if np.any(mp["emissive"] > 0) else 0.0
-    return _tone((lo * (0.35 + 0.65 * ao) + ibl + cc_lin + emissive_lin) * 1.06)
+    # v5.6 — l'émission était clippée à [0,1] par `_srgb_to_linear`, ce qui
+    # détruisait l'intensité HDR (`mk.mat.emissive("#3af0ff", 2.6)` -> 2.6).
+    # On sépare la chromaticité (bornée) de l'intensité (conservée en HDR) pour
+    # que le néon dépasse réellement le seuil de bloom.
+    em_raw = np.asarray(mp["emissive"], dtype=float)
+    if float(np.max(em_raw)) > 0.0:
+        peak = float(np.max(em_raw))
+        chroma = np.clip(em_raw / peak, 0.0, 1.0)
+        emissive_lin = _srgb_to_linear(chroma) * (peak ** 0.85) * 1.35
+    else:
+        emissive_lin = 0.0
+    # v5.7 — retour en LINÉAIRE : la tonemap est appliquée une seule fois en fin
+    # d'image, après calcul de l'exposition sur la silhouette réelle.
+    return (lo * (0.35 + 0.65 * ao) + ibl + cc_lin + emissive_lin) * 1.06
+
+
+def _post_finish(img: Image.Image, bloom: bool = True, vignette: bool = True,
+                 sharpen: bool = True) -> Image.Image:
+    """Finition photo de la sortie de rendu (v5.6).
+
+    Le shading PBR est correct mais l'image sortait « plate » : pas de halo sur
+    les émissions, coins aussi lumineux que le sujet, micro-détail écrasé par le
+    downscale. Trois retouches standard de plateau produit, toutes mesurables :
+      - bloom émissif : seuil de luminance + flou gaussien -> le néon respire ;
+      - vignettage doux : recentre le regard (10 % max dans les coins) ;
+      - unsharp mask : récupère le détail perdu par le LANCZOS final.
+    """
+    arr = np.asarray(img, dtype=np.float32) / 255.0
+    H, W = arr.shape[:2]
+
+    if bloom:
+        lum = arr @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+        mask = np.clip((lum - 0.70) / 0.26, 0.0, 1.0)[..., None] ** 1.2
+        bright = arr * mask
+        small = Image.fromarray((np.clip(bright, 0, 1) * 255).astype(np.uint8))
+        sw, sh = max(32, W // 4), max(32, H // 4)
+        small = small.resize((sw, sh), Image.BILINEAR).filter(
+            ImageFilter.GaussianBlur(radius=max(2.0, sw / 28.0)))
+        halo = np.asarray(small.resize((W, H), Image.BILINEAR), dtype=np.float32) / 255.0
+        arr = 1.0 - (1.0 - arr) * (1.0 - 0.75 * halo)   # écran additif doux
+
+    if vignette:
+        yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+        r = np.sqrt(((xx - W / 2) / (W / 2)) ** 2 + ((yy - H / 2) / (H / 2)) ** 2)
+        arr *= (1.0 - 0.10 * np.clip((r - 0.55) / 0.75, 0.0, 1.0) ** 2)[..., None]
+
+    out = Image.fromarray((np.clip(arr, 0, 1) * 255).astype(np.uint8))
+    if sharpen:
+        out = out.filter(ImageFilter.UnsharpMask(radius=1.4, percent=65, threshold=2))
+    return out
 
 
 def render_view(scene: trimesh.Scene, azimuth_deg=42.0, elevation_deg=22.0,
-                size=1024, fov=38.0, ssaa=2, shadow=True) -> Image.Image:
+                size=1024, fov=38.0, ssaa=2, shadow=True, post=True,
+                return_mask=False) -> Image.Image:
     parts = _gather(scene)
     if not parts:
         raise ValueError("scène vide")
@@ -659,15 +749,31 @@ def render_view(scene: trimesh.Scene, azimuth_deg=42.0, elevation_deg=22.0,
     L_key = np.array([0.35, 0.45, 0.83]); L_key /= np.linalg.norm(L_key)
     L_fill = np.array([-0.62, 0.18, 0.55]); L_fill /= np.linalg.norm(L_fill)
     L_rim = np.array([0.05, -0.72, 0.25]); L_rim /= np.linalg.norm(L_rim)
-    I = np.array([1.05, 0.38, 0.50])
+    # Intensités clé / remplissage / contre (v5.7).
+    # BUG CORRIGÉ : ce vecteur était construit puis JAMAIS utilisé (`_` dans
+    # `light_defs`), les radiances restant codées en dur à 3.05 / 2.15 / 1.75 —
+    # soit un remplissage à 70 % de la clé. Trois lumières quasi égales ne
+    # produisent aucun modelé sur une forme lisse : le pion d'échecs se mesurait
+    # à une luminance de 0.945 avec une dynamique de 0.09, une surface morte.
+    # `I` pilote désormais réellement l'énergie, normalisée pour que la clé
+    # conserve l'étalonnage d'exposition (3.05).
+    I = np.array([1.35, 0.26, 0.46])
     lights = (L_key, L_fill, L_rim, I)
 
-    img = np.zeros((H, W, 3))
+    img = np.zeros((H, W, 3), dtype=np.float32)   # espace LINÉAIRE (v5.7)
     zbuf = np.full((H, W), np.inf)
 
     # ---- fond dégradé studio ----
     grad = np.linspace(0, 1, H)[:, None, None]
-    img[:] = (BG_TOP * (1 - grad) + BG_BOTTOM * grad) * np.ones((1, W, 1))
+    # Cyclorama : nappe de lumière derrière le sujet qui s'éteint vers les coins.
+    # Un fond plat à 0.99 ne détachait aucun métal clair (lame mesurée à 0.886
+    # de luminance pour un fond à 0.93 : silhouette invisible en vignette).
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    rad_bg = np.sqrt(((xx - W * 0.5) / (W * 0.74)) ** 2
+                     + ((yy - H * 0.44) / (H * 0.74)) ** 2)
+    pool = np.clip(1.0 - 0.34 * rad_bg ** 1.7, 0.5, 1.0)[..., None]
+    bg_lin = (BG_TOP * (1 - grad) + BG_BOTTOM * grad) * pool
+    img[:] = _srgb_to_linear(bg_lin).astype(np.float32)
 
     # ---- ombre de contact : projection C via PIL.ImageDraw + flou Gaussien ----
     if shadow:
@@ -690,11 +796,16 @@ def render_view(scene: trimesh.Scene, azimuth_deg=42.0, elevation_deg=22.0,
                 dr.polygon([(tri[0][0], tri[0][1]),
                             (tri[1][0], tri[1][1]),
                             (tri[2][0], tri[2][1])], fill=255)
-        sh_im = sh_im.filter(ImageFilter.GaussianBlur(radius=max(2, SW // 70)))
+        # Deux couches : halo large (occlusion ambiante au sol) + noyau serré
+        # (contact réel) — sans le noyau, l'objet « flotte » sur le fond.
+        halo_im = sh_im.filter(ImageFilter.GaussianBlur(radius=max(2, SW // 70)))
+        core_im = sh_im.filter(ImageFilter.GaussianBlur(radius=max(1, SW // 220)))
         if SW != W:
-            sh_im = sh_im.resize((W, H), Image.BILINEAR)
-        sh = np.asarray(sh_im, dtype=float) / 255.0
-        img *= (1.0 - 0.42 * sh[..., None])
+            halo_im = halo_im.resize((W, H), Image.BILINEAR)
+            core_im = core_im.resize((W, H), Image.BILINEAR)
+        halo = np.asarray(halo_im, dtype=float) / 255.0
+        core = np.asarray(core_im, dtype=float) / 255.0
+        img *= (1.0 - 0.34 * halo[..., None]) * (1.0 - 0.30 * core[..., None])
 
     # ---- 1) Passe OPAQUE différée : rasterisation z-buffer -> shading unique ----
     opaque_indices = [i for i in range(len(parts)) if parts[i][5]["opacity"] >= 0.999]
@@ -743,7 +854,9 @@ def render_view(scene: trimesh.Scene, azimuth_deg=42.0, elevation_deg=22.0,
         col = _shade_fragments(fi, w0, w1, w2, depth, verts_cam, vn_cam, fn_cam,
                                smooth_mask, faces, mp, lights, Rv=Rv,
                                ssao_px=ssao_buf[ys, xs], shadow_ctx=shadow_ctx,
-                               verts_world=verts_w)
+                               verts_world=verts_w,
+                               ground_z=float(lo[2]),
+                               height_span=float(max(hi[2] - lo[2], 1e-6)))
         img[ys, xs] = col
 
     # ---- 2) Passe VERRE RÉFRACTIF PHYSIQUE (Snell + Beer-Lambert + Fresnel + Specular pur) ----
@@ -823,9 +936,9 @@ def render_view(scene: trimesh.Scene, azimuth_deg=42.0, elevation_deg=22.0,
             xi, yi = xs[idx], ys[idx]
             sx = np.clip(xi + rx_off[idx], 0, W - 1)
             sy = np.clip(yi + ry_off[idx], 0, H - 1)
-            bg_lin = _srgb_to_linear(img[sy, sx])
+            bg_lin = img[sy, sx]
             L_glass = bg_lin * beer[idx] * tir_atten[idx] * (1.0 - fres[idx]) + refl_lin[idx]
-            img[yi, xi] = _linear_to_srgb(np.clip(L_glass, 0.0, 1.0) * 0.92 + 0.08 * np.clip(spec_o[idx], 0.0, 2.0))
+            img[yi, xi] = np.clip(L_glass, 0.0, None) * 0.92 + 0.08 * np.clip(spec_o[idx], 0.0, 2.0)
             rem = np.ones(len(flat), dtype=bool)
             rem[idx] = False
             flat = flat[rem]
@@ -834,9 +947,45 @@ def render_view(scene: trimesh.Scene, azimuth_deg=42.0, elevation_deg=22.0,
             beer, fres, tir_atten = beer[rem], fres[rem], tir_atten[rem]
             refl_lin, spec_o = refl_lin[rem], spec_o[rem]
 
+    # ---- Auto-exposition sur la silhouette (v5.7) --------------------------
+    # Sans ça, un albédo clair (pion d'échecs 0.94, saladier, assiette) partait
+    # à ~2.1 en linéaire : ACES y est plat, la surface se mesurait à une
+    # luminance de 0.945 avec une dynamique de 0.09 -> blanc sans modelé.
+    # On n'expose JAMAIS au-dessus de 1.0 (aucun asset déjà correct ne bouge) et
+    # on vise un point blanc à 0.90 en linéaire.
+    exposure = 1.0
+    cov_px = np.isfinite(zbuf)
+    if cov_px.sum() > 256:
+        lum_obj = (img @ np.array([0.2126, 0.7152, 0.0722]))[cov_px]
+        lum_obj = lum_obj[np.isfinite(lum_obj)]
+        if lum_obj.size > 256:
+            p95 = float(np.percentile(lum_obj, 95))
+            if p95 > 0.62:
+                exposure = float(np.clip(0.62 / p95, 0.38, 1.0))
+    # L'exposition ne s'applique qu'au SUJET : le cyclorama reste identique d'un
+    # asset à l'autre (catalogue homogène). Raccord doux par un masque flouté
+    # pour éviter une couture sur l'anticrénelage de la silhouette.
+    toned_obj = _tone(img * exposure)
+    if exposure < 0.999:
+        toned_bg = _tone(img)
+        m_cov = cov_px.astype(np.float64)
+        m_cov = np.asarray(Image.fromarray((m_cov * 255).astype(np.uint8)).filter(
+            ImageFilter.GaussianBlur(radius=1.2)), dtype=np.float64) / 255.0
+        img = toned_obj * m_cov[..., None] + toned_bg * (1.0 - m_cov[..., None])
+    else:
+        img = toned_obj
+
     out = Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8))
+    # Masque de silhouette exact (z-buffer, avant réduction) : indispensable pour
+    # mesurer la matière d'un asset sans compter le cyclorama comme du sujet.
+    mask = None
+    if return_mask:
+        cov = np.isfinite(zbuf)
+        mask = Image.fromarray((cov * 255).astype(np.uint8)).resize(
+            (int(size), int(size)), Image.LANCZOS)
     out = out.resize((int(size), int(size)), Image.LANCZOS)
-    return out
+    res = _post_finish(out) if post else out
+    return (res, mask) if return_mask else res
 
 
 def render_views(scene, outdir, stem, views=None, size=1024, prefix="") -> list:
@@ -905,6 +1054,16 @@ def _font(px=16):
         return ImageFont.load_default(px)
     except TypeError:
         return ImageFont.load_default()
+
+
+def make_gif(paths, out_path, fps=8) -> str:
+    """Assemble une liste de PNG en GIF animé (turntable livrable en chat/README)."""
+    ims = [Image.open(p).convert("RGB") for p in paths]
+    if not ims:
+        raise ValueError("aucune image pour le GIF")
+    ims[0].save(out_path, save_all=True, append_images=ims[1:],
+                duration=int(1000 / fps), loop=0, optimize=True)
+    return str(out_path)
 
 
 def render_all_faces(scene, outdir, stem, size=768, prefix="",

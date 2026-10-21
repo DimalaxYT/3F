@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+
+import pytest
 import numpy as np
 import trimesh
 
@@ -26,6 +28,23 @@ import meshkit as mk  # noqa: E402
 import pbr  # noqa: E402
 import recipes  # noqa: E402
 
+
+
+# Packs d'exemples lourds hors arbre : skip explicite plutôt qu'échec
+# (`python3 scripts/fetch_examples.py --only <pack>` pour les restaurer).
+_PACKS = {
+    "dragon_buste": "examples/dragon_buste",
+    "katana": "examples/katana",
+    "sci_fi_crate": "examples/sci_fi_crate",
+    "epee_rouillee": "examples/epee_rouillee",
+    "motocross": "examples/motocross",
+}
+
+
+def require_pack(name: str) -> None:
+    rel = _PACKS[name]
+    if not (ROOT / rel).is_dir():
+        pytest.skip(f"pack `{rel}` absent : python3 scripts/fetch_examples.py --only {name}")
 
 def test_all_greebles_primitives_strictly_watertight():
     single_primitives = [
@@ -114,6 +133,7 @@ def test_zbuffer_multiview_projection_blocks_occluded_back_wall(tmp_path):
 def test_flagship_v5_1_packages_roblox_and_unreal():
     # 1. Katana v5.1 : Dual-1024² `Blade` + `Hilt` dans Roblox Studio (`< 9 800 tris/part`, `webp=False`)
     kat_rbx_dir = ROOT / "examples" / "katana" / "game_ready" / "roblox"
+    require_pack("katana")
     kat_glb_bytes = (kat_rbx_dir / "katana_roblox.glb").read_bytes()
     assert b"EXT_texture_webp" not in kat_glb_bytes
     assert (kat_rbx_dir / "T_katana_Blade_ColorMap.png").is_file()

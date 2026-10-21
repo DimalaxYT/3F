@@ -216,9 +216,22 @@ def build_rocket(height=0.5, radius=0.06, body_color="#e8e6e1",
           name="nozzle", at=(0, 0, 0))
     b.add(mk.cylinder(radius, body_h, sections=48), body_m, name="body",
           at=(0, 0, body_z))
-    b.add(mk.cone(radius, nose_h, sections=48), accent_m, name="nose",
-          at=(0, 0, body_z + body_h))
-    band = mk.cylinder(radius * 1.005, height * 0.03, sections=48)
+    # v5.7 — la jupe du cône descend de 2 mm SOUS la jonction : le cône peint
+    # chevauche le fût au lieu de l'affleurer. À ras, le bake cuisait au même
+    # endroit la peinture rouge et le blanc du fût, d'où la couture déchirée
+    # visible à la base du nez (le pire des deux matériaux gagnait au pixel).
+    # v5.7 — le cône est ENFONCÉ de 10 mm dans le fût (léger débord de 1 % en
+    # rayon). Deux défauts disparaissent d'un coup :
+    #   - plus de couronne annulaire horizontale visible en quasi-tangente ;
+    #   - la face de base du cône et le capuchon du fût sont désormais tous deux
+    #     ENTERRÉS, donc le bake ne peut plus échantillonner le blanc du fût là
+    #     où le cône rouge commence (c'était la « couture déchirée » en créneaux).
+    # Rayon élargi à 6 % : enfoncé de 5 mm, le cône reste PLUS LARGE que le fût
+    # à cette hauteur (à 1 %, il s'affinait déjà sous le rayon du fût et le
+    # capuchon blanc ressortait à travers le rouge — mesuré au zoom).
+    b.add(mk.cone(radius * 1.06, nose_h + height * 0.01, sections=48), accent_m,
+          name="nose", at=(0, 0, body_z + body_h - height * 0.01))
+    band = mk.cylinder(radius * 1.03, height * 0.03, sections=48)
     b.add(band, accent_m, name="band", at=(0, 0, body_z + body_h * 0.12))
 
     n = 3 if int(fins) < 4 else 4

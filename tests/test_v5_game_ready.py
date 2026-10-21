@@ -33,6 +33,23 @@ import meshkit as mk
 import pbr
 
 
+
+# Packs d'exemples lourds hors arbre : skip explicite plutôt qu'échec
+# (`python3 scripts/fetch_examples.py --only <pack>` pour les restaurer).
+_PACKS = {
+    "dragon_buste": "examples/dragon_buste",
+    "katana": "examples/katana",
+    "sci_fi_crate": "examples/sci_fi_crate",
+    "epee_rouillee": "examples/epee_rouillee",
+    "motocross": "examples/motocross",
+}
+
+
+def require_pack(name: str) -> None:
+    rel = _PACKS[name]
+    if not (ROOT / rel).is_dir():
+        pytest.skip(f"pack `{rel}` absent : python3 scripts/fetch_examples.py --only {name}")
+
 def _parse_glb_json(path: Path) -> tuple[dict, bytes]:
     raw = path.read_bytes()
     magic, version, _ = struct.unpack_from("<III", raw, 0)
@@ -162,6 +179,7 @@ def test_game_ready_end_to_end_multi_engine_package(tmp_path: Path):
     assert any(n.get("name", "").endswith("-colonly") for n in gd_gltf.get("nodes", []))
 
     # Vérifie aussi la piste d'animation standard `Idle_Action` sur `sci_fi_crate`
+    require_pack("sci_fi_crate")
     crate_gltf, _ = _parse_glb_json(ROOT / "examples" / "sci_fi_crate" / "game_ready" / "sci_fi_crate_game.glb")
     assert len(crate_gltf.get("animations", [])) >= 1
     assert crate_gltf["animations"][0]["name"] == "Idle_Action"

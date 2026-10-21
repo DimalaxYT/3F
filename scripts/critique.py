@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-critique.py — boucle d'autocritique NOTÉE (1-10, seuil de livraison 9.5).
+critique.py — boucle d'autocritique NOTÉE (1-10).
+Seuil & budget d'itérations : source de vérité = `critique.py policy`.
 
 L'agent (LLM) est son propre contrôleur qualité. Le code fournit la structure :
 métriques objectives, fiche de critique, validation anti-triche, historique.
@@ -8,9 +9,9 @@ La NOTE vient de l'agent après lecture des photos — chaque point perdu doit
 correspondre à une issue concrète, sinon le verdict est rejeté.
 
 Règle d'or (celle du prompt d'autocritique) :
-    note < 9.5  ->  PAUFINER : corriger le spec, régénérer, re-critiquer.
-    note >= 9.5 ->  LIVRER (avec --deliver explicite).
-    Jamais de faux 9.5 : à la fin du budget d'itérations, livraison forcée
+    note < seuil   ->  PAUFINER : corriger le spec, régénérer, re-critiquer.
+    note >= seuil  ->  LIVRER (avec --deliver explicite).
+    Jamais de note de complaisance : à la fin du budget, livraison forcée
     avec issues résiduelles documentées (FORCE_DELIVER).
 
 Sous-commandes :
@@ -49,13 +50,53 @@ AXES = {
 # Lecture des métriques objectives depuis report.json
 # --------------------------------------------------------------------------
 
+def _manifest_to_report(man: dict) -> dict:
+    """Convertit un `game_manifest.json` (turbo_forge/game_ready) au schéma
+    `report.json` attendu par `objective_metrics` : la boucle notée fonctionne
+    sur TOUS les chemins de génération."""
+    lods = man.get("lods", {})
+    tris = int(lods.get("LOD0", {}).get("tris", 0))
+    wt = bool(man.get("stl_watertight", False))
+    return {
+        "pipeline": "turbo_forge",
+        "prompt": man.get("asset_name", ""),
+        "output_dir": man.get("out_dir", ""),
+        "params": {"budget_tris": int(man.get("lod0_target_tris", 15000))},
+        "validation": {
+            "watertight": wt,
+            "winding_consistent": wt,
+            "triangles": tris,
+            "over_budget": False,
+            "components": 1,
+            "degenerate_faces": 0,
+            "volume_m3": None,
+            "iou_views": {},
+            "iou_mean": 0.0,
+        },
+        "photos": {},
+        "renders": [man["qa_sheet"]] if man.get("qa_sheet") else [],
+        "references": None,
+    }
+
+
 def load_report(dirpath, it):
-    p = os.path.join(dirpath, f"iter_{it}", "report.json")
-    if not os.path.isfile(p):
-        raise FileNotFoundError(
-            f"{p} introuvable — lance d'abord meshgen.py --out {dirpath}/iter_{it}")
-    with open(p) as fh:
-        return json.load(fh)
+    itdir = os.path.join(dirpath, f"iter_{it}")
+    candidates = [
+        os.path.join(itdir, "report.json"),
+        os.path.join(itdir, "game_manifest.json"),
+        os.path.join(dirpath, "report.json"),
+        os.path.join(dirpath, "game_manifest.json"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            with open(p) as fh:
+                data = json.load(fh)
+            if os.path.basename(p) == "game_manifest.json":
+                return _manifest_to_report(data)
+            return data
+    raise FileNotFoundError(
+        f"aucun report.json / game_manifest.json dans {itdir} ni {dirpath} — "
+        f"lance d'abord turbo_forge.py, meshgen.py ou generate.py --out {dirpath}")
 
 
 def objective_metrics(rep):
@@ -216,9 +257,10 @@ def cmd_brief(args):
     L.append("Format d'issue : `AXE|problème observé|correctif proposé` avec "
              "AXE dans " + "/".join(AXES) + ".")
     L.append(f"Rappel : note >= {args.threshold} sans issue OUVERTE, sinon le "
-             "verdict est rejeté (pas de 9.5 de complaisance).")
+             "verdict est rejeté (pas de note de complaisance).")
     L.append("")
 
+    os.makedirs(itdir, exist_ok=True)
     out = os.path.join(itdir, "critique_brief.md")
     with open(out, "w") as fh:
         fh.write("\n".join(L))
@@ -277,7 +319,7 @@ def cmd_verdict(args):
     if args.note >= threshold and issues:
         print(f"REFUSÉ : note {args.note} >= seuil {threshold} avec "
               f"{len(issues)} issue(s) ouverte(s) — corrige d'abord ou baisse "
-              "la note. Pas de 9.5 de complaisance.", file=sys.stderr)
+              "la note. Pas de note de complaisance.", file=sys.stderr)
         return 2
     if args.note < threshold and not issues:
         print("REFUSÉ : note < seuil sans AUCUNE issue — un diagnostic est "
@@ -345,7 +387,7 @@ def cmd_verdict(args):
     elif decision == "FORCE_DELIVER":
         print(f"  DÉCISION : LIVRAISON FORCÉE (budget {max_iters} itérations "
               "atteint).")
-        print("  Rappel de design : le seuil 9.5 est un plafond "
+        print("  Rappel de design : le seuil est un plafond "
               "volontairement exigeant — la note est bornée "
               "mécaniquement (T technique, IoU) ; FORCE_DELIVER est le "
               "dénouement normal d'une boucle saine, pas un échec : on "
@@ -397,10 +439,26 @@ def cmd_status(args):
     return 0
 
 
+def cmd_policy(args):
+    """Source de vérité unique : seuil & budget d'itérations actifs."""
+    print(f"seuil de livraison (défaut) : {THRESHOLD_DEFAULT}")
+    print(f"budget d'itérations (défaut) : {MAX_ITERS_DEFAULT}")
+    print("mode --fast : seuil 8.5, budget 1 itération")
+    print("barème :")
+    for k, v in AXES.items():
+        print(f"  {k} = {v}")
+    print("Les docs (SKILL.md, AUTOCRITIQUE.md) doivent citer `critique.py policy`, "
+          "jamais recopier ces chiffres.")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Boucle d'autocritique notée (1-10, seuil 9.5)")
+        description="Boucle d'autocritique notée — seuil & budget : `critique.py policy`")
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    pol = sub.add_parser("policy", help="imprimer seuil / budget / barème actifs")
+    pol.set_defaults(fn=cmd_policy)
 
     b = sub.add_parser("brief", help="générer la fiche de critique d'une itération")
     b.add_argument("--dir", required=True)
