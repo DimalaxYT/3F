@@ -30,11 +30,31 @@ import argparse
 import importlib.util
 import inspect
 import json
+import subprocess
 import sys
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+
+
+def _ensure_runtime_deps() -> None:
+    """Auto-installe `requirements.txt` au 1er lancement dans un conteneur vierge (ex: Arena.ai)."""
+    try:
+        import fast_simplification  # noqa: F401
+        import manifold3d  # noqa: F401
+        import numpy  # noqa: F401
+        import trimesh  # noqa: F401
+        import xatlas  # noqa: F401
+    except ImportError:
+        req = HERE.parent / "requirements.txt"
+        if req.is_file():
+            cmd = [sys.executable, "-m", "pip", "install", "--break-system-packages", "-q", "-r", str(req)]
+            if subprocess.call(cmd) != 0:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-r", str(req)])
+
+
+_ensure_runtime_deps()
 sys.path.insert(0, str(HERE))
 
 import game_ready as gr  # noqa: E402
