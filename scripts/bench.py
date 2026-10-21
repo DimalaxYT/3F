@@ -92,21 +92,29 @@ def main(argv=None) -> int:
             if not o:
                 drift.append(f"{r['asset']}: absent du bench commité")
                 continue
-            for k in ("high_poly_tris", "lod0_tris", "lod0_bytes", "lod1_tris", "lod2_tris"):
+            # tris : strictement déterministes (géométrie générée par le code).
+            for k in ("high_poly_tris", "lod0_tris", "lod1_tris", "lod2_tris"):
                 if o.get(k) != r[k]:
                     drift.append(f"{r['asset']}.{k}: commité {o.get(k)} != mesuré {r[k]}")
+            # octets : la taille du GLB dépend de la version de libwebp (encodage
+            # des textures) : tolérance 5 % pour attraper une vraie dérive
+            # (ex. bascule webp -> PNG = ×5) sans casser sur un arrondi d'encodeur.
+            ob, rb = o.get("lod0_bytes"), r.get("lod0_bytes")
+            if ob and rb and abs(ob - rb) / max(ob, rb) > 0.05:
+                drift.append(f"{r['asset']}.lod0_bytes: commité {ob} vs mesuré {rb} "
+                             f"(> 5 %, encodeur différent ou régression de taille)")
         if drift:
             print("DÉRIVE DOC/CODE :", file=sys.stderr)
             for d in drift:
                 print("  -", d, file=sys.stderr)
             print("=> régénère : python3 scripts/bench.py", file=sys.stderr)
             return 1
-        print(f"bench à jour ({len(rows)} assets, tris/octets identiques).")
+        print(f"bench à jour ({len(rows)} assets, tris identiques, octets à ±5 %).")
         return 0
 
     payload = {
         "generated_by": "scripts/bench.py",
-        "note": "durées indicatives (machine dépendante) ; tris/octets déterministes, comparés en CI",
+        "note": "durées indicatives (machine dépendante) ; tris déterministes (comparés strictement en CI), octets à ±5 % (encodeur webp versionné)",
         "rows": rows,
     }
     bench_p.parent.mkdir(parents=True, exist_ok=True)
