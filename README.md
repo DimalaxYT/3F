@@ -95,8 +95,8 @@ python3 scripts/turbo_forge.py mon_arme_custom.py --lod0-tris 4200 -o out/mon_ar
 <!-- BENCH:START -->
 | asset | high-poly | LOD0 (poids) | LOD1 | LOD2 | draw calls | turbo CPU (indicatif) |
 |---|---|---|---|---|---|---|
-| `katana` | 6,508 tris | **6,846 tris** (945 Ko) | 3,127 tris | 1,228 tris | 10 ➔ 1 | 15.94 s |
-| `sci_fi_crate` | 13,076 tris | **3,796 tris** (1040 Ko) | 1,520 tris | 836 tris | 44 ➔ 3 | 15.64 s |
+| `katana` | 6,508 tris | **6,840 tris** (965 Ko) | 3,129 tris | 1,228 tris | 10 ➔ 1 | 15.94 s |
+| `sci_fi_crate` | 13,076 tris | **3,796 tris** (1063 Ko) | 1,520 tris | 836 tris | 44 ➔ 3 | 15.64 s |
 <!-- BENCH:END -->
 
 > Mesures reproductibles : `python3 scripts/bench.py` (régénère `docs/bench.json`
