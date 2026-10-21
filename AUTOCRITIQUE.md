@@ -17,12 +17,14 @@ livrer quoi que ce soit :
 2. OUVRE et REGARDE chaque photo listée dans la fiche (les 6 faces, le
    turntable, les vues de contrôle, la planche des références). Une note
    donnée sans avoir lu les photos est une triche.
-3. NOTE le résultat sur 10 avec le barème :
-     S  silhouette & proportions   /3   (IoU multi-vues + lecture des photos)
-     V  volume inter-faces         /2   (face/dos/gauche = même objet)
-     M  matériaux & textures       /2   (overlays visibles et stables)
-     D  détails à respecter        /2   (checklist Stage 0, -0.5 par détail absent)
-     T  technique                  /1   (watertight, budget, dégénérés)
+3. NOTE le résultat sur 10 avec le barème v3 (6 axes incluant Photoréalisme `R`) :
+     S  silhouette & proportions   /2.5 (IoU multi-vues + lecture des photos)
+     V  volume, CAO & sculpture    /1.5 (CAO exacte sur mécanique, `gpu_sculpt.py` lisse sans escaliers sur organique)
+     M  matériaux, verre & vernis  /1.5 (IOR/transmission cristal, Clearcoat auto, masques directionnels)
+     R  photoréalisme visuel       /1.5 (reflets HDRI, AO creux, grain IA GPU datacenter
+                                         `gpu_sculpt.py` / `gpu_bridge.py` / `photo_pass.py` vs Stage 0)
+     D  détails & articulations    /2.0 (checklist Stage 0 + pivots `def_joint`, -0.5 par détail absent)
+     T  technique & imprimabilité  /1.0 (`is_watertight == True`, UVs, `split_stl.py` si hors plateau)
    Chaque point perdu DOIT correspondre à une issue concrète et localisée
    (format : AXE|problème observé|correctif proposé). Une note de
    complaisance est une triche : si tu doutes, la note descend.

@@ -47,21 +47,54 @@ import sys; sys.path.insert(0, "<chemin_du_skill>/scripts")
 import meshkit as mk
 
 # ---- primitives (base z=0, centrées XY, mètres) ----
-mk.box(w, d, h)                        # pavé
+mk.box(w, d, h)                        # pavé droit vif
+mk.rounded_box(w, d, h, r=0.015)       # pavé congé arrondi continu (étanche)
+mk.chamfer_box(w, d, h, c=0.008)       # bloc usiné CNC à chanfrein 45° franc
+mk.tube_sweep(path, r=0.02, r_inner=0) # tube cintré lissé PCHIP (échappements, guidons, cadres)
+mk.helix_spring(0.03, 0.006, 0.02, 7)  # vrai ressort hélicoïdal 3D (amortisseurs)
+mk.cable(points, r=0.004, sag=0.02)    # durite hydraulique / câble souple
 mk.cylinder(r, h, sections=32)
 mk.frustum(r_bas, r_haut, h)           # tronc de cône
 mk.cone(r, h)                          # apex propre, jamais de faces dégénérées
 mk.sphere(r, center=(0,0,0), subdivisions=3)
 mk.torus(R, r, center=None)            # posé à plat ; center défaut (0,0,r)
-mk.tube(r_ext, r_int, h)               # bague étanche
+mk.tube(r_ext, r_int, h)               # bague fermée garantie étanche
 mk.capsule(r, h_cyl)                   # pilule verticale, hauteur h_cyl+2r
 
-# ---- révolution & extrusion ----
+# ---- révolution, extrusion, loft & sweep ----
 mk.lathe([(r, z), ...], sections=48, smooth=True, close=True)
    # profil (rayon, hauteur) du bas vers le haut ; close=True referme sur
-   # l'axe → étanche. Pour un creux (mug, bol) : monter le mur extérieur,
+   # l'axe → étanche. Pour un creux (mug, bol, verre) : monter le mur extérieur,
    # traverser le bord, redescendre à l'intérieur, finir sur l'axe.
 mk.extrude([(x, y), ...], hauteur)     # polygone XY extrudé en +Z
+mk.loft([(sec0, z0), (sec1, z1), ...]) # relie N sections 2D/3D (carrosseries, manches)
+mk.sweep(profile_2d, path_3d, scale=lambda t: (sx, sy))
+   # balaye un profil 2D le long d'une courbe 3D arbitraire (repère de Bishop sans torsion :
+   # lames courbées sori, cornes, poignées, tubulures)
+
+# ---- bake PBR hybride sur géométrie paramétrique ----
+# Combine précision CAO + atlas UV xatlas + 3 textures PBR (albedo, metallicRoughness, normal) !
+b.bake_pbr(
+    overlays=[
+        {"type": "wrap", "on": "grip", "diamond": True, "under_color": "#dfd8c5", "count": 9.5},
+        {"type": "hamon", "on": "blade", "axis": "x", "positive_edge": True},
+        {"type": "rust", "on": "blade", "coverage": 0.35, "scale": 14.0},
+        {"type": "wood_grain", "on": "top", "axis": "x", "rings": 14.0},
+        {"type": "brushed_metal", "on": "blade", "axis": "z", "scale": 160.0},
+        {"type": "edge_wear", "on": ["blade", "guard"], "amount": 0.55},
+    ],
+    texture_size=1024,
+    normal_strength=2.0,
+)
+
+# ---- articulations hiérarchiques glTF (`v4`) + découpe impression 3D (`split_stl.py`) ----
+b.def_joint("front_axle", pivot=(0.34, 0.0, 0.084), axis=(0, 1, 0))
+b.add(wheel_mesh, alloy_m, name="wheel_fl", group="front_axle")
+mk.export_glb_pbr(b.scene(), "out/car.glb")  # injecte KHR_materials_transmission/ior/clearcoat + joints !
+# CLI découpe plateau imprimante 3D avec tenons/mortaises chanfreinés (jeu 0.20 mm) :
+#   python3 scripts/split_stl.py out/katana.stl -o out/print_parts --bed 0.256 0.256 0.256
+# CLI sculpture organique multi-vues GPU Datacenter -> .glb/.stl/.usdz étanche :
+#   python3 scripts/gpu_sculpt.py --front front.png --side side.png --back back.png -o out/statue
 
 # ---- CSG (résultats garantis étanches) ----
 mk.union([m1, m2, ...])

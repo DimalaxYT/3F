@@ -3,7 +3,12 @@
 > Document de conception. Décrit *pourquoi* le skill est construit ainsi,
 > puis *où il va*. À mettre à jour à chaque évolution majeure.
 
-## 1. Problème et pari fondateur
+## 1. Problème et pari fondateur (`v1` -> `v4`)
+
+`3d-forge v4` réunit **en une seule chaîne 100 % autonome** :
+1. **La CAO paramétrique exacte (`meshkit.py` + `manifold3d`)** pour les objets mécaniques, architecturaux, mobiliers et verreries (19/19 recettes étanches, pivots articulés `def_joint`, extensions glTF 2.0 `KHR_materials_transmission` / `ior` / `clearcoat`),
+2. **La Sculpture Organique 3D par GPU Datacenter (`gpu_sculpt.py`)** pour les bustes, créatures et statues organiques (reconstruction SDF elliptique multi-branches sans boîtes ni escaliers + socle de musée soudé `manifold3d` + bake UV `1024²`),
+3. **L'Ingénierie d'Impression 3D Réelle (`split_stl.py` & `validate.py`)** : découpe automatique au volume du plateau (`256 × 256 × 256 mm`) avec clés d'assemblage mâle/femelle chanfreinées (`0,20 mm` de jeu).
 
 La génération 3D par IA (Meshy, Tripo, Luma) impose trois dépendances : une API
 payante, un réseau, et une perte de contrôle (mesh opaque, non déterministe,
@@ -20,13 +25,11 @@ capacité de raisonnement du modèle en fichiers 3D industriels.
 
 ## 2. Architecture — les trois étages
 
-### Étage 1 — meshkit (la main)
-`scripts/meshkit.py`, ~550 lignes, zéro dépendance lourde (numpy + trimesh).
+### Étage 1 — meshkit + pbr (la main & l'atelier de surface)
+`scripts/meshkit.py` + `scripts/pbr.py` : CAO paramétrique étanche + texturage PBR procédural unifié.
 
-- **Primitives posées au sol** (base z=0, centrées XY) : `box`, `cylinder`,
-  `frustum`, `cone` (anneau + apex, sans faces dégénérées), `sphere`, `torus`,
-  `tube`, `capsule`, `lathe` (révolution avec fermeture automatique sur l'axe →
-  étanchéité garantie), `extrude` (shapely).
+- **Primitives posées au sol** (base z=0, centrées XY) : `box`, `rounded_box` (chanfreins/congés réalistes), `cylinder`, `frustum`, `cone` (anneau + apex, sans faces dégénérées), `sphere`, `torus`, `tube` (fermé, étanche), `capsule`, `lathe`, `extrude`, `loft` (sections 2D/3D ré-échantillonnées par abscisse curviligne), `sweep` (balayage le long d'une courbe 3D à repère de Bishop sans torsion).
+- **Pont hybride CAO → PBR (`Builder.bake_pbr`)** : déplie la géométrie exacte avec `xatlas` et cuit 3 cartes glTF 2.0 (`albedo`, `metallicRoughness`, `normal` en espace tangent) avec usure d'arêtes dièdres et 8 overlays 3D sans couture (`rust`, `wrap` / `diamond` *tsuka-maki*, `edge_wear`, `wood_grain`, `brushed_metal`, `hamon`, `patina`, `speckle`), alignés sur la convention UV `1 - v` de `trimesh`/glTF/OBJ/USDZ/WebGL.
 - **CSG manifold** : `union`, `difference`, `intersection` — le backend
   manifold3d produit des résultats étanches par construction, ce qui rend le
   fil « impression 3D » trivial : `Builder.union_solid()` fusionne toutes les
@@ -46,15 +49,14 @@ capacité de raisonnement du modèle en fichiers 3D industriels.
 - *Paramètres en mètres, échelle réelle* → un mug fait 9,5 cm, pas 9,5 unités
   mystères ; les exports sont à l'échelle pour l'AR comme pour l'impression.
 
-### Étage 2 — renderer (les yeux)
-`scripts/renderer.py`, rasterizer logiciel 100 % numpy (~300 lignes) :
+### Étage 2 — renderer + cycles_render + gpu_bridge (les yeux & le GPU datacenter)
+`scripts/renderer.py`, `scripts/cycles_render.py`, `scripts/gpu_bridge.py`, `scripts/photo_pass.py` :
 
-- z-buffer correct (distance caméra = `clip.w`, toujours positive),
-- **ombrage hybride** : normales interpolées sur les faces « douces »
-  (révolutions, sphères), facettage conservé sur les arêtes vives (meubles) —
-  décision par face via l'alignement normale-sommet/normale-face,
-- Blinn-Phong 3 lumières suivant la caméra (key/fill/rim) + ambiant,
-- **approximation PBR** : split diffuse/spéculaire par `metallic`, lobe
+- **Pipeline linéaire physique** : décodage sRGB -> lumière linéaire -> tone mapping filmique ACES -> ré-encodage sRGB (élimine tout aspect délavé pastel),
+- **BRDF microfacettes Cook-Torrance GGX** ($D_{\text{GGX}}, G_{\text{Smith}}, F_{\text{Schlick}}$) avec vrai vecteur vue perspectif par pixel,
+- **Dôme HDRI Studio Softbox** filtré par la rugosité + ligne d'horizon studio pour le chrome et les peintures vernies,
+- **Shadow-Map directionnelle 3D PCF** + **SSAO multi-échelles** + **AO géométrique cuite dans `mr.r` (`occlusionTexture` glTF 2.0)**,
+- **Pont GPU Datacenter (`gpu_bridge.py` / `photo_pass.py`)** : cuisson directe de textures générées sur le GPU datacenter du modèle hôte dans l'atlas UV `.glb` (`bake-tiles` et `bake-views`) + passe photographique verrouillée 1:1 sur la silhouette et les normales du maillage (`photo_pass.py`).
   spéculaire piloté par `roughness`, terme d'environnement hémisphérique
   ciel/sol pour les métaux (sinon lame d'épée = trou noir), tone mapping ACES,
 - ombre de contact : silhouette projetée sur le sol **par la même caméra**

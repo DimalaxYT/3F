@@ -14,6 +14,7 @@ import os
 import shutil
 import sys
 import time
+import trimesh
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -77,7 +78,8 @@ def unique_dir(base):
 
 
 def run(recipe_name, params, formats, outdir, views, size, quality,
-        render=True, quiet=False, faces_all=False):
+        render=True, quiet=False, faces_all=False, render_engine="auto",
+        texture_ai=None):
     t0 = time.time()
     mk.set_quality(quality)
     recipe = get_recipe(recipe_name)
@@ -86,8 +88,14 @@ def run(recipe_name, params, formats, outdir, views, size, quality,
     stats = builder.stats()
 
     solid = None
-    if "stl" in formats:
+    if "stl" in formats or texture_ai:
         solid = builder.union_solid()
+    if texture_ai:
+        import gpu_bridge
+        with open(texture_ai, encoding="utf-8") as fh:
+            ai_spec = json.load(fh)
+        solid_ai, _ = gpu_bridge.bake_ai_tiles_to_mesh(solid.copy(), ai_spec)
+        scene = trimesh.Scene(solid_ai)
     checks = valmod.check_mesh(solid if solid is not None else scene)
     printable = checks.get("is_printable", False)
 
@@ -98,7 +106,7 @@ def run(recipe_name, params, formats, outdir, views, size, quality,
 
     if "glb" in formats:
         p = os.path.join(outdir, stem + ".glb")
-        scene.export(p)
+        mk.export_glb_pbr(scene, p)
         files["glb"] = p
     if "obj" in formats:
         p = os.path.join(outdir, stem + ".obj")
@@ -116,8 +124,22 @@ def run(recipe_name, params, formats, outdir, views, size, quality,
     renders = []
     if render:
         try:
-            renders = renderer.render_views(scene, outdir, stem, views=list(views),
-                                            size=size)
+            if render_engine == "cycles":
+                import cycles_render
+                if "glb" not in files:
+                    tmp_g = os.path.join(outdir, "_cycles_tmp.glb")
+                    scene.export(tmp_g)
+                else:
+                    tmp_g = files["glb"]
+                vmap = {v: renderer.DEFAULT_VIEWS[v] for v in views}
+                omap = {v: os.path.join(outdir, f"{stem}_{v}.png") for v in views}
+                cycles_render.render_cycles_glb(tmp_g, vmap, omap, size=size)
+                renders = list(omap.values())
+                if "glb" not in files and os.path.exists(tmp_g):
+                    os.unlink(tmp_g)
+            else:
+                renders = renderer.render_views(scene, outdir, stem, views=list(views),
+                                                size=size)
         except Exception as e:  # le rendu ne doit jamais tuer la génération
             if not quiet:
                 print(f"[renderer] rendu échoué ({e}) — exports conservés", file=sys.stderr)
@@ -183,6 +205,11 @@ def main(argv=None):
     ap.add_argument("--size", type=int, default=1024, help="taille PNG")
     ap.add_argument("--quality", type=float, default=1.0,
                     help="densité de maillage (0.5 rapide, 2 fin)")
+    ap.add_argument("--render", dest="render_engine",
+                    choices=["auto", "numpy", "cycles"], default="auto",
+                    help="moteur de rendu : auto (GGX+HDRI+SSAO), cycles (Blender headless)")
+    ap.add_argument("--texture-ai", dest="texture_ai", default=None,
+                    help="JSON de tuiles matière GPU datacenter à cuire dans l'atlas UV du .glb")
     ap.add_argument("--no-render", action="store_true")
     ap.add_argument("--faces", choices=["all"], default=None,
                     help="all = photos des 6 faces + turntable en plus des vues")
@@ -206,7 +233,8 @@ def main(argv=None):
     params = coerce_params(args.recipe, args.set, args.json)
     report = run(args.recipe, params, args.formats, args.out, args.views,
                  args.size, args.quality, render=not args.no_render,
-                 quiet=args.quiet, faces_all=(args.faces == "all"))
+                 quiet=args.quiet, faces_all=(args.faces == "all"),
+                 render_engine=args.render_engine, texture_ai=args.texture_ai)
     if report and not args.no_preview:
         try:
             import preview

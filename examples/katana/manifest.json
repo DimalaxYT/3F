@@ -1,57 +1,50 @@
 {
   "name": "katana",
-  "prompt": "katana forgé — lame courbée polie, tsuba de fer, tsuka wrappée ito noir, habaki laiton, kashira laqué (0.97 m)",
-  "size_m": 0.969,
-  "parallel": true,
+  "prompt": "katana japonais traditionnel forgé (5 parties assemblées)",
   "parts": [
     {
       "id": "kashira",
-      "spec": "specs/parts/kashira.json",
+      "spec": "parts_spec/kashira.json",
       "at": [
-        0,
-        0,
-        0.018
+        0.0,
+        0.0,
+        0.013
       ]
     },
     {
       "id": "tsuka",
-      "spec": "specs/parts/tsuka.json",
+      "spec": "parts_spec/tsuka.json",
       "at": [
-        0,
-        0,
-        0.1665
+        0.0,
+        0.0,
+        0.154
       ]
     },
     {
       "id": "tsuba",
-      "spec": "specs/parts/tsuba.json",
+      "spec": "parts_spec/tsuba.json",
       "at": [
-        0,
-        0,
-        0.3035
-      ],
-      "rot_deg": [
-        90,
-        0,
-        0
+        0.0,
+        0.0,
+        0.288
       ]
     },
     {
       "id": "habaki",
-      "spec": "specs/parts/habaki.json",
+      "spec": "parts_spec/habaki.json",
       "at": [
-        0,
-        0,
-        0.3215
+        0.0,
+        0.0,
+        0.304
       ]
     },
     {
-      "id": "lame",
-      "spec": "specs/parts/lame.json",
+      "id": "blade",
+      "spec": "parts_spec/blade.json",
       "at": [
-        0,
-        0,
-        0.6515
+        -0.005,
+        0.0,
+        0.654
       ]
     }
   ]

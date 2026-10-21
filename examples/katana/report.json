@@ -1,113 +1,113 @@
 {
   "pipeline": "assemble v1 (Workflow D multi-parties, meshgen parallèle)",
-  "prompt": "katana forgé — lame courbée polie, tsuba de fer, tsuka wrappée ito noir, habaki laiton, kashira laqué (0.97 m)",
+  "prompt": "katana japonais traditionnel forgé (5 parties assemblées)",
   "manifest_parts": 5,
   "stats": {
     "parts": 5,
-    "triangles": 27000,
-    "triangles_union": 25654
+    "triangles": 76000,
+    "triangles_union": 65904
   },
   "validation": {
     "watertight_union": true,
     "watertight_parts": true,
-    "volume_m3": 0.00037785783448576917,
-    "triangles": 27000
+    "volume_m3": 0.00041143887323127833,
+    "triangles": 76000
   },
   "coherence": {
     "method": "IoU moyen par partie (chacune vs ses 3 vues)",
     "per_view": {
-      "kashira": 0.6278,
-      "tsuka": 0.8399,
-      "tsuba": 0.9098,
-      "habaki": 0.9444,
-      "lame": 0.5937
+      "kashira": 0.7594,
+      "tsuka": 0.7804,
+      "tsuba": 0.7805,
+      "habaki": 0.7758,
+      "blade": 0.8561
     },
-    "mean": 0.7831
+    "mean": 0.7904
   },
   "parts": [
     {
       "id": "kashira",
-      "triangles": 2000,
-      "watertight": true,
-      "iou_mean": 0.6278,
-      "cached": true
-    },
-    {
-      "id": "tsuka",
       "triangles": 4000,
       "watertight": true,
-      "iou_mean": 0.8399,
-      "cached": true
-    },
-    {
-      "id": "tsuba",
-      "triangles": 6000,
-      "watertight": true,
-      "iou_mean": 0.9098,
-      "cached": true
-    },
-    {
-      "id": "habaki",
-      "triangles": 6000,
-      "watertight": true,
-      "iou_mean": 0.9444,
+      "iou_mean": 0.7594,
       "cached": false
     },
     {
-      "id": "lame",
-      "triangles": 9000,
+      "id": "tsuka",
+      "triangles": 15000,
       "watertight": true,
-      "iou_mean": 0.5937,
-      "cached": true
+      "iou_mean": 0.7804,
+      "cached": false
+    },
+    {
+      "id": "tsuba",
+      "triangles": 30000,
+      "watertight": true,
+      "iou_mean": 0.7805,
+      "cached": false
+    },
+    {
+      "id": "habaki",
+      "triangles": 15000,
+      "watertight": true,
+      "iou_mean": 0.7758,
+      "cached": false
+    },
+    {
+      "id": "blade",
+      "triangles": 12000,
+      "watertight": true,
+      "iou_mean": 0.8561,
+      "cached": false
     }
   ],
-  "parallel_jobs": 1,
+  "parallel_jobs": 4,
   "files": {
     "glb": {
-      "path": "../../3d-forge-examples/katana/katana/katana.glb",
-      "bytes": 981380
+      "path": "examples/katana/katana.glb",
+      "bytes": 5234872
     },
     "stl": {
-      "path": "../../3d-forge-examples/katana/katana/katana.stl",
-      "bytes": 1282784
+      "path": "examples/katana/katana.stl",
+      "bytes": 3295284
     },
     "obj": {
-      "path": "../../3d-forge-examples/katana/katana/katana.obj",
-      "bytes": 1190768
+      "path": "examples/katana/katana.obj",
+      "bytes": 9159378
     },
     "usdz": {
-      "path": "../../3d-forge-examples/katana/katana/katana.usdz",
-      "bytes": 2204864
+      "path": "examples/katana/katana.usdz",
+      "bytes": 4628315
     }
   },
   "renders": [
-    "../../3d-forge-examples/katana/katana/katana_face.png",
-    "../../3d-forge-examples/katana/katana/katana_profil.png",
-    "../../3d-forge-examples/katana/katana/katana_trois_quarts.png",
-    "../../3d-forge-examples/katana/katana/katana_dessus.png"
+    "examples/katana/katana_face.png",
+    "examples/katana/katana_profil.png",
+    "examples/katana/katana_trois_quarts.png",
+    "examples/katana/katana_dessus.png"
   ],
-  "output_dir": "/home/z/my-project/download/3d-forge-examples/katana/katana",
-  "duration_s": 98.72,
+  "output_dir": "examples/katana",
+  "duration_s": 187.0,
   "photos": {
     "faces": [
-      "../../3d-forge-examples/katana/katana/katana_face_face.png",
-      "../../3d-forge-examples/katana/katana/katana_face_dos.png",
-      "../../3d-forge-examples/katana/katana/katana_face_gauche.png",
-      "../../3d-forge-examples/katana/katana/katana_face_droite.png",
-      "../../3d-forge-examples/katana/katana/katana_face_dessus.png",
-      "../../3d-forge-examples/katana/katana/katana_face_dessous.png"
+      "examples/katana/katana_face_face.png",
+      "examples/katana/katana_face_dos.png",
+      "examples/katana/katana_face_gauche.png",
+      "examples/katana/katana_face_droite.png",
+      "examples/katana/katana_face_dessus.png",
+      "examples/katana/katana_face_dessous.png"
     ],
-    "all_faces": "../../3d-forge-examples/katana/katana/katana_all_faces.png",
+    "all_faces": "examples/katana/katana_all_faces.png",
     "turn_images": [
-      "../../3d-forge-examples/katana/katana/katana_turn_00.png",
-      "../../3d-forge-examples/katana/katana/katana_turn_01.png",
-      "../../3d-forge-examples/katana/katana/katana_turn_02.png",
-      "../../3d-forge-examples/katana/katana/katana_turn_03.png",
-      "../../3d-forge-examples/katana/katana/katana_turn_04.png",
-      "../../3d-forge-examples/katana/katana/katana_turn_05.png",
-      "../../3d-forge-examples/katana/katana/katana_turn_06.png",
-      "../../3d-forge-examples/katana/katana/katana_turn_07.png"
+      "examples/katana/katana_turn_00.png",
+      "examples/katana/katana_turn_01.png",
+      "examples/katana/katana_turn_02.png",
+      "examples/katana/katana_turn_03.png",
+      "examples/katana/katana_turn_04.png",
+      "examples/katana/katana_turn_05.png",
+      "examples/katana/katana_turn_06.png",
+      "examples/katana/katana_turn_07.png"
     ],
-    "turntable": "../../3d-forge-examples/katana/katana/katana_turntable.png"
+    "turntable": "examples/katana/katana_turntable.png"
   }
 }

@@ -1,8 +1,19 @@
-# 3d-forge 🔨
+# 3d-forge v4 🔨🐉✨
 
-**Générateur 3D pour agents LLM — façon Meshy, mais sans API, sans GPU, sans réseau.**
+**CAO 3D paramétrique étanche × Sculpture Organique Multi-Vues GPU (`gpu_sculpt.py`) × Verre Cristal & Clearcoat glTF 2.0 × Découpe Imprimante 3D à Tenons (`split_stl.py`) — zéro GPU requis côté utilisateur.**
 
-> Le LLM **est** le modèle de diffusion. Le code n'exécute que la géométrie.
+![Vitrine Technique 3d-forge v4](docs/img/v4_showcase.png)
+
+![Showcase v3 GPU Mécanique & Armes](docs/img/v3_gpu_showcase.png)
+
+![Catalogue Complet des 19 Recettes Étanches v4](docs/img/gallery.png)
+
+> **Les 5 Piliers de `3d-forge v4` :**
+> 1. **Sculpture Organique 3D propulsée par le GPU Datacenter (`scripts/gpu_sculpt.py`)** : reconstruction SDF elliptique multi-branches sans escaliers ni angles carrés, lissage de Taubin, socle de musée chanfreiné soudé par `manifold3d` (**100 % `watertight`**) et bake UV `1024²` haute définition (ex. `examples/dragon_buste/` : **84 152 triangles**, `2,68 L`, `.glb` + `.stl` + `.usdz` + `preview.html` + `photo_hero.png`).
+> 2. **Catalogue complet de 19 recettes 100 % étanches (`scripts/recipes/`)** : refonte majeure de `car` (coupé GT fastback Clearcoat, vitres encastrées, jantes alliage 5 branches, disques de frein), `house` (fenêtres et porte CSG ajourées à croisillons, perron pierre), `tree` (racines et branches `tube_sweep`, couronnes organiques), `sword` et `motocross` (disques Wave ajourés, ailettes moteur, couronne dentée).
+> 3. **Rasteriseur UV NumPy vectorisé `×80` plus rapide (`scripts/pbr.py`)** : `rasterize_uv_triangles` (< `0,35 s` en `1024 × 1024`) + compression PNG sans perte `compress_png` gardant l'intégralité du dépôt légère et rapide.
+> 4. **Verre Cristal Réfractif, Vernis Clearcoat & Visionneuse `preview.html` v2** : extensions officielles glTF 2.0 (`KHR_materials_transmission`, `KHR_materials_ior`, `KHR_materials_clearcoat`), réfraction linéaire + réflexion interne totale (TIR) dans `renderer.py`, et inspecteur WebGL interactif hors-ligne avec **4 éclairages HDRI**, **ombre de contact douce** et **7 canaux techniques** (`PBR`, `Albédo`, `Roughness`, `Metallic`, `Normales`, `AO`, `Filaire`).
+> 5. **Hiérarchie `.glb` articulée & Découpe Plateau Imprimante 3D (`scripts/split_stl.py`)** : pivots d'articulation nommés (`front_axle`, `rear_axle`, `front_wheel`, `steering`, `front_door`) animables en direct dans `preview.html`, et découpe automatique des grands modèles (ex. `katana.stl` d'1 m découpé en **5 pièces étanches** pour plateau `256 × 256 × 256 mm` avec **7 tenons/mortaises chanfreinés à jeu paramétrique `0,20 mm`**).
 
 Là où un service text-to-3D devine une approximation ballonneuse de « une chaise »,
 un agent peut **raisonner** la géométrie — quatre pieds, une assise à 45 cm, un
@@ -93,39 +104,18 @@ retomber sur ses connaissances internes — sauter l'étape en silence est inter
 
 | Workflow | Quand l'utiliser | Outil |
 |---|---|---|
-| **A — Recettes** | l'objet existe dans le catalogue (18 familles paramétriques) | `generate.py` |
-| **B — Image → 3D** | l'utilisateur fournit une photo de référence | `img2mesh.py` + `compare.py` |
-| **C — Génération multi-vues** (« Meshy mode ») | tout le reste : formes organiques, props composites, objets sans recette ni photo | `meshgen.py` + spec JSON |
-| **D — Multi-parties** (« katana mode ») | objets composites à générer partie par partie, avec itération bout par bout et parties générées **en parallèle** | `assemble.py` + manifest |
+| **A — Recettes & Hybride PBR** | l'objet existe dans le catalogue (19 familles paramétriques dont `katana` texturé PBR) ou se compose via `meshkit` + `b.bake_pbr(...)` | `generate.py` / `meshkit.py` |
+| **B — Image → 3D** | l'utilisateur fournit une photo de référence (filtrage auto de l'ombre au sol dans `compare.py`) | `img2mesh.py` + `compare.py` |
+| **C — Génération multi-vues v2** (« Meshy mode ») | formes organiques/forgées : **canevas vectoriel 2D continu** (`spline`, `capsule`, `ellipse`, `poly`) ou ASCII → SDF 3D anisotrope + bake PBR 3 cartes | `meshgen.py` + spec JSON |
+| **D — Multi-parties** (« katana mode ») | objets composites mixant specs `meshgen`, `recipe` et `.glb` générés **en parallèle** avec cache par pièce et union `manifold3d` étanche | `assemble.py` + manifest |
 
-Les trois se combinent : on peut dessiner les vues du workflow C **guidé par les
-mesures** du workflow B (`img2mesh analyze` donne le profil de largeur, l'aspect,
-les couleurs dominantes).
+Les workflows se combinent librement : un objet paramétrique `meshkit` précis (`rounded_box`, `loft`, `sweep`) peut recevoir un unwrap `xatlas` + bake PBR complet (`rust`, `wrap` / `diamond` *tsuka-maki*, `hamon`, `wood_grain`, `brushed_metal`, `edge_wear`, `patina` + carte de normales tangentes) via `Builder.bake_pbr(...)`, et `assemble.py` peut mixer pièces paramétriques et pièces SDF multi-vues dans la même scène.
 
-**A — Recettes paramétriques** : chaise, table, tabouret, bibliothèque, lampe,
-mug, vase (4 formes), bouteille, bol, assiette, verre à pied, pion d'échecs,
-épée, fusée, maison, arbre, voiture, motocross. Paramètres coercés (float, int,
-bool, choice, color), clés inconnues rejetées avec la liste valide.
+**A — Recettes paramétriques (19 familles, 19/19 étanches)** : chaise, table, tabouret, bibliothèque, lampe, mug, vase (4 formes), bouteille, bol, assiette, verre à pied (profil spline PCHIP + verre multi-couches), pion d'échecs, épée, **katana forgé PBR (`sweep` courbure *sori* + tressage *tsuka-maki* en losanges + *hamon*)**, fusée, maison, arbre, voiture, motocross (154 pièces, union étanche en 0,19 s).
 
-**B — Image → 3D** : segmentation (fond uni ou transparent), contour, profil de
-largeur W(z), puis trois modes de construction — `revolve` (objets de
-révolution, IoU de roundtrip ≈ 0.99), `extrude` (objets plats), `loft` (objets
-gonflés, sections super-elliptiques) — puis scoring **IoU de silhouette** mesh
-vs photo, global et par tiers, avec overlay rouge/vert/jaune qui montre où
-manque et où dépasse la masse. C'est la boucle qui a recalé la motocross du
-catalogue sur une photo KTM 450 : IoU 0.55 → 0.74.
+**B — Image → 3D** : segmentation (fond uni détouré dans `research.py` + filtrage automatique de l'ombre portée au sol dans `compare.py`), contour, profil de largeur W(z), construction `revolve` / `extrude` / `loft`, puis scoring **IoU de silhouette** mesh vs photo (ex. motocross KTM : IoU global **0,747**, zone basse **0,794** sans fausse pénalité d'ombre).
 
-**C — Génération multi-vues** : l'agent écrit une spec JSON — palette PBR
-(`{id, name, color, metallic, roughness}`) et trois vues ASCII où chaque lettre
-peint un matériau. Le moteur en déduit le volume par **hull visuel** (intersection
-des extrusions des trois vues : une cellule n'existe que si les trois vues
-d'accord), maille en marching cubes, lisse (Taubin), décime au budget de
-triangles, unwrap xatlas, puis **bake les textures** en reprojetant les vues sur
-l'UV : albedo, metallicRoughness, normal map, plus des overlays procéduraux —
-`rust` (bruit fBm 3D par bande de hauteur), `wrap` (enroulement cuir),
-`edge_wear` (usure d'arêtes). Résultat : un GLB **vraiment texturé**, pas un
-mesh uni. Exemple de référence : [`specs/epee_rouillee.json`](specs/epee_rouillee.json)
-— 12 196 tris, étanche, textures 1024², ~39 s.
+**C — Génération multi-vues v2 (`meshgen.py`)** : vues vectorielles 2D continues sans marche d'escalier (`spline`, `poly`, `rect`, `ellipse`, `capsule`, ajourages `void`) ou vues ASCII classiques, grille SDF 3D anisotrope (`dims` + `grid`) préservant les lames de 4–8 mm, unwrap `xatlas`, puis bake PBR glTF 2.0 complet (`baseColorTexture` + `metallicRoughnessTexture` + `normalTexture`). Exemple de référence : [`specs/epee_rouillee.json`](specs/epee_rouillee.json) — 15 000 tris, **étanche**, **IoU moyen = 0,9152** (`face 0,928` · `profil 0,873` · `dessus 0,945`).
 
 ### Stage 3 — l'autocritique notée (la boucle 9.5, obligatoire)
 
@@ -347,14 +337,15 @@ Des modèles finis, prêts à télécharger, vivent dans [`examples/`](examples/
 
 | Exemple | Workflow | Points forts |
 |---|---|---|
-| [`examples/katana/`](examples/katana/) | D — multi-parties | 5 parties générées **en parallèle** puis assemblées (habaki laiton, tsuka wrappée, lame courbée), STL union étanche, specs incluses |
-| [`examples/epee_rouillee/`](examples/epee_rouillee/) | C — multi-vues | GLB **texturé PBR** (rouille fBm, usure d'arêtes), 6 faces + turntable, `critique_log.json` (la boucle 9.5 en trace réelle : 5.0 → 8.6) |
-| [`examples/motocross/`](examples/motocross/) | B — image → 3D | recalée photo KTM : overlay silhouette, `score.json` IoU 0.55 → 0.74, STL étanche |
+| [`examples/katana/`](examples/katana/) | D — multi-parties | 5 parties vectorielles générées **en parallèle** (`kashira`, `tsuka` losanges *tsuka-maki*, `tsuba` *sukashi* ajourée, `habaki` laiton, `blade` courbée *sori* + *hamon*), **STL union 100 % étanche**, `preview.html` WebGL hors-ligne |
+| [`examples/epee_rouillee/`](examples/epee_rouillee/) | C — multi-vues v2 | GLB **texturé PBR** (rouille multi-octaves piquée, normal map tangente, cuir spiralé, pommeau or), **IoU moyen = 0.9152** (`profil = 0.8725`), 6 faces + turntable + `preview.html` hors-ligne |
+| [`examples/motocross/`](examples/motocross/) | A/B — CAD + photo | 154 pièces, moteur & cadre twin-spar en relief 3D, union étanche en **0.19 s**, overlay silhouette sans ombre au sol (`IoU = 0.7468`, bas `0.7936`) |
 | [`examples/chaise_scandinave/`](examples/chaise_scandinave/) · [`vase/`](examples/vase/) · [`rocket/`](examples/rocket/) | A — recettes | paramétrique, STL prêts impression |
 
 Sorties d'une génération complète d'épée (workflow C + Stage 0 + boucle 9.5) :
-GLB texturé (albedo + metallicRoughness + normal 1024²), 4 formats, planche des
-6 faces, turntable 8 angles, planche des références, `report.json` + `critique_log.json`.
+GLB texturé (`albedo` + `metallicRoughness` + `normal` 1024²), OBJ+MTL avec UVs,
+STL étanche, USDZ aligné 64 octets avec textures embarquées, `preview.html`
+WebGL 100 % hors-ligne, planche des 6 faces et turntable 8 angles.
 
 ## Pourquoi « sans API » ?
 
@@ -365,27 +356,27 @@ GLB texturé (albedo + metallicRoughness + normal 1024²), 4 formats, planche de
 | Déterminisme | seed à chaque essai | reproductible à l'identique |
 | Éditable | non (mesh opaque) | oui (paramètres + spec + code) |
 | Étanchéité garantie | non | oui (CSG manifold) |
-| Références réelles | implicites | Stage 0 explicite, traçable |
+| Viewer 3D interactif | cloud propriétaire | `preview.html` WebGL PBR **100 % hors-ligne** (0 CDN) |
+| Références réelles | implicites | Stage 0 explicite, fond studio détouré, traçable |
 | Contrôle qualité | un aperçu | photos 6 faces + IoU + note /10 imposée |
-| Temps | ~30 s – 5 min | 0,2 – 60 s |
+| Temps | ~30 s – 5 min | 0,2 – 90 s |
 
-**Le compromis honnête** : 3d-forge ne sculpte pas d'organique complexe
-(personnages, créatures) et l'IoU de profil reste structurellement faible sur
-les objets très fins (une lame de 0.7 cm vue de côté). Pour du sculptural avec
-GPU NVIDIA, `neural/README.md` documente le branchement d'un fallback local
-open-source (TripoSR, Hunyuan3D, TRELLIS) — le skill fonctionne entièrement
-sans lui.
+**Le compromis honnête** : 3d-forge ne sculpte pas d'organique anatomique fin
+(visages humains, drapés libres). Pour du sculptural avec GPU NVIDIA,
+`neural/README.md` documente le branchement d'un fallback local open-source
+(TripoSR, Hunyuan3D, TRELLIS) — le skill fonctionne entièrement sans lui.
 
 ## Tests
 
-```bash
-python3 -m pytest tests/ -v      # 5 tests : meshgen (hull + vues) + img2mesh (roundtrips)
-python3 tests/test_smoke.py      # 18/18 recettes étanches, volume > 0
-python3 tests/test_motocross.py  # motocross : build + union + étanchéité
-```
+Toute la suite s'exécute directement via `pytest` (18 tests couvrant les 19 recettes,
+`meshkit` v2, l'alignement UV `.glb`/`.obj`/`.usdz`, `meshgen` v2 vectoriel,
+`pbr.py`, `renderer.py`, `img2mesh.py`, `research.py`, `compare.py` et `preview.py` hors-ligne) :
 
-(`test_smoke.py` et `test_motocross.py` sont des scripts à tableau de sortie,
-pas des fonctions pytest — les lancer directement.)
+```bash
+python3 -m pytest -v             # 18/18 tests (inclut smoke 19/19 recettes + motocross + v2)
+python3 tests/test_smoke.py      # tableau détaillé des 19 recettes (étanchéité + volume + dims)
+python3 tests/test_motocross.py  # benchmark rapide build + union booléenne motocross
+```
 
 ## Licence
 

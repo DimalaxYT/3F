@@ -38,19 +38,19 @@
   },
   "files": {
     "glb": {
-      "path": "/home/z/my-project/download/3d-forge-examples/rocket/rocket.glb",
+      "path": "rocket.glb",
       "bytes": 31084
     },
     "stl": {
-      "path": "/home/z/my-project/download/3d-forge-examples/rocket/rocket.stl",
+      "path": "rocket.stl",
       "bytes": 86084
     }
   },
   "renders": [
-    "/home/z/my-project/download/3d-forge-examples/rocket/rocket_front.png",
-    "/home/z/my-project/download/3d-forge-examples/rocket/rocket_three_quarter.png",
-    "/home/z/my-project/download/3d-forge-examples/rocket/rocket_top.png"
+    "rocket_front.png",
+    "rocket_three_quarter.png",
+    "rocket_top.png"
   ],
-  "output_dir": "/home/z/my-project/download/3d-forge-examples/rocket",
+  "output_dir": "rocket",
   "duration_s": 2.97
 }

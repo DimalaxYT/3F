@@ -37,19 +37,19 @@
   },
   "files": {
     "glb": {
-      "path": "/home/z/my-project/download/3d-forge-examples/vase/vase.glb",
+      "path": "vase.glb",
       "bytes": 93204
     },
     "stl": {
-      "path": "/home/z/my-project/download/3d-forge-examples/vase/vase.stl",
+      "path": "vase.stl",
       "bytes": 256084
     }
   },
   "renders": [
-    "/home/z/my-project/download/3d-forge-examples/vase/vase_front.png",
-    "/home/z/my-project/download/3d-forge-examples/vase/vase_three_quarter.png",
-    "/home/z/my-project/download/3d-forge-examples/vase/vase_top.png"
+    "vase_front.png",
+    "vase_three_quarter.png",
+    "vase_top.png"
   ],
-  "output_dir": "/home/z/my-project/download/3d-forge-examples/vase",
+  "output_dir": "vase",
   "duration_s": 5.91
 }

@@ -1,43 +1,37 @@
 ---
 name: 3d-forge
 description: >-
-  Procedural 3D generation toolkit: turns any object description into clean,
-  watertight meshes with PBR materials, exported to GLB/GLTF, OBJ+MTL, STL and
-  USDZ, plus multi-angle PNG renders — no external API, no GPU, no neural
-  network required. The agent reasons (decompose the object, choose proportions
-  and materials), the toolkit executes geometry deterministically. Use this
-  skill whenever the user asks for 3D models, meshes, 3D assets, game props,
-  printable STL files, 3D product visuals, turntable renders, text-to-3D,
-  image-to-3D, photo-to-3D, "make me a 3D X", "model this photo", "match this
-  picture", "model a chair/vase/rocket/motocross", AR-ready models, or any
-  mention of GLB/OBJ/STL/USDZ export — even casually or in French. Multi-part
-  composite objects (katana, lamps, vehicles) get part-by-part parallel
-  generation via assemble.py; every full delivery also ships an interactive
-  self-contained preview.html (GLB embedded, opens in any browser), photos
-  of all 6 faces + a turntable (Meshy-style preview gallery) and starts with
-  a mandatory web-reference stage (research.py) that produces a
-  details-to-respect sheet and measured palette hints.
+  Hybrid CAD + Organic GPU Sculpture + Datacenter-GPU 3D generation toolkit (v4):
+  turns any object description (mechanical CAD, architectural CSG, glassware, OR
+  organic statues/creatures via `gpu_sculpt.py`) into clean, 100% watertight meshes
+  with physically-based Cook-Torrance GGX + Clearcoat + Refractive Crystal Glass
+  (`KHR_materials_transmission` / `ior` / `clearcoat`), articulated `.glb` joints,
+  80x faster vectorized UV baking, Sketchfab-grade offline `preview.html` inspector,
+  automatic 3D-printer bed splitting with keyed snap pins (`split_stl.py`), and
+  structure-locked Datacenter-GPU studio renders (`photo_pass.py`) — zero GPU
+  required on the user's machine.
 ---
 
-# 3d-forge — procedural 3D generation (no API, no GPU)
+# 3d-forge v4 — Hybrid Exact CAD + Organic GPU Sculpture + Print Engineering
 
-## The core idea
+## Architecture: CPU Exact CAD/SDF × Host Datacenter GPU (`v4`)
 
-There is no neural network here and there doesn't need to be one. **You are the
-generator.** A text-to-3D model would guess a blobby approximation of "a
-chair"; you can *reason* about what makes a chair a chair — four legs, a seat
-at 45 cm, a reclined backrest — and express it exactly. This skill gives you a
-deterministic geometry factory (`meshkit`) so your reasoning becomes a clean,
-watertight, printable mesh in seconds.
+In an agent sandbox, Python executes on an isolated CPU container (`cuda_available: false`), while **your native diffusion tool (`generate_image`) executes directly on the model host's Datacenter GPU cluster** (zero local GPU required from the user). `3d-forge v4` combines five pillars across both processors:
 
-Division of labor:
-- **You (the agent)**: parse the request → pick or compose geometry → choose
-  real-world dimensions and PBR materials → run the CLI → check the renders →
-  iterate if the preview looks off → deliver.
-- **meshkit**: primitives, CSG booleans (manifold3d, guaranteed watertight),
-  lathe/extrude, PBR materials, multi-format export.
-- **renderer**: software rasterizer (numpy) producing studio-lit PNGs from any
-  angle — your feedback loop. Never ship an object you haven't looked at.
+1. **Pillar 1 — Organic Multi-View GPU -> 3D Sculpture Pipeline (`scripts/gpu_sculpt.py`)**:
+   - Generates calibrated orthographic views (`front`, `side`, `back`) on the Datacenter GPU via `generate_image(..., images=[front])`, reconstructs a smooth multi-branch elliptical 3D Euclidean SDF (`(1 - d_front)² + (1 - d_side)² <= 1` separating horns, ears, jaws, and spikes without box artifacts), applies Taubin smoothing + `manifold3d` boolean fusion onto a chamfered museum plinth (**100% `is_watertight == True` `.stl`**), and bakes full-HD `1024×1024` normal-weighted multi-view PBR + scales normal maps + AO into `.glb` / `.usdz` / `preview.html`.
+2. **Pillar 2 — Exact CAD Geometry & 19/19 Watertight Catalog (`meshkit.py` + `scripts/recipes/`)**:
+   - Deterministic metric CAD primitives (`box`, `rounded_box`, `chamfer_box`, `cylinder`, `frustum`, `cone`, `sphere`, `torus`, `tube`, `capsule`, `lathe`, `extrude`, `loft`, `sweep`, `tube_sweep`, `helix_spring`, `cable`) + guaranteed-watertight `manifold3d` CSG booleans across all 19 catalog recipes (`car` fastback coupé with 5-spoke wheels & brake rotors, `house` with hollow CSG windows/door & stone steps, `tree` with swept roots/branches, `motocross` with wave rotors & cooling fins, `katana`, `sword`, etc.).
+   - **STRICT BAN ON `meshgen.py` FOR MECHANICAL PARTS**: NEVER use voxel/marching-cubes `meshgen.py` on mechanical parts (exhaust headers, tubes, forks, frames, wheels, blades, furniture legs). Use exact `meshkit` primitives for mechanics, and `gpu_sculpt.py` for organic statues/busts/creatures.
+3. **Pillar 3 — `×80` Vectorized NumPy UV Rasterizer & PNG Compression (`pbr.py`, `gpu_bridge.py`)**:
+   - Bucketed vectorized barycentric UV rasterization (`pbr.rasterize_uv_triangles`, `< 0.35 s` at `1024²`), instant `box_project_uv` triplanar mapping, and lossless `compress_png` keeping full showcase packages lean.
+4. **Pillar 4 — Refractive Crystal Glass, Automotive Clearcoat & Sketchfab-Grade `preview.html` v2**:
+   - Official glTF 2.0 extensions (`KHR_materials_transmission`, `KHR_materials_ior`, `KHR_materials_clearcoat`) injected into `.glb` via `mk.export_glb_pbr`.
+   - Linear-radiance optical crystal shader in `renderer.py` (Fresnel reflection, screen-space refraction offset, Beer-Lambert absorption, Total Internal Reflection edge contours, unattenuated GGX glints) + Clearcoat GGX lobe.
+   - Upgraded standalone offline WebGL viewer (`preview.py`) with soft ground contact shadow, 4 live HDRI lighting rigs, and 7 Sketchfab-style technical channels (`PBR`, `Albédo`, `Roughness`, `Metallic`, `Normales`, `AO`, `Filaire`).
+5. **Pillar 5 — Articulated `.glb` Joints & Real 3D-Printer Bed Splitter (`Builder.def_joint` + `split_stl.py`)**:
+   - Named hierarchical sub-assemblies with exact rotation pivots/axes (`node.extras.joint`) + live browser animation button in `preview.html`.
+   - `python3 scripts/split_stl.py model.stl -o print_parts --bed 0.256 0.256 0.256`: slices oversized models cleanly onto Bambu/Prusa build volumes with auto-calibrated chamfered male tenons & `0.20 mm`-clearance female mortises + `exploded_preview.png`.
 
 ## Quick start
 
@@ -217,21 +211,57 @@ coding primitives, you *imagine* the object as three orthographic views
 painted with material letters. The hidden angles are constrained by the other
 two views, exactly like multi-view synthesis.
 
-| Meshy step | meshgen equivalent |
+| Meshy step | meshgen v2 equivalent |
 |---|---|
-| 1. Internal representation | spec JSON: palette PBR + 3 ASCII views |
-| 2. Multi-view synthesis | you draw front/side/top consistently |
-| 3. Volume reconstruction | visual hull (intersection of extrusions) |
-| 4. Remesh / retopology | marching cubes → Taubin smoothing → quadric decimation to triangle budget (retry at larger budgets before keeping the raw mesh) |
-| 5. UV unwrap | xatlas (automatic seams + atlas packing) |
-| 6. PBR textures | procedural bake reprojected from the 3 views: albedo + metallicRoughness + normal map, overlays (rust / wrap / edge wear) |
-| 7. Consistency check | silhouette IoU of the final mesh re-projected against your 3 views + watertight + budget |
+| 1. Internal representation | spec JSON: PBR palette (`palette` or `materials`), optional anisotropic `dims`/`grid`, + 3 views (**2D vector shapes** OR ASCII) |
+| 2. Multi-view synthesis | continuous 2D vector canvas (`spline`, `poly`, `rect`, `ellipse`, `circle`, `capsule`, `void`/`erase`) or ASCII |
+| 3. Volume reconstruction | continuous 2D Euclidean SDF visual hull (`ndimage.zoom(..., mode="nearest")`) with Z-up (`row 0 = +Z`, `z=0` base) |
+| 4. Remesh / retopology | marching cubes → Taubin smoothing → quadric decimation to triangle budget → XY centering + exact `z=0` grounding |
+| 5. UV unwrap | `pbr.unwrap` (`xatlas` chart packing, shared with `Builder.bake_pbr`) |
+| 6. PBR textures | 3-map procedural glTF 2.0 bake (`albedo` + `metallicRoughness` + tangent-space `normal`): `rust`, seamless `wrap` / `diamond` (*tsuka-maki*), `edge_wear`, `wood_grain`, `brushed_metal`, `hamon`, `patina`, `speckle` |
+| 7. Consistency check | aligned 3-view silhouette IoU (`> 0.90` even on 7 mm thin blades via anisotropic `dims`/`grid`) + direct UV-PBR renders |
 
-Spec format (`specs/epee_rouillee.json` is the reference example):
+### Vector 2D view format (preferred over ASCII — zero staircase artifacts)
 
 ```json
 {
   "name": "epee_rouillee",
+  "dims": [0.215, 0.044, 0.96],
+  "grid": [96, 40, 208],
+  "smooth": 5,
+  "texture_size": 1024,
+  "normal_strength": 2.3,
+  "materials": {
+    "blade":  {"base": "#9ca2a9", "roughness": 0.26, "metallic": 0.90},
+    "fuller": {"base": "#666c74", "roughness": 0.42, "metallic": 0.84},
+    "guard":  {"base": "#cc9e42", "roughness": 0.30, "metallic": 0.93},
+    "grip":   {"base": "#3b2517", "roughness": 0.76, "metallic": 0.03},
+    "pommel": {"base": "#cf9f44", "roughness": 0.28, "metallic": 0.94}
+  },
+  "overlays": [
+    {"type": "brushed_metal", "on": ["blade", "fuller"], "axis": "z", "scale": 165.0, "amount": 0.14},
+    {"type": "rust", "on": ["blade", "fuller"], "color": "#8f421d", "coverage": 0.40, "scale": 14.5},
+    {"type": "wrap", "on": "grip", "count": 11.0, "ribbon_width": 0.44},
+    {"type": "edge_wear", "on": ["blade", "guard", "pommel"], "amount": 0.68, "scale": 18.0}
+  ],
+  "views": {
+    "front": {"size": [224, 512], "shapes": [
+      {"op": "spline", "mat": "blade", "center": [[2, 112], [404, 112]],
+       "half_width": [[2, 1.5], [44, 17.5], [220, 27.0], [404, 32.0]]},
+      {"op": "capsule", "mat": "guard", "a": [12, 405], "b": [212, 405], "r": 10.5},
+      {"op": "ellipse", "mat": "pommel", "cx": 112, "cy": 489, "rx": 26.5, "ry": 22.0}
+    ]},
+    "side": {"size": [96, 512], "shapes": ["..."]},
+    "top":  {"size": [224, 96], "shapes": ["..."]}
+  }
+}
+```
+
+Legacy ASCII specs (`size_m` + `res` + `palette` + string arrays) remain 100% supported:
+
+```json
+{
+  "name": "epee_ascii",
   "prompt": "épée médiévale rouillée avec pommeau en or",
   "size_m": 1.05, "res": 80, "upsample": 2, "smooth": 10,
   "budget_tris": 15000, "symmetry_x": true, "mc_level": 0.47,
@@ -243,9 +273,9 @@ Spec format (`specs/epee_rouillee.json` is the reference example):
     {"id": "r", "name": "rouille","color": "#7d4426","metallic": 0.2,  "roughness": 0.88}
   ],
   "views": {
-    "front": ["       s       ", "      sss      ", "..."],   // X×Z, ligne 0 = sommet
-    "side":  ["  s  ", "  s  ", "..."],                        // Y×Z
-    "top":   ["               ", "ggggggggggggggg", "..."]     // X×Y, ligne 0 = arrière
+    "front": ["       s       ", "      sss      ", "..."],
+    "side":  ["  s  ", "  s  ", "..."],
+    "top":   ["               ", "ggggggggggggggg", "..."]
   },
   "overlays": [
     {"type": "rust", "on": "s", "with": "r", "coverage": 0.42, "band": [0.14, 0.6], "scale": 6.5},

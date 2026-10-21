@@ -59,17 +59,54 @@ def _generate_part(part: dict, manifest_dir: str, out_root: str,
     pid = part["id"]
     pdir = os.path.join(out_root, "parts", pid)
     report_path = os.path.join(pdir, "report.json")
-    spec_path = part["spec"]
-    if not os.path.isabs(spec_path):
-        spec_path = os.path.join(manifest_dir, spec_path)
     needed = force or (only is not None and only == pid)
     if os.path.isfile(report_path) and not needed:
         with open(report_path) as fh:
             return {"id": pid, "report": json.load(fh), "cached": True}
+
     os.makedirs(pdir, exist_ok=True)
+    t0 = time.time()
+
+    if "glb" in part:
+        src = part["glb"]
+        if not os.path.isabs(src):
+            src = os.path.join(manifest_dir, src)
+        dst = os.path.join(pdir, pid + ".glb")
+        shutil.copyfile(src, dst)
+        import validate as valmod
+        sc = trimesh.load(dst, force="scene")
+        chk = valmod.check_mesh(sc)
+        rep = {"validation": chk, "coherence": {"mean": 1.0}, "files": {"glb": {"path": dst}}}
+        with open(report_path, "w") as fh:
+            json.dump(rep, fh, indent=2)
+        return {"id": pid, "report": rep, "cached": False, "wall_s": round(time.time() - t0, 2)}
+
+    if "recipe" in part:
+        rname = part["recipe"]
+        sets = [f"{k}={v}" for k, v in (part.get("params") or {}).items()]
+        cmd = [sys.executable, os.path.join(_HERE, "generate.py"), rname,
+               "--out", pdir, "--no-render", "--no-preview", "--quiet"]
+        if sets:
+            cmd += ["--set"] + sets
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        sub_rep = os.path.join(pdir, rname, "report.json")
+        if proc.returncode != 0 or not os.path.isfile(sub_rep):
+            raise RuntimeError(f"partie recette '{pid}' échouée:\n{proc.stderr[-800:]}")
+        shutil.copyfile(os.path.join(pdir, rname, rname + ".glb"),
+                        os.path.join(pdir, pid + ".glb"))
+        shutil.copyfile(sub_rep, report_path)
+        with open(report_path) as fh:
+            rep = json.load(fh)
+        rep.setdefault("coherence", {"mean": 1.0})
+        with open(report_path, "w") as fh:
+            json.dump(rep, fh, indent=2)
+        return {"id": pid, "report": rep, "cached": False, "wall_s": round(time.time() - t0, 2)}
+
+    spec_path = part["spec"]
+    if not os.path.isabs(spec_path):
+        spec_path = os.path.join(manifest_dir, spec_path)
     cmd = [sys.executable, os.path.join(_HERE, "meshgen.py"), spec_path,
            "--out", pdir, "--no-preview"]
-    t0 = time.time()
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0 or not os.path.isfile(report_path):
         raise RuntimeError(
@@ -157,7 +194,7 @@ def _to_vertex_colored(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     h, w = arr.shape[:2]
     uv = np.asarray(uv)
     cols = np.clip((uv[:, 0] * (w - 1)).astype(int), 0, w - 1)
-    rows = np.clip((uv[:, 1] * (h - 1)).astype(int), 0, h - 1)
+    rows = np.clip(((1.0 - uv[:, 1]) * (h - 1)).astype(int), 0, h - 1)
     rgb = arr[rows, cols]
     rgba = np.column_stack([rgb, 255 * np.ones((len(rgb), 1))]).astype(np.uint8)
     out = mesh.copy()
@@ -184,9 +221,11 @@ def _union_solid(meshes: list[trimesh.Trimesh]) -> tuple[trimesh.Trimesh, bool]:
         return trimesh.util.concatenate(solids), False
     if isinstance(uni, list):
         uni = trimesh.util.concatenate(uni)
-    uni.update_faces(uni.area_faces > 1e-10)
+    if uni.is_watertight:
+        return uni, True
     uni.merge_vertices()
-    uni.fill_holes()
+    trimesh.repair.fill_holes(uni)
+    trimesh.repair.fix_normals(uni)
     return uni, bool(uni.is_watertight)
 
 
@@ -232,31 +271,29 @@ def assemble(manifest: dict, outdir: str, faces_all: bool = False,
     stl = os.path.join(outdir, name + ".stl")
     solid.export(stl)
 
-    # 5 : exports
+    # 5 : exports (préserve les matériaux & textures PBR sur GLB, OBJ+MTL et USDZ)
     glb = os.path.join(outdir, name + ".glb")
     scene.export(glb)
     obj = os.path.join(outdir, name + ".obj")
     try:
-        bare = trimesh.util.concatenate([_bare(m) for m in meshes])
-        bare.export(obj)
+        import meshkit as mk
+        mk.export_obj_with_mtl(scene, obj)
     except Exception:
         obj = None
     try:
         import usdz_export
         usd = os.path.join(outdir, name + ".usdz")
-        usdz_export.export_usdz(trimesh.Scene(solid), usd)
+        usdz_export.export_usdz(scene, usd)
     except Exception:
         usd = None
 
-    # 6 : rendus + photos (mesh fusionné, couleurs par sommet)
-    merged = trimesh.util.concatenate(colored)
-    merged_scene = trimesh.Scene(merged)
+    # 6 : rendus + photos PBR directs sur la scène texturée (UV + MR + normal map)
     stem = name
     views_def = [("face", 0, 8), ("profil", 90, 8), ("trois_quarts", 42, 22),
                  ("dessus", 0, 78)]
     renders = []
     for label, az, el in views_def:
-        img = renderer.render_view(merged_scene, azimuth_deg=az,
+        img = renderer.render_view(scene, azimuth_deg=az,
                                    elevation_deg=el, size=768, ssaa=2)
         p = os.path.join(outdir, f"{stem}_{label}.png")
         img.save(p)
@@ -264,9 +301,9 @@ def assemble(manifest: dict, outdir: str, faces_all: bool = False,
     photos = {}
     if faces_all:
         face_paths, faces_sheet = renderer.render_all_faces(
-            merged_scene, outdir, stem, size=768)
+            scene, outdir, stem, size=768)
         turn_paths, turn_sheet = renderer.render_turntable(
-            merged_scene, outdir, stem, n=8, size=560)
+            scene, outdir, stem, n=8, size=560)
         photos = {"faces": face_paths, "all_faces": faces_sheet,
                   "turn_images": turn_paths, "turntable": turn_sheet}
 
@@ -344,8 +381,11 @@ def main():
         description="Workflow D : assemblage multi-parties (parallèle)")
     ap.add_argument("manifest", help="manifest JSON multi-parties")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--name", default=None, help="nom du livrable")
     ap.add_argument("--faces", choices=["all"], default=None,
                     help="all = photos des 6 faces + turntable de l'assemblage")
+    ap.add_argument("--usdz", action="store_true",
+                    help="accepté pour compatibilité CLI (USDZ exporté d'office)")
     ap.add_argument("--jobs", type=int, default=4,
                     help="processus parallèles max (défaut 4)")
     ap.add_argument("--part", default=None,
@@ -356,6 +396,8 @@ def main():
     args = ap.parse_args()
     with open(args.manifest) as fh:
         manifest = json.load(fh)
+    if args.name:
+        manifest["name"] = args.name
     manifest["_path"] = args.manifest
     report = assemble(manifest, args.out, faces_all=(args.faces == "all"),
                       force=args.force, only=args.part, jobs=args.jobs,

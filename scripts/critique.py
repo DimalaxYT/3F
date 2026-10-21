@@ -36,11 +36,12 @@ import time
 THRESHOLD_DEFAULT = 9.5
 MAX_ITERS_DEFAULT = 4
 AXES = {
-    "S": "silhouette & proportions (0-3)",
-    "V": "volume inter-faces (0-2)",
-    "M": "matériaux & textures (0-2)",
-    "D": "détails à respecter (0-2)",
-    "T": "technique (0-1)",
+    "S": "silhouette & proportions (0-2.5)",
+    "V": "volume inter-faces & géométrie mécanique propre (0-1.5)",
+    "M": "matériaux physiques & masques sémantiques (0-1.5)",
+    "R": "photoréalisme matière / lumière HDRI / AO vs références (0-1.5)",
+    "D": "détails distinctifs Stage 0 (0-2.0)",
+    "T": "intégrité technique watertight / UVs / budget (0-1.0)",
 }
 
 
@@ -179,18 +180,17 @@ def cmd_brief(args):
     L.append("")
     L.append("| Axe | Points | Question à te poser devant les photos |")
     L.append("|-----|--------|----------------------------------------|")
-    L.append("| S | 0-3 | Les proportions tiennent-elles face/profil/dessus ? "
-             "IoU bas = points perdus (plafond sur la moyenne des DEUX "
-             "MEILLEURES vues : S<=2 si <0.65, S<=1 si <0.5 — l'axe le plus "
-             "faible est exclu car structurellement dégénéré sur objets "
-             "plats : lame de 0.7 cm d'épaisseur = silhouette side quasi-1D) |")
-    L.append("| V | 0-2 | Face/dos/gauche racontent-ils le MÊME volume ? "
-             "partie flottante, aplatie, écrasée ? |")
-    L.append("| M | 0-2 | Palette crédible ? overlays (rouille/usure/wrap) "
-             "visibles et STABLES entre les angles ? zones peintes qui fuient ? |")
-    L.append("| D | 0-2 | Chaque détail de la checklist section 3 est-il VISIBLE "
+    L.append("| S | 0-2.5 | Les proportions tiennent-elles face/profil/dessus ? "
+             "IoU bas = points perdus (plafond sur les DEUX MEILLEURES vues) |")
+    L.append("| V | 0-1.5 | Face/dos/gauche racontent-ils le MÊME volume ? "
+             "Zéro tube/pièce mécanique en escalier marching-cubes (`meshgen` interdit sur mécanique) ! |")
+    L.append("| M | 0-1.5 | Matériaux physiques mesurés ? Masques sémantiques directionnels "
+             "(boue basse anisotrope, usure d'arêtes, sérigraphies nettes) ? |")
+    L.append("| R | 0-1.5 | Photoréalisme face aux vraies photos Stage 0 : reflets HDRI crédibles "
+             "sur chrome/vernis, AO dans les cavités, micro-grain réel (`--texture-ai` / `photo_pass` GPU) ? |")
+    L.append("| D | 0-2.0 | Chaque détail de la checklist section 3 est-il VISIBLE "
              "sur une photo ? (1 détail manquant = -0.5) |")
-    L.append("| T | 0-1 | Reprends la note T suggérée ci-dessus |")
+    L.append("| T | 0-1.0 | Reprends la note T suggérée ci-dessus |")
     L.append("")
     L.append("## 5. Questions guidées (réponds mentalement, note ce qui coince)")
     L.append("")

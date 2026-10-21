@@ -1,195 +1,352 @@
-#!/usr/bin/env python3
-"""make_specs.py — construit les specs meshgen des 5 parties du katana
-+ le manifest d'assemblage (Workflow D, scripts/assemble.py).
-
-Katana vertical (pointe en haut), base z=0, ~0.98 m :
-  kashira 0.000-0.033 · tsuka 0.033-0.303 · tsuba 0.303-0.311
-  habaki 0.311-0.341 · lame 0.341-0.976 (sori vers +X, kissaki)
-
-Les vues ASCII sont dessinées par code (put_row) avec vérification des
-dimensions — même méthode que specs/epee_rouillee.json du skill.
 """
+Génère les specs de pièces + l'assembly spec pour un katana + fourreau (Workflow D).
+
+Chaque pièce a SA grille dédiée (haute résolution sur son volume utile, plus de
+diluer 1 m de lame sur 256 voxels) et SES vues vectorielles lisses (`meshgen` v2 :
+`spline`, `ellipse`, `capsule`, `erase`).
+
+Conventions d'axes (partagées avec `meshgen` et `assemble`) :
+  X : largeur lame (dos mune -X -> tranchant ha +X), la courbe sori part en -X
+  Y : épaisseur (plat de la lame)
+  Z : longueur (0 = kashira au bout de poignée -> ~0.99 m kissaki)
+
+Usage :
+  python3 examples/katana/make_specs.py
+  python3 scripts/assemble.py examples/katana/assembly.json --out examples/katana --name katana --force
+"""
+from __future__ import annotations
+
 import json
-import os
+import math
+from pathlib import Path
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(HERE, "specs", "parts")
-os.makedirs(OUT, exist_ok=True)
-
-
-def grid(cols, rows, fill="."):
-    return ["".join(fill for _ in range(cols)) for _ in range(rows)]
+HERE = Path(__file__).resolve().parent
+PARTS = HERE / "parts_spec"
+PARTS.mkdir(parents=True, exist_ok=True)
 
 
-def put(g, r, c0, c1, ch):
-    """Écrit ch sur la ligne r entre les colonnes c0..c1 (incluses)."""
-    row = list(g[r])
-    for c in range(c0, min(c1 + 1, len(row))):
-        row[c] = ch
-    g[r] = "".join(row)
-    return g
+def sori_curve(t: float) -> float:
+    """Courbure japonaise sori (m) centrée dans sa boîte englobante."""
+    return 0.0085 - 0.0195 * (t ** 1.75)
 
 
-def spec(name, prompt, size_m, res, palette, front, side, top, overlays=None,
-         symmetry=True, smooth=8, budget=6000, texture=512, mc=0.5):
-    # cohérence inter-vues : front.cols == top.cols, front.rows == side.rows,
-    # side.cols == top.rows
-    assert len(front[0]) == len(top[0]), f"{name}: X front={len(front[0])} top={len(top[0])}"
-    assert len(front) == len(side), f"{name}: Z {len(front)} vs {len(side)}"
-    assert len(side[0]) == len(top), f"{name}: Y {len(side[0])} vs {len(top)}"
-    s = {"name": name, "prompt": prompt, "size_m": size_m, "res": res,
-         "upsample": 2, "smooth": smooth, "budget_tris": budget,
-         "symmetry_x": symmetry, "mc_level": mc, "texture_size": texture,
-         "palette": palette,
-         "views": {"front": front, "side": side, "top": top}}
-    if overlays:
-        s["overlays"] = overlays
-    p = os.path.join(OUT, name + ".json")
-    with open(p, "w") as fh:
-        json.dump(s, fh, indent=2, ensure_ascii=False)
-    print(f"spec  {name:10s} front {len(front[0])}x{len(front)}  -> {p}")
-    return p
+def write_spec(name: str, spec: dict) -> str:
+    p = PARTS / f"{name}.json"
+    p.write_text(json.dumps(spec, indent=2), encoding="utf-8")
+    # Chemin relatif au dossier du manifest (zéro chemin local dans report.json)
+    return str(p.relative_to(HERE))
 
 
-# ---------------------------------------------------------------- kashira ---
-# Capuchon arrondi (laque noire), 33 mm — largeur calée sur la tsuka (~2 cm)
-C, R = 9, 8
-f = grid(C, R)
-for r in range(1, 7):
-    put(f, r, 2, 6, "#")
-put(f, 0, 3, 5, "#")
-put(f, 7, 3, 5, "#")
-s = grid(6, R)
-for r in range(1, 7):
-    put(s, r, 1, 5, "#")
-put(s, 0, 2, 3, "#")
-put(s, 7, 2, 3, "#")
-t = grid(C, 6)
-put(t, 0, 3, 5, "#")
-for r in range(1, 5):
-    put(t, r, 2, 6, "#")
-put(t, 5, 3, 5, "#")
-kashira = spec("kashira", "kashira (capuchon) de katana, laque noire", 0.033, 48,
-               [{"id": "#", "name": "laque", "color": "#1c1c20",
-                 "metallic": 0.15, "roughness": 0.35}],
-               f, s, t, budget=2000)
+# ======================================================================== LAME
+def make_blade() -> tuple[str, list[float]]:
+    L = 0.705       # 68.5 cm nagasa + 2 cm sous le habaki
+    XSPAN = 0.049
+    YSPAN = 0.0080
+    W, WS, H = 160, 64, 512
 
-# ------------------------------------------------------------------ tsuka ---
-# Poignée wrappée (ito noir sur same), 270 mm
-C, R = 5, 40
-f = grid(C, R)
-for r in range(R):
-    put(f, r, 1, 3, "#")
-s = grid(3, R)
-for r in range(R):
-    put(s, r, 0, 2, "#")
-t = grid(C, 3)
-for r in range(3):
-    put(t, r, 0, 4, "#")
-tsuka = spec("tsuka", "tsuka (poignée) de katana, ito noir wrappé sur same", 0.27,
-             72,
-             [{"id": "#", "name": "ito", "color": "#26262b",
-               "metallic": 0.0, "roughness": 0.82}],
-             f, s, t,
-             overlays=[{"type": "wrap", "on": "#", "count": 11,
-                        "twist": 0.42, "darken": 0.5}],
-             budget=4000, texture=512, smooth=6)
+    center_front = []
+    hw_front = []
+    center_side = []
+    hw_side = []
+    for k in range(33):
+        t = k / 32.0                # 0 = base (y = H), 1 = kissaki (y = 0)
+        py = round((1.0 - t) * (H - 4) + 2, 2)
+        cx_m = sori_curve(t)
+        px = round((cx_m / XSPAN + 0.5) * W, 2)
+        w_m = 0.0315 * (1.0 - 0.24 * (t ** 1.15))
+        th_m = 0.0076 * (1.0 - 0.34 * t)
+        if t > 0.90:
+            u = (t - 0.90) / 0.10
+            w_m *= max(0.06, (1.0 - u) ** 0.80)
+            th_m *= max(0.14, 1.0 - 0.84 * u)
+        center_front.append([py, px])
+        hw_front.append([py, max(0.8, round(w_m / XSPAN * W * 0.5, 2))])
+        center_side.append([py, WS * 0.5])
+        hw_side.append([py, max(2.2, round(th_m / YSPAN * WS * 0.5, 2))])
 
-# ------------------------------------------------------------------ tsuba ---
-# Garde : disque Ø80 mm, épaisseur 8 mm. Dessinée SUR TRANCHE (disque vertical
-# dans son propre repère : le rond est dans la vue face X×Z), puis couchée
-# à plat dans le manifest via rot_deg [90,0,0]. Évite une grille voxelle
-# 960×960×96 (aspect 10:1 à plat = OOM).
-C, R = 80, 80          # front (X×Z) : le disque
-f = grid(C, R)
-cx, cy, rad = C / 2 - 0.5, R / 2 - 0.5, C / 2
-for r in range(R):
-    dy = r - cy
-    half = int((rad * rad - dy * dy) ** 0.5) if abs(dy) <= rad else -1
-    if half >= 0:
-        put(f, r, int(cx - half), int(cx + half), "#")
-s = grid(8, R)          # side (Y×Z) : épaisseur 8 cellules = 8 mm
-for r in range(R):
-    put(s, r, 0, 7, "#")
-t = grid(C, 8)          # top (X×Y) : empreinte, couvre tout
-for r in range(8):
-    put(t, r, 0, C - 1, "#")
-tsuba = spec("tsuba", "tsuba (garde) de katana, fer sombre patiné", 0.08, 96,
-             [{"id": "#", "name": "fer", "color": "#3a3d42",
-               "metallic": 0.85, "roughness": 0.52}],
-             f, s, t, budget=6000, texture=512, smooth=3, mc=0.5)
+    # Bo-hi (gorge de sang côté dos -X) sur les 2/3 inférieurs
+    hi_center, hi_hw = [], []
+    for k in range(22):
+        t = 0.04 + 0.66 * (k / 21.0)
+        py = round((1.0 - t) * (H - 4) + 2, 2)
+        w_m = 0.0315 * (1.0 - 0.24 * (t ** 1.15))
+        cx_m = sori_curve(t) - w_m * 0.26
+        hi_center.append([py, round((cx_m / XSPAN + 0.5) * W, 2)])
+        hi_hw.append([py, round(0.0044 / XSPAN * W * 0.5, 2)])
 
-# ---------------------------------------------------------------- habaki ---
-# Collerette laiton, 30 mm
-C, R = 12, 10
-f = grid(C, R)
-for r in range(R):
-    put(f, r, 1, 10, "#")
-s = grid(8, R)
-for r in range(R):
-    put(s, r, 0, 7, "#")
-t = grid(C, 8)
-for r in range(8):
-    put(t, r, 0, C - 1, "#")
-habaki = spec("habaki", "habaki (collerette) de katana, laiton doré", 0.03, 64,
-              [{"id": "#", "name": "laiton", "color": "#b08d3e",
-                "metallic": 1.0, "roughness": 0.34}],
-              f, s, t, budget=3000, smooth=6)
+    spec = {
+        "name": "blade",
+        "dims": [XSPAN, YSPAN, L],
+        "grid": [96, 32, 192],
+        "symmetry_x": False,
+        "smooth": 4,
+        "sdf_sigma": 0.7,
+        "budget_tris": 12000,
+        "texture_size": 1024,
+        "normal_strength": 1.6,
+        "materials": {
+            "steel": {"base": "#cfd4da", "roughness": 0.16, "metallic": 0.95},
+            "hi":    {"base": "#969da6", "roughness": 0.30, "metallic": 0.92},
+        },
+        "overlays": [
+            {"type": "brushed_metal", "on": ["steel", "hi"], "axis": "z", "scale": 190.0, "amount": 0.10},
+            {"type": "hamon", "on": "steel", "axis": "x", "positive_edge": True, "edge_frac": 0.62, "freq": 64.0},
+            {"type": "edge_wear", "on": "steel", "amount": 0.42, "scale": 22.0, "seed": 3},
+        ],
+        "views": {
+            "front": {
+                "size": [W, H],
+                "shapes": [
+                    {"op": "spline", "mat": "steel",
+                     "center": list(reversed(center_front)),
+                     "half_width": list(reversed(hw_front))},
+                    {"op": "spline", "mat": "hi",
+                     "center": list(reversed(hi_center)),
+                     "half_width": list(reversed(hi_hw))},
+                ],
+            },
+            "side": {
+                "size": [WS, H],
+                "shapes": [
+                    {"op": "spline", "mat": "steel",
+                     "center": list(reversed(center_side)),
+                     "half_width": list(reversed(hw_side))},
+                ],
+            },
+            "top": {
+                "size": [W, WS],
+                "shapes": [
+                    {"op": "rect", "mat": "steel", "x0": 3, "y0": 4, "x1": W - 3, "y1": WS - 4, "r": 10},
+                ],
+            },
+        },
+    }
+    return write_spec("blade", spec), [-0.005, 0.0, 0.654]
 
-# ------------------------------------------------------------------- lame ---
-# Lame courbée (sori 15 mm vers +X), kissaki, 635 mm — 2 px d'épaisseur
-VOX = 0.635 / 96
-ROWS = 96
-WID = 4           # largeur lame (cols) ~2.6 cm
-THICK = 2         # épaisseur (cols, vue side) ~1.3 cm
-f = grid(WID + 4, ROWS)
-for r in range(ROWS):
-    h_frac = 1.0 - r / (ROWS - 1)                   # 1 = bas, 0 = pointe
-    off = round(0.015 * (1.0 - h_frac) ** 1.6 / VOX)  # sori -> +X vers le haut
-    c0 = 2 + off
-    w = WID
-    if r == 0:
-        w = 1
-    elif r == 1:
-        w = 2
-    elif r == 2:
-        w = 3
-    put(f, r, c0, c0 + w - 1, "#")
-s = grid(THICK + 2, ROWS)
-for r in range(ROWS):
-    put(s, r, 1, 1 + THICK - 1, "#")
-TC, TR = WID + 4, THICK + 2
-t = grid(TC, TR)
-for r in range(TR):
-    put(t, r, 0, TC - 1, "#")
-lame = spec("lame", "lame de katana courbée, acier poli, kissaki", 0.635, 96,
-            [{"id": "#", "name": "acier", "color": "#b9bec6",
-              "metallic": 0.95, "roughness": 0.3}],
-            f, s, t,
-            overlays=[{"type": "edge_wear", "on": ["#"], "amount": 0.45,
-                       "scale": 16.0}],
-            symmetry=False, smooth=4, budget=9000, texture=1024, mc=0.47)
 
-# --------------------------------------------------------------- manifest ---
-# at = position du CENTRE de chaque partie (assemble.py centre les bboxes).
-# Chevauchements 1-3 mm entre parties consécutives : les unions booléennes
-# face-à-face exactes sont fragiles, l'interpénétration est robuste.
-manifest = {
-    "name": "katana",
-    "prompt": "katana forgé — lame courbée polie, tsuba de fer, tsuka wrappée "
-              "ito noir, habaki laiton, kashira laqué (0.97 m)",
-    "size_m": 0.969,
-    "parallel": True,
-    "parts": [
-        {"id": "kashira", "spec": "specs/parts/kashira.json", "at": [0, 0, 0.018]},
-        {"id": "tsuka",   "spec": "specs/parts/tsuka.json",   "at": [0, 0, 0.1665]},
-        {"id": "tsuba",   "spec": "specs/parts/tsuba.json",   "at": [0, 0, 0.3035],
-         "rot_deg": [90, 0, 0]},
-        {"id": "habaki",  "spec": "specs/parts/habaki.json",  "at": [0, 0, 0.3215]},
-        {"id": "lame",    "spec": "specs/parts/lame.json",    "at": [0, 0, 0.6515]},
-    ],
-}
-mp = os.path.join(HERE, "manifest.json")
-with open(mp, "w") as fh:
-    json.dump(manifest, fh, indent=2, ensure_ascii=False)
-print(f"manifest -> {mp}")
+# ====================================================================== HABAKI
+def make_habaki() -> tuple[str, list[float]]:
+    X, Y, Z = 0.036, 0.013, 0.032
+    spec = {
+        "name": "habaki",
+        "dims": [X, Y, Z],
+        "grid": [80, 48, 64],
+        "smooth": 3,
+        "texture_size": 512,
+        "normal_strength": 1.4,
+        "materials": {"brass": {"base": "#c89b3c", "roughness": 0.26, "metallic": 0.94}},
+        "overlays": [
+            {"type": "brushed_metal", "on": "brass", "axis": "z", "scale": 140.0, "amount": 0.14},
+            {"type": "edge_wear", "on": "brass", "amount": 0.45, "scale": 26.0, "seed": 5},
+        ],
+        "views": {
+            "front": {"size": [192, 192], "shapes": [
+                {"op": "poly", "mat": "brass", "pts": [[16, 8], [176, 8], [186, 184], [6, 184]]},
+            ]},
+            "side": {"size": [192, 192], "shapes": [
+                {"op": "poly", "mat": "brass", "pts": [[24, 8], [168, 8], [180, 184], [12, 184]]},
+            ]},
+            "top": {"size": [192, 192], "shapes": [
+                {"op": "poly", "mat": "brass", "pts": [[8, 96], [84, 16], [184, 88], [184, 104], [84, 176]]},
+            ]},
+        },
+    }
+    return write_spec("habaki", spec), [0.0, 0.0, 0.304]
+
+
+# ======================================================================= TSUBA
+def make_tsuba() -> tuple[str, list[float]]:
+    D, T = 0.082, 0.0085
+    W = 256
+    shapes_top = [
+        {"op": "circle", "mat": "bronze", "cx": 128, "cy": 128, "r": 120},
+        {"op": "circle", "mat": "rim",    "cx": 128, "cy": 128, "r": 120},
+        {"op": "circle", "mat": "bronze", "cx": 128, "cy": 128, "r": 106},
+    ]
+    for ang_deg in (45, 135, 225, 315):
+        a = math.radians(ang_deg)
+        shapes_top.append({
+            "op": "circle", "mat": "void",
+            "cx": round(128 + 64 * math.cos(a), 1),
+            "cy": round(128 + 64 * math.sin(a), 1),
+            "r": 21.0,
+        })
+
+    spec = {
+        "name": "tsuba",
+        "dims": [D, D, T],
+        "grid": [112, 112, 32],
+        "smooth": 2,
+        "fill_cavities": False,
+        "texture_size": 512,
+        "normal_strength": 1.8,
+        "materials": {
+            "bronze": {"base": "#5b4834", "roughness": 0.44, "metallic": 0.88},
+            "rim":    {"base": "#8f7144", "roughness": 0.30, "metallic": 0.92},
+        },
+        "overlays": [
+            {"type": "patina", "on": ["bronze", "rim"], "color": "#2f2a22", "amount": 0.35, "scale": 28.0, "seed": 9},
+            {"type": "edge_wear", "on": ["bronze", "rim"], "amount": 0.62, "scale": 24.0, "seed": 12},
+        ],
+        "views": {
+            "front": {"size": [W, 96], "shapes": [
+                {"op": "rect", "mat": "rim", "x0": 8, "y0": 10, "x1": W - 8, "y1": 86, "r": 18},
+            ]},
+            "side": {"size": [W, 96], "shapes": [
+                {"op": "rect", "mat": "rim", "x0": 8, "y0": 10, "x1": W - 8, "y1": 86, "r": 18},
+            ]},
+            "top": {"size": [W, W], "shapes": shapes_top},
+        },
+    }
+    return write_spec("tsuba", spec), [0.0, 0.0, 0.288]
+
+
+# ======================================================================= TSUKA
+def make_tsuka() -> tuple[str, list[float]]:
+    X, Y, L = 0.040, 0.026, 0.268
+    W, H = 192, 384
+    spec = {
+        "name": "tsuka",
+        "dims": [X, Y, L],
+        "grid": [80, 64, 160],
+        "smooth": 3,
+        "texture_size": 1024,
+        "normal_strength": 2.4,
+        "materials": {
+            "ito":   {"base": "#1b1d24", "roughness": 0.82, "metallic": 0.03},
+            "fuchi": {"base": "#2b2622", "roughness": 0.34, "metallic": 0.88},
+        },
+        "overlays": [
+            {"type": "wrap", "on": "ito", "diamond": True, "under_color": "#e2dac6",
+             "count": 9.5, "ribbon_width": 0.35},
+            {"type": "edge_wear", "on": "fuchi", "amount": 0.58, "scale": 24.0, "seed": 17},
+        ],
+        "views": {
+            "front": {"size": [W, H], "shapes": [
+                {"op": "spline", "mat": "ito",
+                 "center": [[6, 96], [192, 99], [378, 96]],
+                 "half_width": [[6, 78], [28, 75], [192, 68], [356, 74], [378, 78]]},
+                {"op": "rect", "mat": "fuchi", "x0": 14, "y0": 4, "x1": 178, "y1": 30, "r": 6},
+            ]},
+            "side": {"size": [W, H], "shapes": [
+                {"op": "spline", "mat": "ito",
+                 "center": [[6, 96], [378, 96]],
+                 "half_width": [[6, 78], [28, 74], [192, 69], [356, 74], [378, 78]]},
+                {"op": "rect", "mat": "fuchi", "x0": 14, "y0": 4, "x1": 178, "y1": 30, "r": 6},
+            ]},
+            "top": {"size": [W, W], "shapes": [
+                {"op": "ellipse", "mat": "ito", "cx": 96, "cy": 96, "rx": 82, "ry": 82},
+            ]},
+        },
+    }
+    return write_spec("tsuka", spec), [0.0, 0.0, 0.154]
+
+
+# ===================================================================== KASHIRA
+def make_kashira() -> tuple[str, list[float]]:
+    X, Y, Z = 0.039, 0.025, 0.026
+    spec = {
+        "name": "kashira",
+        "dims": [X, Y, Z],
+        "grid": [72, 56, 56],
+        "smooth": 4,
+        "budget_tris": 4000,
+        "texture_size": 512,
+        "normal_strength": 1.5,
+        "materials": {
+            "horn": {"base": "#231f22", "roughness": 0.28, "metallic": 0.86},
+            "cord": {"base": "#c89b3c", "roughness": 0.30, "metallic": 0.92},
+        },
+        "overlays": [
+            {"type": "edge_wear", "on": ["horn", "cord"], "amount": 0.55, "scale": 26.0, "seed": 23},
+        ],
+        "views": {
+            "front": {"size": [192, 160], "shapes": [
+                {"op": "rect", "mat": "horn", "x0": 12, "y0": 8, "x1": 180, "y1": 148, "r": 34},
+                {"op": "ellipse", "mat": "cord", "cx": 96, "cy": 72, "rx": 24, "ry": 14},
+            ]},
+            "side": {"size": [192, 160], "shapes": [
+                {"op": "rect", "mat": "horn", "x0": 14, "y0": 8, "x1": 178, "y1": 148, "r": 34},
+            ]},
+            "top": {"size": [192, 192], "shapes": [
+                {"op": "ellipse", "mat": "horn", "cx": 96, "cy": 96, "rx": 86, "ry": 84},
+            ]},
+        },
+    }
+    return write_spec("kashira", spec), [0.0, 0.0, 0.013]
+
+
+# ======================================================================== SAYA
+def make_saya() -> tuple[str, list[float]]:
+    L = 0.735
+    XSPAN = 0.058
+    YSPAN = 0.022
+    W, WS, H = 160, 72, 512
+
+    center_front, hw_front = [], []
+    for k in range(33):
+        t = k / 32.0
+        py = round((1.0 - t) * (H - 6) + 3, 2)
+        cx_m = sori_curve(t)
+        w_m = 0.040 * (1.0 - 0.16 * t)
+        center_front.append([py, round((cx_m / XSPAN + 0.5) * W, 2)])
+        hw_front.append([py, round(w_m / XSPAN * W * 0.5, 2)])
+
+    spec = {
+        "name": "saya",
+        "dims": [XSPAN, YSPAN, L],
+        "grid": [88, 40, 176],
+        "symmetry_x": False,
+        "smooth": 4,
+        "sdf_sigma": 0.75,
+        "budget_tris": 10000,
+        "texture_size": 1024,
+        "normal_strength": 1.5,
+        "materials": {
+            "lacquer":  {"base": "#17161a", "roughness": 0.18, "metallic": 0.05},
+            "koiguchi": {"base": "#2f241c", "roughness": 0.32, "metallic": 0.10},
+            "kurigata": {"base": "#c89b3c", "roughness": 0.30, "metallic": 0.90},
+        },
+        "overlays": [
+            {"type": "speckle", "on": "lacquer", "amount": 0.05, "scale": 130.0, "seed": 21},
+            {"type": "edge_wear", "on": ["koiguchi", "kurigata"], "amount": 0.45, "scale": 24.0, "seed": 13},
+        ],
+        "views": {
+            "front": {"size": [W, H], "shapes": [
+                {"op": "spline", "mat": "lacquer",
+                 "center": list(reversed(center_front)),
+                 "half_width": list(reversed(hw_front))},
+                {"op": "rect", "mat": "koiguchi", "x0": 34, "y0": 488, "x1": 146, "y1": 509, "r": 5},
+                {"op": "ellipse", "mat": "kurigata", "cx": 42, "cy": 432, "rx": 14, "ry": 20},
+            ]},
+            "side": {"size": [WS, H], "shapes": [
+                {"op": "spline", "mat": "lacquer",
+                 "center": [[3, WS * 0.5], [509, WS * 0.5]],
+                 "half_width": [[3, 22], [32, 27], [488, 33], [509, 34]]},
+                {"op": "rect", "mat": "koiguchi", "x0": 3, "y0": 488, "x1": WS - 3, "y1": 509, "r": 4},
+            ]},
+            "top": {"size": [W, WS], "shapes": [
+                {"op": "rect", "mat": "lacquer", "x0": 4, "y0": 4, "x1": W - 4, "y1": WS - 4, "r": 16},
+            ]},
+        },
+    }
+    return write_spec("saya", spec), [0.095, 0.0, 0.0]
+
+
+def main():
+    parts = []
+    for fn in (make_kashira, make_tsuka, make_tsuba, make_habaki, make_blade):
+        spec_rel, pos = fn()
+        parts.append({"id": Path(spec_rel).stem, "spec": spec_rel, "at": pos})
+    assembly = {
+        "name": "katana",
+        "prompt": "katana japonais traditionnel forgé (5 parties assemblées)",
+        "parts": parts,
+    }
+    out = HERE / "assembly.json"
+    out.write_text(json.dumps(assembly, indent=2), encoding="utf-8")
+    print(f"écrit : {out.relative_to(HERE.parent.parent)}  ({len(parts)} pièces)")
+
+
+if __name__ == "__main__":
+    main()
