@@ -180,6 +180,21 @@ def build_volumes(spec):
     if not occ.any():
         raise SpecError("visual hull vide : les 3 vues ne se recouvrent pas")
 
+    occ = _fill_closed_cavities(occ, spec)
+
+    # symmetry_x miroite l'objet en X et fait l'union : utile pour dessiner
+    # une moitié, mais il DUPLIQUE silencieusement tout détail asymétrique
+    # (antenne décentrée, pupille, emblème). On prévient si les vues
+    # décrivent un objet visiblement asymétrique.
+    if spec.get("symmetry_x", True):
+        diff = int((occ ^ occ[::-1, :, :]).sum())
+        if diff * 20 > int(occ.sum()):
+            print(f"  ⚠ symmetry_x=true mais les vues sont asymétriques "
+                  f"({diff} voxels hors miroir) : les détails décentrés "
+                  f"seront dupliqués en miroir — symmetry_x: false si "
+                  f"non voulu")
+        occ = occ | occ[::-1, :, :]
+
     # votes de matériaux (une vue = un vote, majorité, ex æquo -> palette order)
     votes = np.stack([Z_f, Z_s, Z_t])          # (3, X, Y, Z)
     valid = votes >= 0
@@ -224,6 +239,46 @@ def _sample_labels(zone_up, coords):
     return np.clip(lab, 0, None)
 
 
+def _remove_debris(mesh, spec):
+    """Supprime les îlots de triangles issus du marching cubes sur les
+    objets à plaques fines (tôle, grilles, boîtes creuses) : le lissage
+    Taubin y sectionne la coque et laisse des fragments de 2-20 faces
+    collés au corps. Critère conservateur : un composant est un débris
+    s'il a moins de `debris_min_faces` faces (50 par défaut — une antenne
+    cylindrique, un rivet ou une sangle en gardent toujours plus de 50).
+    Le nombre de débris supprimés est tracé dans mesh.metadata pour le
+    report.json."""
+    min_faces = int(spec.get("debris_min_faces", 50))
+    parts = mesh.split(only_watertight=False)
+    if len(parts) < 2:
+        return
+    big = [p for p in parts if len(p.faces) >= min_faces]
+    gone = len(parts) - len(big)
+    if not big or not gone:
+        return
+    cleaned = trimesh.util.concatenate(big)
+    mesh.vertices = cleaned.vertices
+    mesh.faces = cleaned.faces
+    mesh.metadata["debris_removed"] = gone
+
+
+def _fill_closed_cavities(occ, spec):
+    """Les vues décrivent l'ENVELOPPE extérieure de l'objet : une cavité
+    FERMÉE ne peut donc être qu'une erreur de dessin (coque dessinée en
+    anneau, pensée comme « creuse »). On comble ces cavités ; les creux
+    ouverts (vase, bol, coque de bateau) restent connectés à l'extérieur
+    et ne sont pas affectés. Désactivable avec fill_cavities: false."""
+    if not spec.get("fill_cavities", True):
+        return occ
+    filled = ndimage.binary_fill_holes(occ)
+    gain = int(filled.sum() - occ.sum())
+    if gain > 0:
+        print(f"  cavités fermées comblées : +{gain} voxels "
+              f"(coque dessinée en anneau ?)")
+        return filled
+    return occ
+
+
 def mesh_from_volumes(occ, zone, spec):
     # padding : marching cubes laisse des surfaces ouvertes sur les bords
     # du tableau si le volume y touche -> on entoure de cellules vides
@@ -245,6 +300,7 @@ def mesh_from_volumes(occ, zone, spec):
     trimesh.smoothing.filter_taubin(mesh, lamb=0.5, nu=-0.53,
                                     iterations=n_smooth)
     mesh.process(validate=True)
+    _remove_debris(mesh, spec)
 
     # étiquettes matériaux par sommet (réparation frontières : voir
     # _sample_labels — sinon les zones peintes au centre des faces
@@ -629,6 +685,7 @@ def generate(spec, outdir, res_override=None, budget_override=None,
         "triangles": int(len(mesh.faces)),
         "vertices": int(len(mesh.vertices)),
         "components": int(solid.body_count),
+        "debris_removed": int(mesh.metadata.get("debris_removed", 0)),
         "degenerate_faces": int((~solid.nondegenerate_faces()).sum()),
         "over_budget": len(mesh.faces) > int(spec.get("budget_tris", 15000)),
     }
@@ -651,8 +708,10 @@ def generate(spec, outdir, res_override=None, budget_override=None,
                 with open(mtl, "w") as fh:
                     fh.write(f"newmtl forge_generated\nKd 1 1 1\nmap_Kd {stem}.png\n")
             files["obj"] = obj
-    except Exception:
-        pass
+    except Exception as e:
+        # échec d'export visible : jamais silencieux (bug qualité industrielle)
+        print(f"  ⚠ export OBJ a échoué ({type(e).__name__}: {e}) "
+              f"— le GLB/STL restent valides", file=sys.stderr)
     stl = os.path.join(outdir, stem + ".stl")
     solid.export(stl)
     files["stl"] = stl
@@ -661,8 +720,9 @@ def generate(spec, outdir, res_override=None, budget_override=None,
         usd = os.path.join(outdir, stem + ".usdz")
         usdz_export.export_usdz(trimesh.Scene(solid), usd)
         files["usdz"] = usd
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"  ⚠ export USDZ a échoué ({type(e).__name__}: {e}) "
+              f"— le GLB reste valide", file=sys.stderr)
     albedo_img.save(os.path.join(outdir, stem + "_albedo.png"))
     files["albedo"] = os.path.join(outdir, stem + "_albedo.png")
 

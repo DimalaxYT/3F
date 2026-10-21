@@ -321,6 +321,8 @@ def cmd_verdict(args):
                       if e.get("iter") != args.iter] + [entry]
     log["entries"].sort(key=lambda e: e["iter"])
     logp = os.path.join(args.dir, "critique_log.json")
+    log["best_note"] = max([e.get("note", 0) for e in log["entries"]]
+                           + [entry["note"]])
     with open(logp, "w") as fh:
         json.dump(log, fh, indent=2, ensure_ascii=False)
 
@@ -339,6 +341,11 @@ def cmd_verdict(args):
     elif decision == "FORCE_DELIVER":
         print(f"  DÉCISION : LIVRAISON FORCÉE (budget {max_iters} itérations "
               "atteint).")
+        print("  Rappel de design : le seuil 9.5 est un plafond "
+              "volontairement exigeant — la note est bornée "
+              "mécaniquement (T technique, IoU) ; FORCE_DELIVER est le "
+              "dénouement normal d'une boucle saine, pas un échec : on "
+              "livre le meilleur itéré, avec ses issues documentées.")
         print(f"  {len(issues)} issue(s) résiduelle(s) documentée(s) dans le "
               "log — elles partent avec la livraison, jamais cachées.")
         print(f"  log -> {logp}")

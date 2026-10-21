@@ -258,6 +258,25 @@ Spec format (`specs/epee_rouillee.json` is the reference example):
 View drawing rules (this is the craft — think like a multi-view artist):
 - `.` or space = empty, `#` = primary material (palette[0]), any palette `id`
   letter = that material. Rows are listed **top to bottom** in world space.
+- **Orientation des vues (l'erreur n°1 — la lire deux fois)** :
+  - `front` : X×Z — ligne 0 = **sommet** de l'objet, dernière ligne = sol ;
+    colonne 0 = côté **gauche** de l'objet vu de face.
+  - `side` : Y×Z — même hauteur que front ; colonne 0 = **arrière** de
+    l'objet, dernière colonne = **avant** (comme un profil droit : ce qui
+    est dessiné à droite de ta vue se retrouve devant). Inverser coûte
+    2 itérations.
+  - `top` : X×Y — ligne 0 = **arrière**, dernière ligne = avant ;
+    colonne 0 = gauche (cohérent avec front).
+  - Les vues décrivent l'**enveloppe extérieure** : ne dessine JAMAIS
+    l'intérieur creux (coque en anneau) — le visual hull est plein et les
+    cavités fermées sont comblées automatiquement (`fill_cavities`, défaut
+    on). Un creux doit être OUVERT (vase, bol) pour survivre.
+- **`symmetry_x` (défaut `true`)** : l'objet est miroité en X puis uni à
+  son reflet. Économie : dessine une moitié, l'autre vient gratuite.
+  Piège : tout détail décentré (antenne, pupille unique, emblème latéral)
+  est **dupliqué en miroir silencieusement** — `symmetry_x: false` pour
+  tout objet non symétrique. meshgen affiche un avertissement quand les
+  vues sont visiblement asymétriques.
 - The 3 views must be **mutually consistent** (same height in front/side,
   same width in front/top): the hull intersection is the shape where all
   three agree. A feature must appear in the views that see it.
@@ -401,6 +420,11 @@ Anti-complacency rules (enforced by the code, not by willpower):
   them, `critique_log.json` keeps the trace;
 - iteration budget (default 4) exhausted -> **FORCE_DELIVER**: honest final
   note + residual issues documented and announced. Never a fake 9.5.
+- **9.5 is a deliberately demanding ceiling, not a target you must reach**:
+  the note is mechanically bounded by the technical grade and the IoU, so a
+  clean loop ends in FORCE_DELIVER at 8.5-9.2 with documented residuals —
+  that is the normal outcome, not a failure. `critique_log.json` keeps
+  `best_note` so the final grade is tracked, not decorative.
 
 Rubric (10 points): **S** silhouette & proportions /3 (IoU multi-view +
 photos), **V** volume consistency across faces /2, **M** materials & textures

@@ -89,7 +89,7 @@ diffusion :
 Pas d'accès web dans l'environnement ? L'agent doit le dire explicitement et
 retomber sur ses connaissances internes — sauter l'étape en silence est interdit.
 
-### Trois workflows selon le point de départ
+### Quatre workflows selon le point de départ
 
 | Workflow | Quand l'utiliser | Outil |
 |---|---|---|

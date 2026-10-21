@@ -55,7 +55,11 @@ un 9.5+. Ne cherche pas à le contourner — c'est ça, la qualité.
   ou si tu tournes en rond.
 - **Le seuil 9.5 est volontairement exigeant** : il force en pratique 2-3
   itérations — exactement comme Meshy, qui re-verifie la cohérence de ses
-  textures multi-vues avant d'afficher le preview.
+  textures multi-vues avant d'afficher le preview. La note est bornée
+  mécaniquement (T technique, IoU) : une boucle saine termine typiquement
+  en FORCE_DELIVER entre 8.5 et 9.2 — c'est le dénouement normal, pas un
+  échec. `critique_log.json` trace `best_note`, qui reste le score de
+  référence de l'objet.
 - **La livraison forcée est honnête** : au bout du budget, on livre avec la
   note atteinte et les issues résiduelles écrites, jamais un 10 imaginaire.
 

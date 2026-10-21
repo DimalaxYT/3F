@@ -8,6 +8,8 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
 import meshgen  # noqa: E402
+import trimesh  # noqa: E402
+import numpy as np  # noqa: E402
 
 SPEC_MIN = {
     "name": "test_cube_arondi",
@@ -62,7 +64,45 @@ def test_parse_views():
         pass
 
 
+def test_fill_cavities():
+    """_fill_closed_cavities comble une cavité fermée (erreur de dessin :
+    coque en anneau) et laisse intacte une cavité ouverte (vase, bol)."""
+    # coque fermée avec bulle interne (l'équivalent 3D d'une coque dessinée
+    # en anneau dans les vues)
+    occ = np.zeros((10, 10, 10), dtype=bool)
+    occ[2:8, 2:8, 2:8] = True
+    occ[4:6, 4:6, 4:6] = False          # poche fermée 2x2x2
+    out = meshgen._fill_closed_cavities(occ, {})
+    assert out.sum() == occ.sum() + 8, "poche fermée non comblée"
+    assert out[4:6, 4:6, 4:6].all()
+    # désactivé : rien ne change
+    out_off = meshgen._fill_closed_cavities(occ, {"fill_cavities": False})
+    assert out_off.sum() == occ.sum()
+    # cavité ouverte (tube traversant vertical) : intouchée
+    tube = np.ones((10, 10, 10), dtype=bool)
+    tube[4:6, 4:6, :] = False           # ouvert en haut ET en bas
+    out2 = meshgen._fill_closed_cavities(tube, {})
+    assert out2.sum() == tube.sum(), "cavité ouverte modifiée"
+
+
+def test_remove_debris():
+    """Les îlots de < debris_min_faces faces sont supprimés ; le corps
+    principal (>= 50 faces) reste intact."""
+    body = trimesh.creation.icosphere(subdivisions=2, radius=1.0)  # 320 faces
+    grit = trimesh.creation.box(extents=(0.02, 0.02, 0.02))        # 12 faces
+    grit.apply_translation((3, 0, 0))    # îlot détaché
+    mesh = trimesh.util.concatenate([body, grit])
+    n_before = len(mesh.split(only_watertight=False))
+    meshgen._remove_debris(mesh, {})
+    n_after = len(mesh.split(only_watertight=False))
+    assert n_after == n_before - 1, "îlot 12 faces non supprimé"
+    assert mesh.metadata.get("debris_removed") == 1
+    assert len(mesh.faces) == 320                 # le corps reste entier
+
+
 if __name__ == "__main__":
     test_parse_views()
+    test_fill_cavities()
+    test_remove_debris()
     test_meshgen_smoke()
     print("tests meshgen OK")
