@@ -1,26 +1,26 @@
 {
   "asset_name": "sci_fi_crate",
-  "high_poly_tris": 2416,
+  "high_poly_tris": 15764,
   "lods": {
     "LOD0": {
-      "tris": 2548,
+      "tris": 3800,
       "path": "examples/sci_fi_crate/game_ready/sci_fi_crate_game.glb",
-      "bytes": 640352
+      "bytes": 1273916
     },
     "LOD1": {
-      "tris": 1120,
+      "tris": 1520,
       "path": "examples/sci_fi_crate/game_ready/sci_fi_crate_LOD1.glb",
-      "bytes": 282040
+      "bytes": 655044
     },
     "LOD2": {
-      "tris": 418,
+      "tris": 1032,
       "path": "examples/sci_fi_crate/game_ready/sci_fi_crate_LOD2.glb",
-      "bytes": 124112
+      "bytes": 414812
     }
   },
-  "draw_calls_before": 25,
+  "draw_calls_before": 44,
   "draw_calls_after": 3,
-  "poly_reduction_pct": -5.46,
+  "poly_reduction_pct": 75.89,
   "physics_colliders": {
     "count": 6,
     "total_tris": 164,
@@ -30,8 +30,8 @@
     "SOCKET_lid_latch": {
       "position": [
         0.0,
-        -0.28,
-        0.38
+        -0.2958,
+        0.38480000000000003
       ],
       "rotation_deg": [
         0.0,
@@ -43,7 +43,7 @@
       "position": [
         0.0,
         0.0,
-        0.5
+        0.532
       ],
       "rotation_deg": [
         0.0,
@@ -67,7 +67,7 @@
       "position": [
         0.0,
         0.0,
-        0.506
+        0.5309999996647239
       ],
       "rotation_deg": [
         0,
@@ -78,8 +78,8 @@
     "SOCKET_interact": {
       "position": [
         0.0,
-        -0.29800000000000004,
-        0.253
+        -0.3144400014603138,
+        0.26549999983236194
       ],
       "rotation_deg": [
         0,
@@ -90,8 +90,8 @@
     "SOCKET_lid": {
       "position": [
         0.0,
-        0.25760000000000005,
-        0.38
+        0.26389999999999997,
+        0.38480000000000003
       ],
       "rotation_deg": [
         0,
@@ -107,11 +107,11 @@
       "studio_ready_glb_png": "examples/sci_fi_crate/game_ready/roblox/sci_fi_crate_roblox.glb",
       "scale_unit": "studs",
       "size_studs_xyz": [
-        3.307,
-        2.129,
-        1.807
+        3.393,
+        2.246,
+        1.896
       ],
-      "max_part_tris": 2548,
+      "max_part_tris": 3800,
       "under_10k_tris_limit": true,
       "surface_appearance": {
         "ColorMap": "examples/sci_fi_crate/game_ready/roblox/T_sci_fi_crate_ColorMap.png",
@@ -133,5 +133,5 @@
   },
   "delight_metrics": {},
   "qa_sheet": "examples/sci_fi_crate/game_ready/qa_game_sheet.png",
-  "duration_s": 38.21
+  "duration_s": 46.78
 }

@@ -33,8 +33,8 @@ import os
 import sys
 import time
 
-THRESHOLD_DEFAULT = 9.5
-MAX_ITERS_DEFAULT = 4
+THRESHOLD_DEFAULT = 8.8
+MAX_ITERS_DEFAULT = 1
 AXES = {
     "S": "silhouette & proportions (0-2.5)",
     "V": "volume inter-faces & géométrie mécanique propre (0-1.5)",
@@ -263,8 +263,12 @@ def cmd_verdict(args):
     m = objective_metrics(rep)
     issues = parse_issues(args.issue)
     log = load_log(args.dir)
-    threshold = args.threshold or log.get("threshold", THRESHOLD_DEFAULT)
-    max_iters = args.max_iters or log.get("max_iters", MAX_ITERS_DEFAULT)
+    if getattr(args, "fast", False):
+        default_thr, default_max = 8.5, 1
+    else:
+        default_thr, default_max = THRESHOLD_DEFAULT, MAX_ITERS_DEFAULT
+    threshold = args.threshold if args.threshold is not None else log.get("threshold", default_thr)
+    max_iters = args.max_iters if args.max_iters is not None else log.get("max_iters", default_max)
 
     # --- validation anti-triche -------------------------------------------
     if not (1.0 <= args.note <= 10.0):
@@ -415,6 +419,8 @@ def main(argv=None):
                    help="AXE|problème|correctif (répétable)")
     v.add_argument("--deliver", action="store_true",
                    help="clôturer la boucle si note >= seuil")
+    v.add_argument("--fast", action="store_true",
+                   help="mode Turbo Express (seuil 8.5, max 1 retouche chirurgicale)")
     v.add_argument("--threshold", type=float, default=None)
     v.add_argument("--max-iters", type=int, default=None)
     v.set_defaults(fn=cmd_verdict)

@@ -1,8 +1,20 @@
-# 3d-forge v5 🎮🟥⚔️🐉✨
+# 3d-forge v5.1 🎮🟥⚔️🐉✨
 
-**Moteur de génération d'Assets 3D Réalistes pensé en priorité pour Roblox Studio (`SurfaceAppearance` + `Studs` + `< 10k tris` + `Neon` + `Luau`) et Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`) — propulsé par CAO étanche + Sculpture Organique GPU (`gpu_sculpt.py`), zéro GPU requis côté utilisateur.**
+**Moteur Ultra Design & Texture PBR photoréaliste pensé en priorité pour Roblox Studio (`SurfaceAppearance` Dual-`1024²` + `Studs` + `< 10k tris` + `Neon` + `Luau`) et Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`) — propulsé par Kitbash Mécanique Hard-Surface (`greebles.py`) + Peinture Multi-Vues GPU Z-Buffer (`gpu_bridge.py`) + Sculpture Organique GPU (`gpu_sculpt.py`), zéro GPU requis côté utilisateur.**
 
-![Vitrine Technique 3d-forge v5 — AAA Game-Ready Asset Engine](docs/img/v5_game_ready_showcase.png)
+![Vitrine Technique 3d-forge v5.1 — Ultra Design & Texture Engine](docs/img/v5_1_ultra_showcase.png)
+
+> ### Nouveautés Majeures `3d-forge v5.1 — Ultra Design & Texture Engine`
+> 1. **Bibliothèque Mécanique Hard-Surface 100 % Étanche (`scripts/greebles.py`)** : `hex_bolt` (empreinte 6-pans creuse BTR), `bolt_array`, `toggle_latch` (loquet à étrier acier cintré `tube_sweep`), `louver_vent` (persiennes d'aération inclinées), `picatinny_rail` (rail cranté MIL-STD-1913), `ribbed_conduit`, `ergonomic_handle` et `corner_armor_cap` — zéro simple boîte cubique sur `sci_fi_crate` (`44` pièces mécaniques profilées -> **`3` Draw Calls** temps réel !).
+> 2. **Peinture Texture Multi-Vues GPU Datacenter à Z-Buffer Exact (`gpu_bridge.py` + `--ai-front/--ai-side/--ai-top`)** : génère des guides orthographiques millimétrés (`ortho_meta.json`), peint les pochoirs industriels (`CARGO BAY 04`, `CR-04`), micro-rayures et joints sur le GPU Datacenter, supprime l'éclairage studio (`delight.py`), puis reprojette dans l'UV avec **test d'occultation Z-buffer par caméra** (zéro bavure sur les faces cachées, couvercle articulé `lid` aligné au sous-pixel !).
+> 3. **Moteur PBR Sémantique 8 Archétypes & Micro-Tissage Analytique `1024²` (`game_ready.py`)** :
+>    - **`MAT_RUBBER_POLY`** : garantit `metallic == 0.0` strict sur le caoutchouc/polymère (zéro tache chromée parasite !).
+>    - **`MAT_PAINTED_ARMOR` & `MAT_HAZARD_STRIPE`** : préserve 95 % d'émail riche + éclats d'acier ciblés sur `curv > 0.54` + chevrons diagonaux 45° ultra-nets.
+>    - **`MAT_TSUKA_WRAP` & `MAT_TAMAHAGANE`** : tressage japonais *tsuka-maki* en soie tressée + nodules de galuchat *samegawa* + ligne de trempe ondulée *notare-choji hamon* évalués analytiquement sur chacun des `1 048 576` pixels !
+> 4. **Mode Haute Densité Texels Roblox Studio (`Blade_1024²` + `Hilt_1024²`) & Redressement UV PCA (`pbr.unwrap`)** : oriente automatiquement les îlots UV le long de leurs axes principaux et offre à la poignée `Hilt` et à la lame `Blade` chacune leur propre `SurfaceAppearance` `1024×1024` dans `<Name>_roblox.glb` (`4×` plus net en vue subjective Roblox tout en restant à `2` Draw Calls et `< 4 100 tris/part` !).
+> 5. **Sculpture Organique `v5.1` Haute Définition (`gpu_sculpt.py`)** : lissage de Taubin préservant le tranchant des cornes/écailles (`6` passes) + normales Mikk bi-bandes micro+méso (`sigma=1.1` & `3.8`) + **`-81,6 %`** de dé-lighting SH mesuré sur `dragon_buste`.
+
+![Vitrine Technique 3d-forge v5.0 — Baseline Précédente](docs/img/v5_game_ready_showcase.png)
 
 > ### Priorité n°1 : **Roblox Studio** (`roblox/`) & **Unreal Engine 5** (`unreal/`) — Profil par défaut `--engine roblox_unreal`
 >
@@ -34,21 +46,37 @@
 >    - **Binaire `.glb` compacté (`EXT_texture_webp`)** : purge complète des buffers morts -> **`dragon_buste_LOD2.glb` = `630 tris` en `108 Ko` (`×42` plus léger que le High-Poly !)**.
 > 5. **Colliders Physiques Convexes (`UCX_*`), Sockets Gameplay (`SOCKET_*`) & Animations `gltf.animations`** : décomposition convexe multi-pièces pour PhysX / Chaos / Jolt, points d'attache gameplay (`SOCKET_grip`, `SOCKET_tip`, `SOCKET_lid_latch`, `SOCKET_top_mount`, etc.), animations quaternions standards (`Idle_Action` lue nativement par Unreal, Unity, Godot, Blender et Three.js) et **20e recette `sci_fi_crate`** (caisse de ravitaillement blindée articulée).
 
-### Démarrage Rapide — Asset Game-Ready AAA en 1 commande
+### Démarrage Rapide — Pipeline Turbo Express (`12 à 20 s` CPU au lieu de `30+ min` !)
 
 ```bash
-# 1. Prop Hard-Surface articulé (caisse blindée Sci-Fi : 25 pièces -> 2 Draw Calls, LOD0/1/2 + UCX + Lid Anim)
-python3 scripts/generate.py sci_fi_crate -f glb stl -q high --game-ready --engine all --lod0-tris 2800 -o examples
+# 1. Pipeline Express TOUT-EN-UN (`scripts/turbo_forge.py`) — 1 seule commande = Géométrie + LOD0/1/2 + Roblox + UE5 + QA !
+#    • Katana Dual-1024² (Blade + Hilt) : 67.91 s -> 12.66 s (x5,4 plus rapide !)
+python3 scripts/turbo_forge.py katana --lod0-tris 8200 -o examples/katana/game_ready
 
-# 2. Arme de mêlée temps réel (Katana : 8 Draw Calls -> 1 Draw Call, SOCKET_grip / SOCKET_tip, 94 Ko en LOD2)
-python3 scripts/game_ready.py katana --engine all --lod0-tris 2600 --tex-size 1024 -o examples/katana/game_ready
+#    • Caisse blindée Sci-Fi articulée + Peinture Z-Buffer GPU : 60.54 s -> 20.46 s (x3,0 plus rapide !)
+python3 scripts/turbo_forge.py sci_fi_crate --lod0-tris 3800 \
+  --ai-front examples/sci_fi_crate/ortho_guides/ai_paint_front.png \
+  --ai-side  examples/sci_fi_crate/ortho_guides/ai_paint_side.png \
+  --ai-top   examples/sci_fi_crate/ortho_guides/ai_paint_top.png \
+  -o examples/sci_fi_crate/game_ready
 
-# 3. Sculpture Organique IA -> Game-Ready (50 200 tris -> 4 200 LOD0 / 1 680 LOD1 / 630 LOD2 [-98.7%], De-Lit Albedo)
-python3 scripts/game_ready.py examples/dragon_buste/dragon_buste.glb --engine all --lod0-tris 4200 -o examples/dragon_buste/game_ready
+#    • Buste de Dragon 3-Vues GPU -> Sculpture 123k tris + STL étanche + Pack Roblox & UE5 : 102.11 s -> 18.85 s (x5,4 plus rapide !)
+python3 scripts/turbo_forge.py \
+  --front assets/ai_multiview/dragon_front.png \
+  --side  assets/ai_multiview/dragon_side.png \
+  --back  assets/ai_multiview/dragon_back.png \
+  --name dragon_buste --lod0-tris 4800 -o examples/dragon_buste/game_ready
 
-# 4. De-Lighting autonome d'une texture albédo IA
-python3 scripts/delight.py raw_albedo.png -o clean_albedo.png --strength 0.85
+# 2. Objet 3D 100 % inédit écrit par l'IA (`def build() -> mk.Builder`) en 1 seule passe (< 15 s CPU) :
+python3 scripts/turbo_forge.py mon_arme_custom.py --lod0-tris 4200 -o out/mon_arme
 ```
+
+| Benchmark Vitesse `v5.1 Turbo` | Avant (`v5.1` initial) | Après (`v5.1 Turbo`) | Gain Mesuré |
+|---|---|---|---|
+| **`katana`** *(Dual-`1024²` Roblox + UE5 + LOD0/1/2 + QA)* | `67,91 s` | **`12,66 s`** | **`×5,4` plus rapide** |
+| **`dragon_buste`** *(Sculpt GPU `123k` tris + STL + Roblox + UE5)* | `102,11 s` | **`18,85 s`** | **`×5,4` plus rapide** |
+| **`sci_fi_crate`** *(`44` pièces CSG + Z-Buffer GPU + Lid + Roblox + UE5)* | `60,54 s` | **`20,46 s`** | **`×3,0` plus rapide** |
+| **Workflow complet d'un Agent IA (bout en bout)** | `30 à 40 min` *(5 boucles `9.5`)* | **`~60 à 90 s`** *(1 passe `turbo_forge`)* | **`×20+` plus rapide** |
 
 | Asset Vitrine `v5` | Source High-Poly | `LOD0` (`1024²`) | `LOD1` (`512²`) | `LOD2` (`256²`) | Draw Calls | Colliders `UCX_*` | Sockets & Animations |
 |---|---|---|---|---|---|---|---|

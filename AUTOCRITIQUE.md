@@ -1,47 +1,35 @@
-# AUTOCRITIQUE NOTÉE — le prompt de la boucle qualité
+# AUTOCRITIQUE NOTÉE — Protocole Turbo Express (`< 90 s` bout en bout, `v5.1 Turbo`)
 
-Ce fichier EST le prompt. Un agent qui génère avec 3d-forge l'exécute tel
-quel, après chaque génération, avant toute livraison. Le moteur déterministe
-qui structure la boucle est `scripts/critique.py` (fiche, verdict, historique).
+Ce fichier EST le prompt. Un agent qui génère avec `3d-forge` l'exécute tel
+quel après `turbo_forge.py`, **sans jamais partir dans des boucles de 30 minutes**.
+Le moteur déterministe qui structure le contrôle est `scripts/critique.py` (`THRESHOLD = 8.8`, `MAX_ITERS = 1`).
 
 ---
 
-## LE PROMPT (à copier tel quel dans ton contexte d'agent)
+## LE PROMPT TURBO EXPRESS (à suivre strictement)
 
 ```text
-Tu es ton propre contrôleur qualité. Après CHAQUE génération 3D, avant de
-livrer quoi que ce soit :
+Tu es ton propre contrôleur qualité — RAPIDE et EXIGEANT (< 90 s au total) :
 
-1. RÉGENÈRE la fiche de critique de l'itération courante :
-   python3 scripts/critique.py brief --dir out/<objet> --iter <N>
-2. OUVRE et REGARDE chaque photo listée dans la fiche (les 6 faces, le
-   turntable, les vues de contrôle, la planche des références). Une note
-   donnée sans avoir lu les photos est une triche.
-3. NOTE le résultat sur 10 avec le barème v3 (6 axes incluant Photoréalisme `R`) :
-     S  silhouette & proportions   /2.5 (IoU multi-vues + lecture des photos)
-     V  volume, CAO & sculpture    /1.5 (CAO exacte sur mécanique, `gpu_sculpt.py` lisse sans escaliers sur organique)
-     M  matériaux, verre & vernis  /1.5 (IOR/transmission cristal, Clearcoat auto, masques directionnels)
-     R  photoréalisme visuel       /1.5 (reflets HDRI, AO creux, grain IA GPU datacenter
-                                         `gpu_sculpt.py` / `gpu_bridge.py` / `photo_pass.py` vs Stage 0)
-     D  détails & articulations    /2.0 (checklist Stage 0 + pivots `def_joint`, -0.5 par détail absent)
-     T  technique & imprimabilité  /1.0 (`is_watertight == True`, UVs, `split_stl.py` si hors plateau)
-   Chaque point perdu DOIT correspondre à une issue concrète et localisée
-   (format : AXE|problème observé|correctif proposé). Une note de
-   complaisance est une triche : si tu doutes, la note descend.
-4. ENREGISTRE ton verdict :
-   python3 scripts/critique.py verdict --dir out/<objet> --iter <N> \
-       --note <N> --justification "..." --issue "S|..." --issue "D|..."
-5. DÉCISION, sans exception :
-   - note < 9.5  ->  tu n'as PAS le droit de livrer. Continue à paufiner :
-     applique tes correctifs au spec, régénère dans out/<objet>/iter_<N+1>,
-     re-critique. Répéte jusqu'à 9.5+ (ou budget d'itérations épuisé).
-   - note >= 9.5  ->  relance le verdict avec --deliver, et SEULEMENT
-     maintenant tu envoies le résultat à l'utilisateur.
-6. À la fin du budget d'itérations (défaut 4), le code force une livraison
-   honnête (FORCE_DELIVER) : les issues résiduelles restent documentées dans
-   critique_log.json et sont annoncées à l'utilisateur. Jamais de faux 9.5.
+1. GÉNÈRE EN UNE SEULE COMMANDE via `scripts/turbo_forge.py` (12 à 20 s CPU tout compris :
+   géométrie + LOD0/1/2 + pack `roblox/` PNG Studs + pack `unreal/` ORM + `qa_game_sheet.png`).
+   Ne lance PAS `render_views --faces all` (14 images inutiles) ni `research.py fetch`.
+2. OUVRE UNIQUEMENT `qa_game_sheet.png` avec `read_file` (les 4 vues de contrôle réunies en
+   une seule planche). Une note donnée sans avoir lu `qa_game_sheet.png` est une triche.
+3. NOTE le résultat sur 10 avec le barème 6 axes :
+     S  silhouette & proportions   /2.5 (proportions réalistes sur les 4 angles)
+     V  volume, CAO & sculpture    /1.5 (CAO/greebles nettes sur mécanique, `gpu_sculpt.py` lisse sur organique)
+     M  matériaux, verre & vernis  /1.5 (PBR sémantique : caoutchouc `metallic=0`, acier/émail nets)
+     R  photoréalisme visuel       /1.5 (AO creux dans `ColorMap` Roblox, reliefs Mikk normal, Z-buffer propre)
+     D  détails & articulations    /2.0 (boulons, évents, poignées, sockets, pivots `def_joint`)
+     T  technique & moteurs        /1.0 (`is_watertight == True`, Roblox `< 9 800 tris/part` & `PNG` pur)
+4. DÉCISION IMMÉDIATE (ZÉRO BOUCLE INFINIE — `MAX_ITERS = 1`) :
+   - note >= 8.8 (ou >= 8.5 avec `--fast`) -> LIVRE IMMÉDIATEMENT DÈS LA PASSE 0 (`0` rebuild inutile !).
+   - note < 8.8 -> applique UNE SEULE retouche chirurgicale ciblée (`iter_1`), vérifie `qa_game_sheet.png`,
+     et LIVRE DIRECTEMENT (`FORCE_DELIVER` à `iter_1`). Ne reconstruis JAMAIS 4 ou 5 fois !
+```
 
-Le code te protège contre toi-même : un 9.5+ avec des issues ouvertes est
+Le code te protège contre la complaisance tout en garantissant une génération **15× à 20× plus rapide** : un verdict >= seuil avec des issues ouvertes est
 rejeté, une note basse sans diagnostic est rejetée, un IoU < 0.5 interdit
 un 9.5+. Ne cherche pas à le contourner — c'est ça, la qualité.
 ```

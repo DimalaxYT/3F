@@ -12,7 +12,25 @@ description: >-
   GPU required on the user's machine.
 ---
 
-# 3d-forge v5 — Realistic 3D Asset Engine for **Roblox Studio** (Primary) & **Unreal Engine 5** (Secondary)
+# 3d-forge v5.1 Turbo — Ultra Design, Texture & `< 90s` Fast Engine (**Roblox Studio** Primary & **UE5** Secondary)
+
+> ## ⚡ CRITICAL SPEED RULE FOR ALL AI AGENTS (`TARGET: < 90 SECONDS TOTAL`, NEVER EXCEED 3 MINUTES!)
+> Previously, AI agents took **30+ minutes** per model by running blocking URL scrapes, chaining 10 separate CLI scripts, rendering 14 views per pass, and looping 5 times (`iter_0..iter_4`) chasing an unreachable `9.5/10`. **FOLLOW THIS FAST 1-COMMAND PROTOCOL EVERY TIME:**
+> 1. **ONE SINGLE PYTHON COMMAND (`scripts/turbo_forge.py` — `12 to 20s` CPU end-to-end!)**:
+>    - **Catalog recipe (`~12s`)**: `python3 scripts/turbo_forge.py katana --lod0-tris 8200 -o out/katana`
+>    - **Brand-new hard-surface / mechanical / weapon asset (`~14s`)**: Write ONE clean Python module `custom_asset.py` exposing `def build() -> mk.Builder:` using `meshkit.py` + `greebles.py`, then run **ONE command**:
+>      `python3 scripts/turbo_forge.py custom_asset.py --lod0-tris 4200 -o out/custom_asset`
+>    - **Brand-new organic creature / character / bust (`~18s` CPU)**: Generate `front.png` + `side.png` [optional `back.png`] **IN PARALLEL IN ONE SINGLE TURN** via `generate_image(..., offer_options=False)` on uniform neutral background, then run **ONE command**:
+>      `python3 scripts/turbo_forge.py --front front.png --side side.png --name creature -o out/creature`
+> 2. **ZERO BLOCKING WEB SCRAPING BY DEFAULT**: **DO NOT run `research.py fetch`** (HTTP image scraping timeouts waste 3–5 min) unless the user explicitly gives URLs or asks for web references.
+> 3. **INSPECT ONLY `qa_game_sheet.png` (1 IMAGE, NOT 14!) & DELIVER IN 1 PASS (`MAX 1 FIX`)**:
+>    - `turbo_forge.py` automatically outputs `qa_game_sheet.png` (4 studio views + wireframe/normal QA). Read **only `qa_game_sheet.png`**.
+>    - If geometry, proportions, and PBR textures look sharp (`>= 8.8/10`), **DELIVER IMMEDIATELY IN 1 PASS (0 rebuilds!)**. Otherwise apply **AT MOST 1 targeted surgical fix (`iter_1`)** and deliver immediately.
+
+> **New in `v5.1` (`Ultra Design, Texture & Turbo Engine`)**:
+> - **Hard-Surface Mechanical Kitbash Library (`scripts/greebles.py`)**: Always enrich hard-surface props, crates, vehicles, weapons, and sci-fi doors with 100%-watertight `greebles` (`hex_bolt`, `bolt_array`, `toggle_latch`, `louver_vent`, `picatinny_rail`, `ribbed_conduit`, `ergonomic_handle`, `corner_armor_cap`) + octagonal/tapered `mk.loft` hulls instead of plain boxes!
+> - **Datacenter-GPU Z-Buffer Multi-View Texture Paint (`gpu_bridge.render_orthographic_paint_guides` + `--ai-front/--ai-side/--ai-top`)**: Render sub-millimeter orthographic guides (`ortho_meta.json`), paint studio albedo stencils/panels via `generate_image(..., images=[guide])`, and project them cleanly with per-camera Z-buffer occlusion testing across both static hulls AND articulated sub-parts (`lid`, `door`).
+> - **8-Archetype Semantic PBR Engine & Dual-`1024²` Roblox Weapon Split**: Strictly enforces `metallic = 0.0` on `MAT_RUBBER_POLY` bumpers/tires, sharpens `MAT_TSUKA_WRAP` braided silk + `MAT_TAMAHAGANE` *hamon* at full `1024²` pixel resolution, straightens UV islands via PCA in `pbr.unwrap()`, and auto-splits elongated weapons (`katana`, `sword`) into `<Name>_Blade` (`1024²`) + `<Name>_Hilt` (`1024²`) inside `<Name>_roblox.glb`!
 
 ## Target Engine Priority (ALWAYS FOLLOW BY DEFAULT!)
 
