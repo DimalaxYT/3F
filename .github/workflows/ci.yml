@@ -49,6 +49,7 @@ jobs:
         run: python evals/run.py --ids 1,4,5,8 | tee /tmp/evals_summary.txt
       - name: "Commentaire PR (résumé QA gates + evals)"
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -56,14 +57,16 @@ jobs:
             echo "## 3d-forge — QA CI"
             echo
             echo '```'
-            cat /tmp/turbo-ci/qa_summary.md
+            cat /tmp/turbo-ci/qa_summary.md 2>/dev/null || echo "(qa_summary.md absent)"
             echo '```'
             echo
             echo '```'
-            cat /tmp/evals_summary.txt
+            cat /tmp/evals_summary.txt 2>/dev/null || echo "(résumé evals absent)"
             echo '```'
           } > /tmp/pr_comment.md
-          gh pr comment "${{ github.event.pull_request.number }}"             --body-file /tmp/pr_comment.md || echo "commentaire PR ignoré
+          gh pr comment "${{ github.event.pull_request.number }}" \
+            --body-file /tmp/pr_comment.md || true
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
