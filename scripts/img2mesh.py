@@ -34,9 +34,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import meshkit as mk                                   # noqa: E402
-import matplotlib                                      # noqa: E402
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt                        # noqa: E402
+plt = None  # import paresseux : voir `_plt()`
+
+
+def _plt():
+    """Import paresseux de matplotlib.
+
+    La mesure (segmentation, profil W(z), IoU de `compare.py`) doit rester
+    utilisable dans un conteneur sans matplotlib ; seuls les tracés PNG
+    (`contour.png`, `profile.png`) en dépendent.
+    """
+    global plt
+    if plt is None:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as _p
+        plt = _p
+    return plt
 
 
 # --------------------------------------------------------------------------- #
@@ -113,15 +127,16 @@ def rdp(pts, eps):
 
 
 def _contour_segments(mask):
+    p = _plt()
     m = np.pad(mask.astype(float), 1)
     try:
-        cs = plt.contour(m, levels=[0.5])
+        cs = p.contour(m, levels=[0.5])
         segs = list(cs.allsegs[0])
     except AttributeError:                     # vieilles API collections
-        cs = plt.contour(m, levels=[0.5])
-        segs = [p.vertices for p in cs.collections[0].get_paths()]
+        cs = p.contour(m, levels=[0.5])
+        segs = [pp.vertices for pp in cs.collections[0].get_paths()]
     finally:
-        plt.close("all")
+        p.close("all")
     return segs
 
 
@@ -266,7 +281,8 @@ def analyze_file(path, outdir, tol=0.14, rows=48, colors=5, max_contour=200):
             ov[yy, xx] = (255, 40, 40)
     Image.fromarray(ov).save(os.path.join(outdir, "contour.png"))
 
-    fig, ax = plt.subplots(1, 2, figsize=(8, 3.4), constrained_layout=True)
+    p = _plt()
+    fig, ax = p.subplots(1, 2, figsize=(8, 3.4), constrained_layout=True)
     P = np.asarray(prof, float)
     ax[0].plot(P[:, 3] / 2, P[:, 0], lw=2, color="#d95f02")
     ax[0].plot(-P[:, 3] / 2, P[:, 0], lw=2, color="#d95f02")
@@ -280,7 +296,7 @@ def analyze_file(path, outdir, tol=0.14, rows=48, colors=5, max_contour=200):
         a_.grid(alpha=0.3)
         a_.invert_yaxis()
     fig.savefig(os.path.join(outdir, "profile.png"), dpi=110)
-    plt.close(fig)
+    p.close(fig)
 
     an = {"source": os.path.basename(path), "background": bg,
           "image_size": [int(a.shape[1]), int(a.shape[0])],

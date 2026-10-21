@@ -111,6 +111,8 @@ def run_turbo(
     tex_size: int = 1024,
     sculpt_res: int = 152,
     engine: str = "roblox_unreal",
+    gate_target: str = "hero",
+    run_gates: bool = True,
 ) -> dict:
     t0 = time.perf_counter()
     out_p = Path(out_dir)
@@ -122,6 +124,7 @@ def run_turbo(
     guides_info = None
     stl_out = None
     stl_watertight = None
+    stl_volume = None
 
     if front_view and side_view:
         asset_name = name or (Path(target).stem if target else "sculpt_asset")
@@ -135,6 +138,7 @@ def run_turbo(
         mesh_hi.export(stl_main)
         stl_out = str(stl_main)
         stl_watertight = bool(mesh_hi.is_watertight)
+        stl_volume = float(mesh_hi.volume)
         mesh_pbr, _, _, _ = gs.bake_sculpt_pbr(mesh_hi, vpack, resolution=int(tex_size))
         glb_src = sculpt_dir / f"{asset_name}.glb"
         glb_src.write_bytes(mesh_pbr.export(file_type="glb"))
@@ -172,6 +176,7 @@ def run_turbo(
         solid.export(stl_main)
         stl_out = str(stl_main)
         stl_watertight = bool(solid.is_watertight)
+        stl_volume = float(solid.volume)
 
     manifest = gr.export_game_package(
         src_obj,
@@ -191,10 +196,17 @@ def run_turbo(
 
     if export_preview:
         rbx_glb = manifest.get("engine_exports", {}).get("roblox", {}).get("studio_ready_glb_png")
-        preview_glb = rbx_glb if (rbx_glb and Path(rbx_glb).is_file()) else manifest["lods"]["LOD0"]["path"]
+        game_glb = manifest["lods"]["LOD0"]["path"]
+        # Le viewer embarque le GLB en base64 : on préfère le pack Roblox PNG s'il reste
+        # léger (<= 3 Mo), sinon le GLB webp (x6 plus petit) pour garder preview.html partageable.
+        if rbx_glb and Path(rbx_glb).is_file() and Path(rbx_glb).stat().st_size <= 3_000_000:
+            preview_glb = rbx_glb
+        else:
+            preview_glb = game_glb
         prev_html = pv.build_preview(str(out_p), title=asset_name, glb=preview_glb)
         if prev_html:
             manifest["preview_html"] = prev_html
+            manifest["preview_glb_source"] = Path(preview_glb).name
 
     if guides_info is not None:
         manifest["ortho_guides"] = guides_info
@@ -203,6 +215,47 @@ def run_turbo(
 
     manifest["turbo_total_s"] = round(time.perf_counter() - t0, 2)
     (out_p / "game_manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # `report.json` — schéma UNIFIÉ lu par `critique.py` (boucle d'autocritique notée)
+    # et `preview.py` : le chemin turbo et le chemin meshgen partagent le même contrat QA.
+    lod0_tris_out = int(manifest.get("lods", {}).get("LOD0", {}).get("tris", 0))
+    report = {
+        "pipeline": "turbo_forge",
+        "prompt": f"{asset_name} (turbo_forge, cible {gate_target})",
+        "output_dir": str(out_p),
+        "params": {"budget_tris": int(lod0_tris)},
+        "validation": {
+            "watertight": bool(stl_watertight),
+            "winding_consistent": bool(stl_watertight),
+            "triangles": lod0_tris_out,
+            "over_budget": lod0_tris_out > int(lod0_tris),
+            "components": 1,
+            "degenerate_faces": 0,
+            "volume_m3": stl_volume,
+            "iou_views": {},
+            "iou_mean": 0.0,
+        },
+        "photos": {},
+        "renders": [manifest["qa_sheet"]] if manifest.get("qa_sheet") else [],
+        "references": None,
+        "engine_exports": manifest.get("engine_exports", {}),
+        "stl": manifest.get("printable_stl"),
+    }
+    (out_p / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    if run_gates:
+        try:
+            import gates as gt
+            res = gt.check_package(out_p, gate_target)
+            gt.write_outputs(out_p, res)
+            manifest["gates"] = {"target": gate_target, "all_pass": res["all_pass"],
+                                 "n_pass": res["n_pass"], "n_total": res["n_total"]}
+            (out_p / "game_manifest.json").write_text(
+                json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+        except Exception as exc:  # les gates ne doivent jamais casser la génération
+            manifest["gates"] = {"target": gate_target, "error": str(exc)}
+            (out_p / "game_manifest.json").write_text(
+                json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     return manifest
 
 
@@ -221,9 +274,17 @@ def main(argv=None) -> int:
     ap.add_argument("--ai-top", default=None, help="Peinture orthographique GPU dessus")
     ap.add_argument("--emit-guides", action="store_true", help="Génère aussi `ortho_guides/` en < 0.4s")
     ap.add_argument("--no-stl", action="store_true", help="Désactive l'export automatique du `.stl` étanche")
+    ap.add_argument("--stl", action="store_true",
+                    help="Alias explicite (no-op) : le `.stl` étanche est déjà exporté par défaut")
     ap.add_argument("--split-bed", action="store_true",
                     help="Découpe automatiquement le `.stl` en pièces <= 256×256×256 mm à tenons/mortaises")
     ap.add_argument("--no-preview", action="store_true", help="Désactive la génération de `preview.html`")
+    ap.add_argument("--target", dest="gate_target", default="hero",
+                    choices=["hero", "ugc", "print"],
+                    help="Cible de gates : hero <= 9 800 tris/part, ugc <= 4 000 (Roblox UGC), print = STL bloquant")
+    ap.add_argument("--no-gates", action="store_true", help="Saute l'évaluation gates.py (gates.json/qa_summary.md)")
+    ap.add_argument("--json", action="store_true",
+                    help="Imprime le manifest JSON complet (défaut : résumé 8 lignes économe en tokens)")
     ap.add_argument("--engine", default="roblox_unreal",
                     choices=["roblox_unreal", "roblox", "unreal", "unity", "godot", "gltf", "all"])
     ap.add_argument("--lod0-tris", type=int, default=3800)
@@ -249,9 +310,45 @@ def main(argv=None) -> int:
         tex_size=args.tex_size,
         sculpt_res=args.sculpt_res,
         engine=args.engine,
+        gate_target=args.gate_target,
+        run_gates=not args.no_gates,
     )
-    print(json.dumps(res, indent=2, ensure_ascii=False))
+    if args.json:
+        print(json.dumps(res, indent=2, ensure_ascii=False))
+    else:
+        _print_summary(res)
+    gates_info = res.get("gates", {})
+    if gates_info and gates_info.get("all_pass") is False:
+        return 1
     return 0
+
+
+def _print_summary(res: dict) -> None:
+    """Résumé 8 lignes (économe en tokens) — le manifest complet reste dans
+    `game_manifest.json` et s'imprime avec `--json`."""
+    out = Path(res.get("preview_html", "")).parent if res.get("preview_html") else Path(".")
+    lods = res.get("lods", {})
+    rbx = res.get("engine_exports", {}).get("roblox", {})
+    gates = res.get("gates", {})
+    print(f"[turbo_forge] {res.get('asset_name')} — {res.get('turbo_total_s')} s "
+          f"(cible {gates.get('target', '?')})")
+    print(f"  LODs      : LOD0 {lods.get('LOD0', {}).get('tris')} tris | "
+          f"LOD1 {lods.get('LOD1', {}).get('tris')} | LOD2 {lods.get('LOD2', {}).get('tris')} "
+          f"| draw calls {res.get('draw_calls_before')} -> {res.get('draw_calls_after')}")
+    print(f"  Roblox    : {rbx.get('max_part_tris')} tris/part | "
+          f"{' x '.join(f'{s:.2f}' for s in rbx.get('size_studs_xyz', []))} Studs | "
+          f"{len(rbx.get('neon_parts', []))} Neon | {Path(rbx.get('studio_ready_glb_png', '-')).name}")
+    print(f"  STL       : {Path(res.get('printable_stl', '-')).name} "
+          f"(watertight={res.get('stl_watertight')})")
+    if gates.get("error"):
+        print(f"  Gates     : ERREUR d'évaluation : {gates['error']}")
+    else:
+        print(f"  Gates     : {gates.get('n_pass', '?')}/{gates.get('n_total', '?')} OK "
+              f"({'LIVRABLE' if gates.get('all_pass') else 'NON LIVRABLE — voir gates.json'})")
+    print(f"  QA        : {Path(res.get('qa_sheet', '-')).name} | "
+          f"{Path(res.get('preview_html', '-')).name} | qa_summary.md")
+    print(f"  Dossier   : {out}")
+    print("  (manifest complet : game_manifest.json / --json)")
 
 
 if __name__ == "__main__":

@@ -26,6 +26,19 @@ jobs:
           python scripts/validate.py /tmp/ci-out/vase/vase.stl
           python scripts/generate.py katana --formats glb obj stl usdz --out /tmp/ci-out --size 256
           python scripts/validate.py /tmp/ci-out/katana/katana.stl
+      - name: E2E turbo_forge v5.2 + gates mesurables + critique sur sortie turbo
+        run: |
+          python scripts/turbo_forge.py sci_fi_crate --lod0-tris 2800 -o /tmp/turbo-ci
+          python scripts/gates.py /tmp/turbo-ci --target hero
+          python scripts/critique.py brief --dir /tmp/turbo-ci --iter 1
+          python scripts/critique.py policy
+      - name: Fraîcheur doc/code (table recettes générée + bench mesuré)
+        run: |
+          python scripts/generate.py --list --markdown > /tmp/recipes.md
+          diff /tmp/recipes.md references/recipes.md
+          python scripts/bench.py --check
+      - name: Evals headless du skill (sous-ensemble rapide)
+        run: python evals/run.py --ids 1,4,5,8
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:

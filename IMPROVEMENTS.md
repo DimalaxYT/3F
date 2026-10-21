@@ -224,3 +224,40 @@ Une page markdown (métriques + gates + chemins de livraison + note critique) é
 
 *Règle transverse proposée : toute valeur normative (seuil, budget, limite, table, bench)
 vit dans le code et est **injectée** dans les docs par génération — plus jamais recopiée.*
+
+---
+
+## Statut d'implémentation — 2026-10-21 (branche `arena/51f6a1f4-3f`)
+
+| # | Proposition | Statut | Preuve / commit |
+|---|---|---|---|
+| 1 | alias `--stl` + doc AGENTS corrigée | ✅ | `turbo_forge.py --stl` accepté ; commande littérale AGENTS sort 0 |
+| 2 | réconciliation `critique.py` ↔ `turbo_forge.py` | ✅ | turbo écrit `report.json` (schéma unifié) ; `critique.py` accepte `game_manifest.json` ; `brief` fonctionne sur sortie turbo |
+| 3 | politique de qualité unique | ✅ | `critique.py policy` = source de vérité ; plus aucun seuil normatif recopié (grep `9.5` vide dans SKILL/AGENTS/CLAUDE/README/AUTOCRITIQUE) |
+| 4 | profils `turbo/standard/showcase` | ✅ | SKILL.md §contrat de vitesse + en-tête de `references/workflows.md` |
+| 5 | tests env-indépendants | ✅ | `test_v2_features` : fallback usda testé, usd-core optionnel |
+| 6 | matplotlib paresseux | ✅ | `img2mesh._plt()` ; Workflow B mesurable sans matplotlib |
+| 7 | `detect_env.py` exhaustif + `--fix` | ✅ | 12 dépendances listées, commande pip imprimée |
+| 8 | `scripts/gates.py` + intégration | ✅ | 13 gates, `gates.json`, exit code ; appelé par `turbo_forge` ; étape CI E2E |
+| 9 | `qa_game_sheet.png` v2 | ✅ | 10 panneaux : face/profil + barre d'échelle cm/Studs calibrée, ColorMap Roblox, carte QA |
+| 10 | artefacts LOD2 | ✅ | cause racine double : pointes hors bbox (clamp + purge slivers dans `decimate_mesh_clean`) + atlas LOD0 interpolé par triangles géants (bake dédié 128² du LOD2) |
+| 11 | sortie console économe | ✅ | résumé 8 lignes ; `--json` pour le manifest complet |
+| 12 | découpage SKILL.md | ✅ | 653 → 180 lignes ; `references/workflows.md`, `references/engine_profiles.md`, `references/recipes.md` |
+| 13 | tables/bench générés | ✅ | `generate.py --list --markdown` → `references/recipes.md` ; `scripts/bench.py` → `docs/bench.json` + table README entre marqueurs ; CI `--check` + `diff` |
+| 14 | fusion des copies du protocole | ✅ | SKILL.md source ; AGENTS/CLAUDE/copilot = pointeurs + séquence outils |
+| 15 | poids du dépôt | 🟡 partiel | `preview.html` 8,0 → **1,6 Mo** (GLB webp conservé par chirurgie JSON + vignettes JPEG) ; **migration LFS/histoire des 174 Mo d'`examples/` NON faite** : réécriture d'historique sur `main` = décision propriétaire hors périmètre de la branche |
+| 16 | evals v5.1 + harnais | ✅ | 10 evals dont 6 sur le chemin v5.2 ; `evals/run.py` headless (table PASS/FAIL, exit code) ; sous-ensemble en CI |
+| 17 | plafonds Roblox à jour + `--target ugc` | ✅ | description SKILL + gates (`hero` 9 800 / `ugc` 4 000 / plafond moteur 20 000 documenté) |
+| 18 | `qa_summary.md` | ✅ | écrit par `gates.py`/`turbo_forge` |
+
+### Vérifications exécutées après refonte
+- `pytest -q` : **40 passed** (84 s).
+- `turbo_forge.py sci_fi_crate` : 18–21 s, gates **13/13**, planche QA v2 propre (LOD2 sans artefacts).
+- `critique.py brief/verdict` fonctionnels sur sortie turbo ; `critique.py policy` imprime seuil/budget.
+- `evals/run.py` : **10/10 PASS** en local (sous-ensemble 1,4,5,8 en CI).
+
+### Reste à faire (décisions propriétaires ou hors périmètre branche)
+- Migration Git LFS / branche orpheline des binaires `examples/` (nécessite un push
+  sur `main` + hook LFS côté serveur).
+- Lint Luau externe de `setup_<Name>.lua` (compilateur Luau non disponible en CI).
+- Test d'import Roblox Studio réel (nécessite l'éditeur, hors sandbox).

@@ -40,16 +40,72 @@ def _b64(path: str) -> str:
 
 
 def _yup_glb_b64(glb_path: str) -> str:
-    """Charge le GLB, tourne Z-up -> Y-up (-90° X) et ré-exporte en base64."""
-    import numpy as np
-    import trimesh
+    """Passe le GLB Z-up en Y-up pour le viewer SANS ré-encoder les textures.
 
-    scene = trimesh.load(glb_path, force="scene")
-    rot = trimesh.transformations.rotation_matrix(-np.pi / 2.0, [1, 0, 0])
-    scene.apply_transform(rot)
-    buf = io.BytesIO()
-    scene.export(buf, file_type="glb")
-    return base64.b64encode(buf.getvalue()).decode("ascii")
+    Chirurgie du chunk JSON (nœud pivot -90° X englobant les racines) : le chunk
+    binaire (`EXT_texture_webp` / PNG) est copié tel quel. Un `.glb` webp de 1 Mo
+    reste 1 Mo dans `preview.html` (l'ancien round-trip trimesh regonflait le
+    webp en PNG : x4 à x7). Repli sur trimesh si le chunk JSON est inhabituel.
+    """
+    import math
+    import struct as _st
+    try:
+        raw = open(glb_path, "rb").read()
+        if raw[:4] != b"glTF":
+            raise ValueError("pas un glb")
+        j_len, _ = _st.unpack_from("<II", raw, 12)
+        b_off = 20 + j_len
+        b_len, b_type = _st.unpack_from("<II", raw, b_off)
+        bin_chunk = raw[b_off + 8: b_off + 8 + b_len]
+        gltf = json.loads(raw[20:20 + j_len].decode("utf-8"))
+        nodes = gltf.setdefault("nodes", [])
+        roots = set(range(len(nodes)))
+        for n in nodes:
+            for c in n.get("children", []):
+                roots.discard(c)
+        if not roots:
+            raise ValueError("pas de racine")
+        q = [math.sin(-math.pi / 4), 0.0, 0.0, math.cos(-math.pi / 4)]
+        nodes.append({"name": "YUp_Z_to_Y", "rotation": q, "children": sorted(roots)})
+        for sc in gltf.get("scenes", []):
+            sc["nodes"] = [len(nodes) - 1]
+        if gltf.get("scenes") and "scene" not in gltf:
+            gltf["scene"] = 0
+        j_bytes = json.dumps(gltf, separators=(",", ":")).encode("utf-8")
+        j_bytes += b" " * ((4 - len(j_bytes) % 4) % 4)
+        total = 12 + 8 + len(j_bytes) + 8 + len(bin_chunk)
+        out = io.BytesIO()
+        out.write(_st.pack("<III", 0x46546C67, 2, total))
+        out.write(_st.pack("<II", len(j_bytes), 0x4E4F534A))
+        out.write(j_bytes)
+        out.write(_st.pack("<II", len(bin_chunk), b_type))
+        out.write(bin_chunk)
+        return base64.b64encode(out.getvalue()).decode("ascii")
+    except Exception:
+        import numpy as np
+        import trimesh
+        scene = trimesh.load(glb_path, force="scene")
+        rot = trimesh.transformations.rotation_matrix(-np.pi / 2.0, [1, 0, 0])
+        scene.apply_transform(rot)
+        buf = io.BytesIO()
+        scene.export(buf, file_type="glb")
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def _b64_thumb(path: str, max_px: int = 900, quality: int = 82) -> str:
+    """Vignette JPEG d'une photo de contrôle : la planche QA pèse ~1,8 Mo en PNG,
+    l'embarquer telle quelle doublerait le poids de `preview.html`."""
+    try:
+        from PIL import Image as _I
+        im = _I.open(path)
+        if max(im.size) > max_px:
+            im = im.copy()
+            im.thumbnail((max_px, max_px))
+        buf = io.BytesIO()
+        im.convert("RGB").save(buf, format="JPEG", quality=quality)
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return _b64(path)
 
 
 def find_glb(outdir: str) -> str | None:
@@ -115,7 +171,7 @@ def build_preview(outdir: str, title: str | None = None, glb: str | None = None,
     photo_html = ""
     if photos:
         cells = "".join(
-            f"<figure><img src='data:image/png;base64,{_b64(p)}' alt='{lab}' "
+            f"<figure><img src='data:image/jpeg;base64,{_b64_thumb(p)}' alt='{lab}' "
             f"loading='lazy'><figcaption>{lab}</figcaption></figure>"
             for p, lab in photos)
         photo_html = f"<section id='shots'><h2>Photos de contrôle</h2>{cells}</section>"

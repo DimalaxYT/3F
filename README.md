@@ -84,18 +84,19 @@ python3 scripts/turbo_forge.py \
 python3 scripts/turbo_forge.py mon_arme_custom.py --lod0-tris 4200 -o out/mon_arme
 ```
 
-| Benchmark Vitesse `v5.1 Turbo` | Avant (`v5.1` initial) | Après (`v5.1 Turbo`) | Gain Mesuré |
-|---|---|---|---|
-| **`katana`** *(Dual-`1024²` Roblox + UE5 + LOD0/1/2 + QA)* | `67,91 s` | **`12,66 s`** | **`×5,4` plus rapide** |
-| **`dragon_buste`** *(Sculpt GPU `123k` tris + STL + Roblox + UE5)* | `102,11 s` | **`18,85 s`** | **`×5,4` plus rapide** |
-| **`sci_fi_crate`** *(`44` pièces CSG + Z-Buffer GPU + Lid + Roblox + UE5)* | `60,54 s` | **`20,46 s`** | **`×3,0` plus rapide** |
-| **Workflow complet d'un Agent IA (bout en bout)** | `30 à 40 min` *(5 boucles `9.5`)* | **`~60 à 90 s`** *(1 passe `turbo_forge`)* | **`×20+` plus rapide** |
+<!-- BENCH:START -->
+| asset | high-poly | LOD0 (poids) | LOD1 | LOD2 | draw calls | turbo CPU (indicatif) |
+|---|---|---|---|---|---|---|
+| `katana` | 6,508 tris | **6,840 tris** (983 Ko) | 3,129 tris | 1,228 tris | 10 ➔ 1 | 13.79 s |
+| `sci_fi_crate` | 13,076 tris | **3,796 tris** (1129 Ko) | 1,520 tris | 836 tris | 44 ➔ 3 | 18.58 s |
+<!-- BENCH:END -->
 
-| Asset Vitrine `v5` | Source High-Poly | `LOD0` (`1024²`) | `LOD1` (`512²`) | `LOD2` (`256²`) | Draw Calls | Colliders `UCX_*` | Sockets & Animations |
-|---|---|---|---|---|---|---|---|
-| **`sci_fi_crate`** *(Prop Hard-Surface)* | `4 824 tris` | **`2 800 tris`** (`608 Ko`) | **`1 120 tris`** (`235 Ko`) | **`420 tris`** (`108 Ko`) | `25` ➔ **`2`** *(Body + Lid)* | `6` hulls (`164 tris`) | `SOCKET_lid_latch`, `SOCKET_top_mount` + `Idle_Action` |
-| **`katana`** *(Arme Temps Réel)* | `5 032 tris` | **`2 598 tris`** (`521 Ko`) | **`1 040 tris`** (`207 Ko`) | **`740 tris`** (`94 Ko`) | `8` ➔ **`1`** | `6` hulls (`748 tris`) | `SOCKET_grip`, `SOCKET_tip`, `SOCKET_trail_mid` |
-| **`dragon_buste`** *(Sculpture IA)* | `50 200 tris` (`4.5 Mo`) | **`4 200 tris`** (`761 Ko`) | **`1 680 tris`** (`285 Ko`) | **`630 tris`** (`108 Ko`, **`-98.7 %`**) | **`1`** | `1` hull (`164 tris`) | SH De-Lit (`-70 %` ombre) + `SOCKET_interact` |
+> Mesures reproductibles : `python3 scripts/bench.py` (régénère `docs/bench.json`
+> + cette table) et `python3 scripts/bench.py --check` en CI. Les durées sont
+> indicatives (machine dépendante) ; **tris et octets sont déterministes** et
+> toute dérive doc/code fait échouer la CI. Gain historique v5.1 → v5.1 Turbo :
+> ×3 à ×5,4 sur ces mêmes assets (boucles de critique incluses : ×20+ bout en bout).
+
 
 ---
 
@@ -136,8 +137,8 @@ notée après.**
         ▼
  PHOTOS DES 6 FACES + TURNTABLE → AUTOCRITIQUE NOTÉE /10
         │
-        ├─ note < 9.5  ► paufiner : corriger la spec, régénérer, re-critiquer
-        └─ note ≥ 9.5  ► LIVRAISON : GLB · OBJ+MTL · STL étanche · USDZ · photos
+        ├─ note < seuil  ► paufiner : corriger la spec, régénérer, re-critiquer
+        └─ note ≥ seuil  ► LIVRAISON : GLB · OBJ+MTL · STL étanche · USDZ · photos
 ```
 
 ---
@@ -208,12 +209,12 @@ Les workflows se combinent librement : un objet paramétrique `meshkit` précis 
 
 **C — Génération multi-vues v2 (`meshgen.py`)** : vues vectorielles 2D continues sans marche d'escalier (`spline`, `poly`, `rect`, `ellipse`, `capsule`, ajourages `void`) ou vues ASCII classiques, grille SDF 3D anisotrope (`dims` + `grid`) préservant les lames de 4–8 mm, unwrap `xatlas`, puis bake PBR glTF 2.0 complet (`baseColorTexture` + `metallicRoughnessTexture` + `normalTexture`). Exemple de référence : [`specs/epee_rouillee.json`](specs/epee_rouillee.json) — 15 000 tris, **étanche**, **IoU moyen = 0,9152** (`face 0,928` · `profil 0,873` · `dessus 0,945`).
 
-### Stage 3 — l'autocritique notée (la boucle 9.5, obligatoire)
+### Stage 3 — l'autocritique notée (seuil & budget : `critique.py policy`)
 
 C'est la règle de qualité du skill, appliquée **verbatim** par l'agent après
 chaque génération :
 
-> **Tu t'autocritique sur une note de 1/10. Si la note est inférieure à 9.5,
+> **Tu t'autocritique sur une note de 1/10. Si la note est inférieure au seuil (`critique.py policy`),
 > continue à paufiner. Sinon, envoie-moi le résultat.**
 
 Le prompt intégral à copier dans le contexte d'un agent vit dans
@@ -232,8 +233,8 @@ python3 scripts/critique.py verdict --dir out/epee --iter 1 \
     --note 7.2 --justification "proportions ok, détails manquants" \
     --issue "S|pointe trop fine|mangée par le lissage : res 80->96, smooth 10->7" \
     --issue "D|gouttière invisible de profil|peindre le fuller dans side aussi"
-#    → REFINE  (note < 9.5 : corriger, régénérer dans iter_2, re-critiquer)
-#      DELIVER (note ≥ 9.5 avec --deliver : seulement maintenant on livre)
+#    → REFINE  (note < seuil : corriger, régénérer dans iter_2, re-critiquer)
+#      DELIVER (note ≥ seuil avec --deliver : seulement maintenant on livre)
 
 # 3. STATUS — historique des notes et tendance
 python3 scripts/critique.py status --dir out/epee

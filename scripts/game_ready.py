@@ -388,7 +388,19 @@ def decimate_mesh_clean(mesh: trimesh.Trimesh, target_tris: int) -> trimesh.Trim
         v_out, f_out = fast_simplification.simplify(v_in, f_in, target_reduction=ratio, agg=agg_val)
         if len(f_out) <= target_tris * 1.12:
             break
+    # v5.2 — garde-fous anti-artefacts : aux ratios extrêmes (LOD2 ~15 %), le
+    # décimiteur C++ peut sortir des pointes/slivers hors de la surface d'origine
+    # (facettes noires visibles sur la planche QA). On re-clippe les sommets dans
+    # le bbox source (un LOD ne doit jamais dépasser son high-poly) et on purge
+    # les faces dégénérées, sans rouvrir le maillage.
+    v_out = np.clip(np.asarray(v_out, dtype=np.float64),
+                    v_in.min(axis=0) - 1e-4, v_in.max(axis=0) + 1e-4)
     out = trimesh.Trimesh(vertices=v_out, faces=f_out, process=True)
+    try:
+        out.update_faces(out.nondegenerate_faces(height=1e-5))
+        out.remove_unreferenced_vertices()
+    except Exception:
+        pass
     return out
 
 
@@ -447,7 +459,7 @@ def prepare_high_poly_sampler(
     }
 
 
-def build_shared_atlas_lod(lod0_mesh: trimesh.Trimesh, baked_lod0: dict, low_raw: trimesh.Trimesh, mip_size: int) -> trimesh.Trimesh:
+def build_shared_atlas_lod(lod0_mesh: trimesh.Trimesh, baked_lod0: dict, low_raw: trimesh.Trimesh, mip_size: int, use_normal: bool = True) -> trimesh.Trimesh:
     """Construit `LOD1` ou `LOD2` en transférant instantanément (`< 0.05 s`, zéro `xatlas`)
     les coordonnées UV exactes du `LOD0` par voisinage surface+normale + mipmap dédiée !"""
     v0 = np.asarray(lod0_mesh.vertices, dtype=np.float32)
@@ -468,8 +480,11 @@ def build_shared_atlas_lod(lod0_mesh: trimesh.Trimesh, baked_lod0: dict, low_raw
     uv_lod = uv0[best_v]
     alb_m = baked_lod0["albedo"].resize((mip_size, mip_size), Image.Resampling.BILINEAR)
     orm_m = baked_lod0["orm"].resize((mip_size, mip_size), Image.Resampling.BILINEAR)
-    nrm_m = baked_lod0["normal_gl"].resize((mip_size, mip_size), Image.Resampling.BILINEAR)
     out_m = low_raw.copy()
+    # `use_normal=False` (LOD2) : une normale tangente bakée pour la surface LOD0
+    # produit des artefacts d'ombrage sur un maillage décimé à 15 % — le LOD
+    # lointain garde un PBR plat (albédo + ORM), sans carte de normales.
+    nrm_m = baked_lod0["normal_gl"].resize((mip_size, mip_size), Image.Resampling.BILINEAR) if use_normal else None
     pbr_m = trimesh.visual.material.PBRMaterial(
         name="game_lod_pbr",
         baseColorFactor=[255, 255, 255, 255],
@@ -931,6 +946,44 @@ def _extract_uv_pbr_vertices(mesh_in: trimesh.Trimesh) -> tuple[np.ndarray, np.n
     return v_a, v_r, v_m
 
 
+def _qa_scale_bar(im: Image.Image, extents_m) -> Image.Image:
+    """Barre d'échelle calibrée sur le cadrage auto de `renderer.render_view`
+    (sphère englobante de rayon r à d = 3.1 r, fov 38° => ~93.7 % de la hauteur)."""
+    import math as _m
+    d = ImageDraw.Draw(im)
+    W, H = im.size
+    r = float(np.linalg.norm(extents_m)) / 2.0
+    px_per_m = (0.937 * H) / (2.0 * r) if r > 1e-9 else 0.0
+    target = 0.32 * W / max(px_per_m, 1e-9)
+    k = 10.0 ** _m.floor(_m.log10(max(target, 1e-9)))
+    bar_m = max([c * k for c in (0.1, 0.2, 0.5, 1.0) if c * k <= target * 1.05] or [k])
+    x0, y0 = int(0.06 * W), H - int(0.07 * H)
+    x1 = x0 + max(int(bar_m * px_per_m), 4)
+    d.line((x0, y0, x1, y0), fill=(15, 15, 15), width=7)
+    d.line((x0, y0, x1, y0), fill=(252, 252, 252), width=3)
+    for xx in (x0, x1):
+        d.line((xx, y0 - 8, xx, y0 + 8), fill=(252, 252, 252), width=3)
+    lbl = f"{bar_m * 100:.0f} cm | {bar_m * ROBLOX_STUDS_PER_METER:.2f} Stud"
+    f = renderer._font(15)
+    tw = int(d.textlength(lbl, font=f)) + 10
+    d.rectangle((x0, y0 - 30, x0 + tw, y0 - 10), fill=(16, 20, 16))
+    d.text((x0 + 5, y0 - 28), lbl, fill=(140, 240, 170), font=f)
+    return im
+
+
+def _qa_metrics_card(clean_name: str, lines: list) -> Image.Image:
+    card = Image.new("RGB", (480, 480), (16, 18, 22))
+    d = ImageDraw.Draw(card)
+    d.text((14, 12), f"Carte QA — {clean_name}", fill=(235, 235, 240), font=renderer._font(20))
+    y = 52
+    for ln in lines:
+        d.text((14, y), ln, fill=(205, 210, 220), font=renderer._font(15))
+        y += 23
+    d.text((14, 448), "gates complètes : python3 scripts/gates.py <dossier>",
+           fill=(140, 240, 170), font=renderer._font(15))
+    return card
+
+
 def export_game_package(
     source: mk.Builder | trimesh.Trimesh | str | Path,
     out_dir: str | Path,
@@ -1100,7 +1153,16 @@ def export_game_package(
     lod1_raw = decimate_mesh_clean(low_base, min(len(low_base.faces) - 2, max(int(lod0_tris * 0.40), 64)))
     lod2_raw = decimate_mesh_clean(lod1_raw, min(len(lod1_raw.faces) - 2, max(int(lod0_tris * 0.15), 32)))
     lod1_mesh = build_shared_atlas_lod(lod0_mesh, baked, lod1_raw, max(tex_size // 2, 256))
-    lod2_mesh = build_shared_atlas_lod(lod0_mesh, baked, lod2_raw, max(tex_size // 4, 128))
+    # v5.2 : le LOD2 reçoit SON PROPRE bake 128² (atlas, AO et normales cohérents
+    # avec sa surface décimée). Partager l'atlas du LOD0 avec des triangles géants
+    # fait interpoler les UV à travers les charts (« vitrage brisé » sur la QA).
+    lod2_baked = bake_high_to_low(
+        high_body, v_alb, v_rgh, v_mtl, lod2_raw,
+        high_vertex_mat_id=v_mid, ai_views=None, hp_cache=hp_cache,
+        tex_size=max(tex_size // 4, 128), weathering=use_weather,
+        delight_pass=False, decal_strength=decal_strength,
+    )
+    lod2_mesh = lod2_baked["mesh_lod0"]
 
     # Construit la scène principale `LOD0` fusionnée en Draw Calls minimaux !
     def _assemble_lod_scene(body_mesh: trimesh.Trimesh, include_colliders: str | None = None) -> trimesh.Scene:
@@ -1410,23 +1472,52 @@ def export_game_package(
     im_nrm = baked["normal_gl"].resize((480, 480), Image.BILINEAR)
     im_orm = baked["orm"].resize((480, 480), Image.BILINEAR)
 
+    # Planche QA v2 : vues orthogonales cadrées + barre d'échelle (cm & Studs),
+    # carte moteur (ColorMap Roblox à AO cuit) et carte de gates — l'agent ne lit
+    # QU'UNE image, elle doit porter les proportions, l'échelle et les métriques.
+    ext = np.asarray(high_body.extents, dtype=float)
+    studs_xyz = ext * ROBLOX_STUDS_PER_METER
+    im_front = _qa_scale_bar(renderer.render_view(sc_lod0, 0.0, 0.0, size=480), ext)
+    im_side = _qa_scale_bar(renderer.render_view(sc_lod0, 90.0, 0.0, size=480), ext)
+    if "roblox" in engines:
+        im_alb, alb_lbl = rbx_col_img, f"7. T_{clean_name}_ColorMap (AO Roblox cuit)"
+    else:
+        im_alb, alb_lbl = baked["albedo"], f"7. T_{clean_name}_BC (albédo de-lit)"
+    im_card = _qa_metrics_card(clean_name, [
+        f"LOD0 {len(lod0_mesh.faces):,} tris | LOD1 {len(lod1_mesh.faces):,} | LOD2 {len(lod2_mesh.faces):,}",
+        f"draw calls {raw_draw_calls} -> {final_draw_calls}",
+        f"dims {ext[0] * 100:.0f} x {ext[1] * 100:.0f} x {ext[2] * 100:.0f} cm",
+        f"Studs {studs_xyz[0]:.2f} x {studs_xyz[1]:.2f} x {studs_xyz[2]:.2f}",
+        f"colliders UCX {len(colliders)} ({sum(len(h.faces) for h in colliders)} tris)",
+        f"sockets {len(sockets)} | textures {tex_size}² | webp={bool(webp)}",
+        f"high-poly {len(high_body.faces):,} tris "
+        f"(-{round(100.0 * (1.0 - len(lod0_mesh.faces) / max(len(high_body.faces), 1)))} %)",
+    ])
+
     qa_sheet = out_path / "qa_game_sheet.png"
     renderer.contact_sheet(
         [
             (im_hi, f"1. Source High-Poly ({len(high_body.faces):,} tris, {raw_draw_calls} draw calls)"),
             (im_lod0, f"2. Game LOD0 ({len(lod0_mesh.faces):,} tris, {final_draw_calls} draw calls)"),
-            (im_lod2, f"3. Far LOD2 ({len(lod2_mesh.faces):,} tris, même atlas UV)"),
+            (im_lod2, f"3. Far LOD2 ({len(lod2_mesh.faces):,} tris, bake dédié 128²)"),
             (im_col, f"4. Colliders Physiques UCX ({sum(len(h.faces) for h in colliders)} tris) & Sockets"),
-            (im_nrm, "5. Tangent-Space Normal Map (Mikk VEC4)"),
-            (im_orm, "6. Packed ORM (R=AO, G=Roughness, B=Metallic)"),
+            (im_front, f"5. Face — {ext[0] * 100:.0f} x {ext[2] * 100:.0f} cm | "
+                       f"{studs_xyz[0]:.2f} x {studs_xyz[2]:.2f} Studs"),
+            (im_side, f"6. Profil — {ext[1] * 100:.0f} x {ext[2] * 100:.0f} cm | "
+                      f"{studs_xyz[1]:.2f} x {studs_xyz[2]:.2f} Studs"),
+            (im_alb.resize((480, 480), Image.BILINEAR), alb_lbl),
+            (im_nrm, "8. Tangent-Space Normal Map (Mikk VEC4)"),
+            (im_orm, "9. Packed ORM (R=AO, G=Roughness, B=Metallic)"),
+            (im_card, "10. Carte QA & gates"),
         ],
         cols=3,
         out_path=str(qa_sheet),
-        title=f"3d-forge v5 Game-Ready QA — {clean_name} (High-Poly -> LOD0/1/2 + PBR + Colliders + Unreal/Unity/Godot)",
+        title=f"3d-forge v5.2 Game-Ready QA — {clean_name} (High-Poly -> LOD0/1/2 + PBR + Colliders + échelle Studs/cm)",
     )
 
     manifest = {
         "asset_name": clean_name,
+        "lod0_target_tris": int(lod0_tris),
         "high_poly_tris": int(len(high_body.faces)),
         "lods": {
             "LOD0": {"tris": int(len(lod0_mesh.faces)), "path": str(glb_main), "bytes": glb_main.stat().st_size},
