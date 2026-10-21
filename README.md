@@ -23,7 +23,7 @@ Objet demandé : [ÉCRIS TON IDÉE ICI — ex: un sabre laser gravé noir et arg
 > - **Reproductibilité** : deux runs identiques donnent désormais des octets identiques — `trimesh.sample.sample_surface` ignorait le seed global, l'AO variait donc à chaque exécution (jusqu'à 8 octets de GLB et des pixels différents).
 > - **Confort agent** : `--dry-run` (plan sans exécuter), `--resume` (re-run identique en **0,8 s**), `--gif` (turntable), `scripts/serve_preview.py` (live preview du `preview.html`).
 > - **CI visuelle** : `scripts/visual_regression.py` compare l'IoU de silhouette des recettes à un baseline commité — une proportion cassée qui passe tous les tests unitaires échoue ici.
-> - **Qualité de rendu (v5.6-5.7)** : éclairage clé/remplissage réellement contrasté, ombre de contact à deux couches, bloom émissif, vignettage, netteté ; l'usure d'arêtes était déclenchée sur **80 % des sommets** (seuil de courbure trop bas : médiane 0.71) — recalibrée à 40 % ; ajout de variations à grande échelle (dérive de teinte par panneau, poussière verticale) ; le néon perdait son intensité à l'export (glTF borne `emissiveFactor` à 1) — exporté via `KHR_materials_emissive_strength`.
+> - **Qualité de rendu (v5.6-5.7)** : éclairage clé/remplissage réellement contrasté, ombre de contact à deux couches, bloom émissif, vignettage, netteté ; l'usure d'arêtes était déclenchée sur **80 % des sommets** (seuil de courbure trop bas : médiane 0.71) — recalibrée à 40 % ; ajout de variations à grande échelle (dérive de teinte par panneau, poussière verticale) ; le néon perdait son intensité à l'export (glTF borne `emissiveFactor` à 1) — exporté via `KHR_materials_emissive_strength` ; fond plat remplacé par un **cyclorama** (une lame à 0.886 de luminance était invisible sur un fond à 0.99) et trempe du katana remise à l'endroit (le tranchant trempé était plus spéculaire que le corps, ce qui écrasait le `hamon` sous la courbe ACES).
 > - **Dépôt allégé** : `examples/` **174 Mo → 1,1 Mo** dans l'arbre ; les 5 packs lourds restent dans l'historique et se restaurent avec `python3 scripts/fetch_examples.py`.
 
 > ### Nouveautés Majeures `3d-forge v5.1 — Ultra Design & Texture Engine`
@@ -94,8 +94,8 @@ python3 scripts/turbo_forge.py mon_arme_custom.py --lod0-tris 4200 -o out/mon_ar
 <!-- BENCH:START -->
 | asset | high-poly | LOD0 (poids) | LOD1 | LOD2 | draw calls | turbo CPU (indicatif) |
 |---|---|---|---|---|---|---|
-| `katana` | 6,508 tris | **6,840 tris** (973 Ko) | 3,129 tris | 1,228 tris | 10 ➔ 1 | 11.95 s |
-| `sci_fi_crate` | 13,076 tris | **3,796 tris** (1063 Ko) | 1,520 tris | 836 tris | 44 ➔ 3 | 12.53 s |
+| `katana` | 6,508 tris | **6,840 tris** (965 Ko) | 3,129 tris | 1,228 tris | 10 ➔ 1 | 11.99 s |
+| `sci_fi_crate` | 13,076 tris | **3,796 tris** (1063 Ko) | 1,520 tris | 836 tris | 44 ➔ 3 | 11.27 s |
 <!-- BENCH:END -->
 
 > Mesures reproductibles : `python3 scripts/bench.py` (régénère `docs/bench.json`

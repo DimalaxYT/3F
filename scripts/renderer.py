@@ -40,8 +40,8 @@ ALL_FACES = [
     ("dessous", 0.0,  -78.0),
 ]
 
-BG_TOP = np.array([0.93, 0.94, 0.96])
-BG_BOTTOM = np.array([0.99, 0.99, 0.995])
+BG_TOP = np.array([0.86, 0.885, 0.93])
+BG_BOTTOM = np.array([0.965, 0.965, 0.975])
 AMBIENT = 0.33
 EXPOSURE = 1.12
 ENV_SKY = np.array([1.00, 1.02, 1.06])   # environnement hémisphérique (approx studio)
@@ -741,7 +741,14 @@ def render_view(scene: trimesh.Scene, azimuth_deg=42.0, elevation_deg=22.0,
 
     # ---- fond dégradé studio ----
     grad = np.linspace(0, 1, H)[:, None, None]
-    img[:] = (BG_TOP * (1 - grad) + BG_BOTTOM * grad) * np.ones((1, W, 1))
+    # Cyclorama : nappe de lumière derrière le sujet qui s'éteint vers les coins.
+    # Un fond plat à 0.99 ne détachait aucun métal clair (lame mesurée à 0.886
+    # de luminance pour un fond à 0.93 : silhouette invisible en vignette).
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    rad_bg = np.sqrt(((xx - W * 0.5) / (W * 0.74)) ** 2
+                     + ((yy - H * 0.44) / (H * 0.74)) ** 2)
+    pool = np.clip(1.0 - 0.34 * rad_bg ** 1.7, 0.5, 1.0)[..., None]
+    img[:] = (BG_TOP * (1 - grad) + BG_BOTTOM * grad) * pool
 
     # ---- ombre de contact : projection C via PIL.ImageDraw + flou Gaussien ----
     if shadow:

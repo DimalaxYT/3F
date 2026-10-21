@@ -272,14 +272,22 @@ def apply_game_weathering(
         edge_dist = bx + wave  # > 0 côté tranchant `ha` !
         yakiba = np.clip((edge_dist - 0.0032) / 0.0022, 0.0, 1.0)
         habuchi = np.exp(-(((edge_dist - 0.0032) / 0.0014) ** 2))  # liseré blanc laiteux `nioi` !
-        ji_col = np.array([0.66, 0.69, 0.73], dtype=np.float32)[None, :]
-        ha_col = np.array([0.85, 0.87, 0.90], dtype=np.float32)[None, :]
-        nioi_col = np.array([0.96, 0.97, 0.99], dtype=np.float32)[None, :]
+        # Physique de la trempe : le `ji` (corps non trempé) est un miroir, le `ha`
+        # (tranchant martensitique) est plus mat et moins métallique. Les deux valeurs
+        # étaient inversées (tranchant metal 0.95 / rough 0.10) : la lame réfléchissait
+        # l'environnement à pleine énergie, ACES écrasait tout à ~0.89 et le `hamon`
+        # devenait invisible (écart-type de luminance mesuré : 0.04).
+        ji_col = np.array([0.58, 0.61, 0.65], dtype=np.float32)[None, :]
+        ha_col = np.array([0.80, 0.82, 0.85], dtype=np.float32)[None, :]
+        nioi_col = np.array([0.93, 0.94, 0.96], dtype=np.float32)[None, :]
         c_bl = ji_col * (1.0 - yakiba[:, None]) + ha_col * yakiba[:, None]
         col[is_blade] = np.clip(c_bl * (1.0 - 0.55 * habuchi[:, None]) + nioi_col * (0.55 * habuchi[:, None]), 0.0, 1.0)
-        rough[is_blade] = np.clip(0.24 * (1.0 - yakiba) + 0.10 * yakiba + 0.12 * habuchi, 0.07, 0.45)
-        metal[is_blade] = 0.95
-        extra_h[is_blade] = 0.05 * habuchi
+        # Laminage : ondulation lente de teinte le long de la soie (acier plié).
+        fold = 1.0 + 0.045 * np.sin(bz * 34.0) + 0.022 * np.sin(bz * 91.0 + 0.7)
+        col[is_blade] *= fold[:, None]
+        rough[is_blade] = np.clip(0.17 * (1.0 - yakiba) + 0.40 * yakiba + 0.10 * habuchi, 0.10, 0.55)
+        metal[is_blade] = np.clip(0.96 * (1.0 - yakiba) + 0.80 * yakiba, 0.0, 1.0)
+        extra_h[is_blade] = 0.16 * habuchi + 0.035 * yakiba
 
     # 0. Motifs graphiques procéduraux nets : chevrons diagonaux 45° sur `MAT_HAZARD_STRIPE` !
     if is_hazard.any():

@@ -348,6 +348,8 @@ Objectif : la qualité *visuelle* des assets, mesurée puis corrigée là où el
 | D7 | **néon mat** : intensité HDR perdue (glTF borne `emissiveFactor` à 1, et `hex_rgb` clipait) | `KHR_materials_emissive_strength` exportée ; chromaticité et force séparées |
 | D8 | familles non-métal pouvaient finir métalliques après additifs | **contrainte dure** en sortie de patine (`metal = 0` pour soie/caoutchouc/bois) |
 | D9 | galuchat blanc pur → plastique | ivoire vieilli (0.72 contre 0.86) |
+| D10 | **silhouette invisible** : fond uni à 0.99 pour une lame à 0.886 de luminance — aucun détourage possible | cyclorama studio : nappe de lumière + chute radiale vers 0.57 dans les coins |
+| D11 | **hamon invisible** : la trempe était à l'envers (tranchant `metal 0.95 / rough 0.10` = miroir, corps mat) ; la réflexion saturait ACES à ~0.89 partout | `ji` miroir / `ha` martensitique mat (`rough 0.40`, `metal 0.80`) + laminage ondulé ; écart-type de luminance de la lame **0.040 → 0.060** |
 | G1 | aucune gate ne mesurait le **design** | gate `albedo_design` (saturation ≥ 0.12, contraste ≥ 0.08, blancs ≤ 15 %) + test mutant → **24 gates**, **10 mutants** |
 
 **Reste connu** : la poignée du katana sort encore gris clair au rendu alors que l'ORM y
