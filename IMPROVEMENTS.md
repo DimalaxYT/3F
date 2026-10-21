@@ -294,3 +294,21 @@ promesse « ≤ 28 tris/hull » du code n'était pas tenue (collider à 124 tris
 le fusil). Les tests qui lisaient des artefacts pré-générés des packs lourds
 passent en `pytest.skip` documenté : un clone léger reste vert, la couverture
 de ces chemins est assurée par les evals (reconstruction fraîche) et l'E2E CI.
+
+---
+
+## Vague v5.4 — « améliorer encore » : qualité prouvée + vitesse (2026-10-21)
+
+| # | Amélioration | Statut | Preuve |
+|---|---|---|---|
+| B11 | **bug latent corrigé** : le `compress_level=1` de `meshkit` n'a jamais été appliqué (PIL fige `Image.SAVE` à l'import) | ✅ | `scripts/pngio.py` patche la vraie table de dispatch ; **encodage PNG 5,6 s → 2,7 s** |
+| B12 | colliders convexes : scipy `ConvexHull` brut au lieu de la reconstruction trimesh | ✅ | **4,4 s → 70 ms** (raffinement glouton inchangé, budget 64 tris respecté) |
+| B13 | run turbo complet | ✅ | crate **~16,2 s** (vs ~19 s), katana 11,8 s au bench |
+| A7 | gate `texture_content` : cartes PBR plates / normal map dégénérée | ✅ | calibration mesurée (BC std 48-59, N stdRG 27-40, B≈240) |
+| A8 | gate `emissive` : pièce Neon déclarée ⇒ matériau émissif dans le GLB | ✅ | 21 gates au total |
+| A9 | **tests « mutants »** : on casse un package sain et on vérifie que 7 gates passent au rouge | ✅ | `tests/test_gates_mutants.py` (7 tests, 13 s) — c'est ce qui manquait pour croire aux gates |
+| D16 | `fetch_examples` durci | ✅ | refus des entrées `..`/absolues/liens dans le tarball |
+| — | CI/docs alignés | ✅ | bench régénéré (octets), README v5.4, SKILL 21 gates, version v5.4 |
+
+**Bilan perf mesuré** : `sci_fi_crate` 19,0 s → **16,2 s** (−15 %), `katana` 13,8 s → **11,8 s** (−14 %).
+**Bilan qualité** : 21 gates + 7 tests de mutants + 10 evals + CI visuelle.

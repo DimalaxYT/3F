@@ -29,6 +29,18 @@ def tarball_url(ref: str) -> str:
     return f"https://codeload.github.com/{REPO}/tar.gz/refs/heads/{ref}"
 
 
+def _safe_member(member: tarfile.TarInfo) -> bool:
+    """Refuse les entrées capables d'écrire hors de `examples/` (traversée `..`,
+    chemins absolus, liens symboliques/physiques)."""
+    name = member.name
+    parts = name.split("/")
+    if name.startswith("/") or ".." in parts:
+        return False
+    if member.issym() or member.islnk():
+        return False
+    return True
+
+
 def fetch(ref: str, only: list[str] | None, force: bool) -> int:
     want = set(only) if only else set(HEAVY)
     url = tarball_url(ref)
@@ -38,7 +50,7 @@ def fetch(ref: str, only: list[str] | None, force: bool) -> int:
     extracted = 0
     with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as tf:
         for member in tf.getmembers():
-            if not member.isfile():
+            if not member.isfile() or not _safe_member(member):
                 continue
             parts = member.name.split("/", 1)
             if len(parts) < 2 or not parts[1].startswith("examples/"):

@@ -197,6 +197,49 @@ def _ucx_budget(ue_glb: Path, max_hulls: int = 6, max_tris: int = 64) -> tuple[b
                 f"{max(hulls) if hulls else 0} tris/hull (<= {max_tris})")
 
 
+
+def _texture_content(out_p: Path, name: str) -> tuple[bool, str]:
+    """Détecte les bakes silencieusement ratés : cartes plates (noir/blanc uni) et
+    normal map dégénérée. Mesuré sur des cas sains : BC std ≈ 48-59, ORM 30-84,
+    N std RG ≈ 27-40 avec moyenne B ≈ 240-246."""
+    import numpy as np
+    from PIL import Image
+    details = []
+    for suf in ("BC", "ORM"):
+        fp = out_p / "unreal" / f"T_{name}_{suf}.png"
+        if not fp.is_file():
+            return False, f"T_{name}_{suf}.png absent"
+        a = np.asarray(Image.open(fp).convert("RGB"), dtype=np.float32)
+        std = float(a.reshape(-1, 3).std(axis=0).max())
+        if std < 3.0:
+            return False, f"{suf} plate (std max {std:.1f} < 3) — bake échoué ?"
+        details.append(f"{suf} std {std:.0f}")
+    fn = out_p / "unreal" / f"T_{name}_N.png"
+    if fn.is_file():
+        a = np.asarray(Image.open(fn).convert("RGB"), dtype=np.float32)
+        std_rg = float(a[..., :2].reshape(-1, 2).std(axis=0).min())
+        mean_b = float(a[..., 2].mean())
+        if std_rg < 2.0 or mean_b < 180.0:
+            return False, (f"N dégénérée : std RG {std_rg:.1f} (>= 2), "
+                           f"moyenne B {mean_b:.0f} (>= 180)")
+        details.append(f"N stdRG {std_rg:.0f} / B {mean_b:.0f}")
+    return True, ", ".join(details)
+
+
+def _emissive_ok(glb: Path | None, man: dict) -> tuple[bool, str]:
+    """Une pièce `neon` déclarée doit produire un matériau émissif dans le GLB
+    (sinon le néon sera terne dans Studio malgré le script Luau)."""
+    neon = (man.get("engine_exports", {}).get("roblox", {}) or {}).get("neon_parts") or []
+    if not neon:
+        return True, "aucune pièce Neon déclarée"
+    if not glb or not Path(glb).is_file():
+        return False, "GLB Roblox absent"
+    g = _glb_json(Path(glb)) or {}
+    emis = [m.get("name", "?") for m in g.get("materials", [])
+            if max(m.get("emissiveFactor") or [0.0]) > 0.3]
+    return bool(emis), f"{len(emis)} matériau(x) émissif(s) pour {len(neon)} pièce(s) Neon"
+
+
 def check_package(out_dir: str | Path, target: str = "hero") -> dict:
     """Évalue toutes les gates d'un dossier produit par `turbo_forge.py`/`game_ready.py`."""
     out_p = Path(out_dir)
@@ -298,6 +341,21 @@ def check_package(out_dir: str | Path, target: str = "hero") -> dict:
               round(vol, 6) if vol is not None else None, "> 0")
     elif cfg["require_stl"]:
         g.add("stl_watertight", "STL présent (cible print)", False, stl, "<name>.stl")
+
+    # --- contenu des textures & émission néon (v5.4) -------------------------
+    try:
+        ok, val = _texture_content(out_p, name)
+        g.add("texture_content", "cartes PBR non plates + normal map valide", ok, val,
+              "std >= 3 / N stdRG >= 2, B >= 180")
+    except Exception as exc:
+        g.add("texture_content", "cartes PBR mesurables", False, str(exc), "mesure ok")
+
+    try:
+        ok, val = _emissive_ok(Path(rbx_glb) if rbx_glb else None, man)
+        g.add("emissive", "pièce Neon => matériau émissif dans le GLB", ok, val,
+              ">= 1 matériau émissif")
+    except Exception as exc:
+        g.add("emissive", "émission mesurable", False, str(exc), "mesure ok")
 
     # --- QA visuelle ---------------------------------------------------------
     qa = man.get("qa_sheet")

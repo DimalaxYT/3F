@@ -1098,20 +1098,14 @@ def export_glb_pbr(scene: trimesh.Scene, glb_path: str, webp: bool = False) -> s
     import io
     import json
     import struct
-    from PIL import PngImagePlugin
 
-    # Encodage PNG sans perte ultra-rapide (`compress_level=1` -> 15x plus rapide dans `trimesh.export_glb` !)
-    _orig_png_save = PngImagePlugin._save
+    from pngio import fast_png
 
-    def _fast_png_save(im, fp, filename, chunk=PngImagePlugin.putchunk, save_all=False):
-        im.encoderinfo.setdefault("compress_level", 1)
-        return _orig_png_save(im, fp, filename, chunk=chunk, save_all=save_all)
-
-    PngImagePlugin._save = _fast_png_save
-    try:
+    # PIL fige son handler PNG dans Image.SAVE à l'import : patcher
+    # `PngImagePlugin._save` (ancienne version de ce fichier) ne faisait RIEN —
+    # les textures étaient ré-encodées en niveau 6 à chaque export GLB (~3 s/run).
+    with fast_png():
         scene.export(glb_path, include_normals=True)
-    finally:
-        PngImagePlugin._save = _orig_png_save
     mat_exts = {}
     for geom in scene.geometry.values():
         m = getattr(geom.visual, "material", None)

@@ -755,11 +755,13 @@ def generate_convex_colliders(
                     sel.append(i)
                     dmin = np.minimum(dmin, np.linalg.norm(pts - pts[i], axis=1))
 
+                from scipy.spatial import ConvexHull
+
                 def _worst_excess(idx: list[int]):
-                    h = trimesh.convex.convex_hull(pts[idx])
-                    nr = h.face_normals
-                    dd = (nr * h.triangles_center).sum(axis=1)
-                    ex = (pts @ nr.T - dd).max(axis=1)  # >0 : dehors
+                    # scipy brut : pas de construction de Trimesh ni de fix_normals
+                    # (cf. profil : trimesh.convex_hull = 2× plus lent).
+                    eq = ConvexHull(pts[idx]).equations  # n·x + off <= 0 à l'intérieur
+                    ex = (pts @ eq[:, :3].T + eq[:, 3]).max(axis=1)
                     return float(ex.max()), int(np.argmax(ex))
 
                 viol, p_star = _worst_excess(sel)
