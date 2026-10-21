@@ -4,6 +4,19 @@
 
 ![Vitrine Technique 3d-forge v5.1 — Ultra Design & Texture Engine](docs/img/v5_1_ultra_showcase.png)
 
+## 🤖 Prompt pour Agents IA (`Arena / GLM / Claude / Cursor / Codex`)
+
+Copie-colle simplement ce bloc dans ton Agent IA (bouton **📋** en haut à droite) et remplace la dernière ligne *(voir aussi [`PROMPT_AGENT_IA.md`](PROMPT_AGENT_IA.md) ; [`AGENTS.md`](AGENTS.md) et [`CLAUDE.md`](CLAUDE.md) sont également chargés automatiquement si tu connectes le repo)* :
+
+```markdown
+Utilise le skill 3D de ce dépôt GitHub : https://github.com/DimalaxYT/3F
+1. Clone le dépôt (s'il n'est pas déjà présent) et vérifie les dépendances de `requirements.txt`.
+2. Lis impérativement `SKILL.md` et `AUTOCRITIQUE.md` avant de commencer.
+3. Crée l'objet suivant avec `3d-forge v5.1` (en utilisant `scripts/turbo_forge.py` avec `meshkit.py` + `greebles.py` si c'est mécanique/architectural, ou `gpu_sculpt.py` si c'est une sculpture organique, + `--split-bed` via `scripts/split_stl.py` s'il dépasse 256×256×256 mm) et livre-moi les `.glb` (standard + Roblox Studio + UE5), le `.stl` 100 % étanche, le `preview.html` interactif et le rendu studio :
+
+Objet demandé : [ÉCRIS TON IDÉE ICI — ex: un sabre laser gravé noir et argent de 28 cm prêt pour Roblox Studio et l'impression 3D]
+```
+
 > ### Nouveautés Majeures `3d-forge v5.1 — Ultra Design & Texture Engine`
 > 1. **Bibliothèque Mécanique Hard-Surface 100 % Étanche (`scripts/greebles.py`)** : `hex_bolt` (empreinte 6-pans creuse BTR), `bolt_array`, `toggle_latch` (loquet à étrier acier cintré `tube_sweep`), `louver_vent` (persiennes d'aération inclinées), `picatinny_rail` (rail cranté MIL-STD-1913), `ribbed_conduit`, `ergonomic_handle` et `corner_armor_cap` — zéro simple boîte cubique sur `sci_fi_crate` (`44` pièces mécaniques profilées -> **`3` Draw Calls** temps réel !).
 > 2. **Peinture Texture Multi-Vues GPU Datacenter à Z-Buffer Exact (`gpu_bridge.py` + `--ai-front/--ai-side/--ai-top`)** : génère des guides orthographiques millimétrés (`ortho_meta.json`), peint les pochoirs industriels (`CARGO BAY 04`, `CR-04`), micro-rayures et joints sur le GPU Datacenter, supprime l'éclairage studio (`delight.py`), puis reprojette dans l'UV avec **test d'occultation Z-buffer par caméra** (zéro bavure sur les faces cachées, couvercle articulé `lid` aligné au sous-pixel !).

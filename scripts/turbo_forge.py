@@ -1,28 +1,15 @@
 #!/usr/bin/env python3
 """
-turbo_forge.py — Pipeline Express "One-Shot" (`< 8 s` CPU !) de `3d-forge v5.1`.
+turbo_forge.py — Pipeline Express "Tout-en-Un" (`~12 à 18 s` CPU) de `3d-forge v5.1`.
 
-Conçu pour éliminer radicalement les générations IA de 30+ minutes en exécutant
-**EN UNE SEULE COMMANDE ULTRA-RAPIDE** :
-  1. Construction géométrique CAO exacte :
-     - soit une recette du catalogue (`sci_fi_crate`, `katana`, `car`, `motocross`, ...),
-     - soit un script Python sur mesure définissant `build() -> mk.Builder` (avec `greebles.py` !),
-     - soit une sculpture organique multi-vues GPU (`--front ... --side ... [--back ...]`),
-  2. Export optionnel des guides orthographiques millimétrés (`--emit-guides`) pour peinture GPU,
-  3. Validation d'étanchéité (`is_watertight`) + export `.stl` imprimable si demandé,
-  4. Cuisson PBR `1024²` sémantique (8 archétypes + Z-buffer GPU optionnel) + `LOD0 / LOD1 / LOD2`,
-  5. Pack complet **Roblox Studio** (`Studs` + `PNG` pur + `Neon_*` + `setup_<Name>.lua`)
-     ET **Unreal Engine 5** (`SM_<Name>.glb` + `UCX_*` + `BC / ORM / DirectX -Y`) + `qa_game_sheet.png` !
-
-Exemples :
-  # 1. Recette existante (avec paramètres custom) en ~5 secondes :
-  python3 scripts/turbo_forge.py katana -o out/katana_fast
-
-  # 2. Modèle 3D 100 % inédit écrit en 1 seul fichier `build()` par l'IA en ~6 secondes :
-  python3 scripts/turbo_forge.py custom_plasma_rifle.py -o out/plasma_rifle --emit-guides
-
-  # 3. Sculpture organique depuis 2-3 vues GPU Datacenter + Game-Ready Roblox/UE5 en 1 passe (~18 s) :
-  python3 scripts/turbo_forge.py --front f.png --side s.png --back b.png --name wyvern -o out/wyvern
+Produit en UNE SEULE COMMANDE tous les livrables attendus par l'utilisateur :
+  1. `.glb` temps réel (`<nom>_game.glb` + `LOD1` + `LOD2`)
+  2. Pack **Roblox Studio** (`roblox/<nom>_roblox.glb` PNG pur + `Studs` + `Neon_*` + `setup_<nom>.lua`)
+  3. Pack **Unreal Engine 5** (`unreal/SM_<nom>.glb` + `UCX_*` + `BC / ORM / DirectX -Y`)
+  4. `.stl` **100 % étanche (`is_watertight == True`)** prêt à imprimer en 3D (+ découpe plateau
+     `256×256×256 mm` à tenons/mortaises via `split_stl.py` avec `--split-bed`)
+  5. `preview.html` **interactif 3D hors-ligne** (WebGL PBR + orbite/zoom/filaire)
+  6. `qa_game_sheet.png` (**rendu studio 4-vues** haute définition)
 """
 from __future__ import annotations
 
@@ -30,18 +17,41 @@ import argparse
 import importlib.util
 import inspect
 import json
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+
+
+def _ensure_runtime_deps() -> None:
+    """Auto-installe `requirements.txt` au 1er lancement dans un conteneur vierge (ex: Arena.ai)."""
+    try:
+        import fast_simplification  # noqa: F401
+        import manifold3d  # noqa: F401
+        import numpy  # noqa: F401
+        import trimesh  # noqa: F401
+        import xatlas  # noqa: F401
+    except ImportError:
+        req = HERE.parent / "requirements.txt"
+        if req.is_file():
+            cmd = [sys.executable, "-m", "pip", "install", "--break-system-packages", "-q", "-r", str(req)]
+            if subprocess.call(cmd) != 0:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "-r", str(req)])
+
+
+_ensure_runtime_deps()
 sys.path.insert(0, str(HERE))
 
 import game_ready as gr  # noqa: E402
 import gpu_bridge as gb  # noqa: E402
 import gpu_sculpt as gs  # noqa: E402
 import meshkit as mk  # noqa: E402
+import preview as pv  # noqa: E402
 import recipes  # noqa: E402
+import split_stl  # noqa: E402
 
 
 def _load_custom_python_builder(py_path: Path, params: dict) -> mk.Builder:
@@ -94,7 +104,9 @@ def run_turbo(
     back_view: str | None = None,
     ai_views: dict[str, str] | None = None,
     emit_guides: bool = False,
-    export_stl: bool = False,
+    export_stl: bool = True,
+    split_bed: bool = False,
+    export_preview: bool = True,
     lod0_tris: int = 3800,
     tex_size: int = 1024,
     sculpt_res: int = 152,
@@ -108,6 +120,8 @@ def run_turbo(
 
     sculpt_info = None
     guides_info = None
+    stl_out = None
+    stl_watertight = None
 
     if front_view and side_view:
         asset_name = name or (Path(target).stem if target else "sculpt_asset")
@@ -117,15 +131,17 @@ def run_turbo(
             front_view, side_view, back_view,
             grid_res=int(sculpt_res),
         )
-        stl_p = sculpt_dir / f"{asset_name}.stl"
-        mesh_hi.export(stl_p)
+        stl_main = out_p / f"{asset_name}.stl"
+        mesh_hi.export(stl_main)
+        stl_out = str(stl_main)
+        stl_watertight = bool(mesh_hi.is_watertight)
         mesh_pbr, _, _, _ = gs.bake_sculpt_pbr(mesh_hi, vpack, resolution=int(tex_size))
         glb_src = sculpt_dir / f"{asset_name}.glb"
         glb_src.write_bytes(mesh_pbr.export(file_type="glb"))
         sculpt_info = {
             "source_glb": str(glb_src),
-            "source_stl": str(stl_p),
-            "watertight": bool(mesh_hi.is_watertight),
+            "printable_stl": stl_out,
+            "watertight": stl_watertight,
             "high_tris": int(len(mesh_hi.faces)),
         }
         src_obj = glb_src
@@ -150,10 +166,12 @@ def run_turbo(
     if emit_guides and isinstance(src_obj, mk.Builder):
         guides_info = gb.render_orthographic_paint_guides(src_obj, str(out_p / "ortho_guides"), size=768)
 
-    stl_out = None
-    if export_stl and isinstance(src_obj, mk.Builder):
-        stl_out = str(out_p / f"{asset_name}.stl")
-        src_obj.export_stl(stl_out)
+    if export_stl and stl_out is None and isinstance(src_obj, mk.Builder):
+        solid = src_obj.union_solid()
+        stl_main = out_p / f"{asset_name}.stl"
+        solid.export(stl_main)
+        stl_out = str(stl_main)
+        stl_watertight = bool(solid.is_watertight)
 
     manifest = gr.export_game_package(
         src_obj,
@@ -164,13 +182,26 @@ def run_turbo(
         tex_size=int(tex_size),
         ai_views=ai_views,
     )
-    manifest["turbo_total_s"] = round(time.perf_counter() - t0, 2)
+
+    if stl_out is not None:
+        manifest["printable_stl"] = stl_out
+        manifest["stl_watertight"] = stl_watertight
+        if split_bed:
+            manifest["split_stl_kit"] = split_stl.export_split_kit(stl_out, str(out_p / "print_parts"))
+
+    if export_preview:
+        rbx_glb = manifest.get("engine_exports", {}).get("roblox", {}).get("studio_ready_glb_png")
+        preview_glb = rbx_glb if (rbx_glb and Path(rbx_glb).is_file()) else manifest["lods"]["LOD0"]["path"]
+        prev_html = pv.build_preview(str(out_p), title=asset_name, glb=preview_glb)
+        if prev_html:
+            manifest["preview_html"] = prev_html
+
     if guides_info is not None:
         manifest["ortho_guides"] = guides_info
     if sculpt_info is not None:
         manifest["sculpt_source"] = sculpt_info
-    if stl_out is not None:
-        manifest["printable_stl"] = stl_out
+
+    manifest["turbo_total_s"] = round(time.perf_counter() - t0, 2)
     (out_p / "game_manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     return manifest
 
@@ -189,7 +220,10 @@ def main(argv=None) -> int:
     ap.add_argument("--ai-side", default=None, help="Peinture orthographique GPU profil")
     ap.add_argument("--ai-top", default=None, help="Peinture orthographique GPU dessus")
     ap.add_argument("--emit-guides", action="store_true", help="Génère aussi `ortho_guides/` en < 0.4s")
-    ap.add_argument("--stl", action="store_true", help="Exporte aussi le `.stl` étanche d'impression 3D")
+    ap.add_argument("--no-stl", action="store_true", help="Désactive l'export automatique du `.stl` étanche")
+    ap.add_argument("--split-bed", action="store_true",
+                    help="Découpe automatiquement le `.stl` en pièces <= 256×256×256 mm à tenons/mortaises")
+    ap.add_argument("--no-preview", action="store_true", help="Désactive la génération de `preview.html`")
     ap.add_argument("--engine", default="roblox_unreal",
                     choices=["roblox_unreal", "roblox", "unreal", "unity", "godot", "gltf", "all"])
     ap.add_argument("--lod0-tris", type=int, default=3800)
@@ -208,7 +242,9 @@ def main(argv=None) -> int:
         back_view=args.back,
         ai_views=ai_v,
         emit_guides=args.emit_guides,
-        export_stl=args.stl,
+        export_stl=not args.no_stl,
+        split_bed=args.split_bed,
+        export_preview=not args.no_preview,
         lod0_tris=args.lod0_tris,
         tex_size=args.tex_size,
         sculpt_res=args.sculpt_res,
