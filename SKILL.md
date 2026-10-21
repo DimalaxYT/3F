@@ -1,8 +1,11 @@
 ---
 name: 3d-forge
 description: >-
-  Roblox Studio (Primary) + Unreal Engine 5 (Secondary) Realistic 3D Asset Engine
-  + Hybrid Exact CAD + Organic GPU Sculpture toolkit (v5.2): generates plug-and-play
+  Use when the user asks for a 3D model, game asset, prop, weapon, vehicle,
+  creature bust, printable STL, or an export for Roblox Studio / Unreal Engine 5
+  (or Unity/Godot/AR). Roblox Studio (Primary) + Unreal Engine 5 (Secondary)
+  Realistic 3D Asset Engine + Hybrid Exact CAD + Organic GPU Sculpture toolkit
+  (v5.3): generates plug-and-play
   realistic 3D assets engineered for **Roblox Studio** (`PNG`-embedded `.glb`, exact
   `Studs` scaling `1 Stud = 0.28 m`, budget `< 9 800 tris`/`MeshPart` (plafond moteur
   20 000), `SurfaceAppearance` `1024²` avec AO baked, `Neon_*` auto-split,
@@ -62,6 +65,11 @@ python3 scripts/turbo_forge.py --front f.png --side s.png --name creature -o out
 
 # options utiles : --target hero|ugc|print (gates) | --split-bed (plateau 256 mm)
 #                  --json (manifest complet) | --no-gates | --engine roblox_unreal|...
+#                  --dry-run (plan sans exécuter) | --resume (réutilise si hash identique)
+#                  --gif (turntable GIF 10 vues)
+
+# live preview navigateur (sandbox Arena / serveur local) :
+python3 scripts/serve_preview.py out/<nom> --port 8000   # http://0.0.0.0:8000/preview.html
 ```
 
 Chaque run écrit dans `out/<nom>/` : `<nom>_game.glb` + LOD1/LOD2, `roblox/`
@@ -162,6 +170,12 @@ sans diagnostic = refusé ; IoU de formatage < 0.5 interdit une note ≥ seuil.
 3. `report.json`/manifest : `watertight: true` ; tris dans le budget de la cible.
 4. Boucle notée close (`critique.py status` : DELIVER ou FORCE_DELIVER documenté).
 5. Profils `standard`/`showcase` seulement : chaque détail Stage 0 visible sur une photo.
+
+Non-régression (CI + local) : `python3 scripts/visual_regression.py` compare
+l'IoU de silhouette des recettes au baseline commité
+(`docs/visreg_baseline.json`) — une proportion cassée qui passe tous les tests
+unitaires échoue ici. Exemples lourds hors arbre :
+`python3 scripts/fetch_examples.py`.
 
 ## 9. Neural fallback (optionnel, off par défaut)
 

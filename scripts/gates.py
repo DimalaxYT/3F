@@ -77,7 +77,6 @@ class GateList:
             "id": gid, "label": label, "pass": bool(ok),
             "value": value, "expected": expected,
         })
-
     @property
     def all_pass(self) -> bool:
         return all(g["pass"] for g in self.gates)
@@ -91,6 +90,111 @@ class GateList:
             "n_total": len(self.gates),
             "gates": self.gates,
         }
+
+
+def luau_issues(lua: str, man: dict) -> list[str]:
+    """Invariants structurels de `setup_<Name>.lua` (pas de compilateur Luau en
+    sandbox : on vérifie ce qui peut casser silencieusement dans la Command Bar)."""
+    import re as _re
+    issues = []
+    # En Lua, `for … do` / `while … do` ne ferment qu'UN seul `end` : le `do`
+    # porté par la ligne for/while ne compte pas comme bloc supplémentaire.
+    code_lines = [l for l in lua.splitlines() if not l.strip().startswith("--")]
+    bare_do = 0
+    for l in code_lines:
+        n_fw = len(_re.findall(r"\b(for|while)\b", l))
+        n_do = len(_re.findall(r"\bdo\b", l))
+        bare_do += max(0, n_do - n_fw)
+    code = "\n".join(code_lines)
+    opens = len(_re.findall(r"\b(if|function|for|while)\b", code)) + bare_do
+    ends = len(_re.findall(r"\bend\b", code))
+    if opens != ends:
+        issues.append(f"blocs ouverts ({opens}) != end ({ends})")
+    rbx = man.get("engine_exports", {}).get("roblox", {}) or {}
+    for n in rbx.get("neon_parts", []):
+        if f"'{n}'" not in lua and f'"{n}"' not in lua:
+            issues.append(f"pièce Neon {n} absente de NEON_COLORS")
+    if rbx.get("neon_parts") and "Enum.Material.Neon" not in lua:
+        issues.append("Enum.Material.Neon absent")
+    for s in (man.get("sockets") or {}):
+        key = s.replace("SOCKET_", "") + "Attachment"
+        if key not in lua:
+            issues.append(f"socket {s} absent de SOCKETS_WORLD_OFFSET")
+    return issues
+
+
+def _normals_cross_ok(rbx_n: Path, ue_n: Path) -> tuple[bool, str]:
+    """Cohérence DirectX `-Y` : `G_unreal == 255 - G_roblox` (map Roblox = OpenGL `+Y`)."""
+    try:
+        import numpy as np
+        from PIL import Image
+        a = np.asarray(Image.open(rbx_n).convert("RGB"), dtype=np.int16)
+        im_b = Image.open(ue_n).convert("RGB")
+        if im_b.size != (a.shape[1], a.shape[0]):
+            im_b = im_b.resize((a.shape[1], a.shape[0]))
+        b = np.asarray(im_b, dtype=np.int16)
+        bad = int((np.abs(a[..., 1] + b[..., 1] - 255) > 1).sum())
+        return bad == 0, f"{bad} pixel(s) G incohérent(s)"
+    except Exception as exc:
+        return False, f"erreur : {exc}"
+
+
+def _lod_silhouette(man: dict, tol_mean_pct: float = 1.0, tol_p95_pct: float = 3.0) -> tuple[bool, str]:
+    """Écart géométrique LOD0↔LOD2 (proximity trimesh) : une décimation ne doit
+    pas détruire la silhouette — mesurable sans lire une seule image.
+    Seuils calibrés sur sci_fi_crate sain : moy 0.27 %, p95 1.6 %."""
+    import numpy as np
+    import trimesh
+    g0 = max(trimesh.load(man["lods"]["LOD0"]["path"]).geometry.values(), key=lambda g: len(g.faces))
+    g2 = max(trimesh.load(man["lods"]["LOD2"]["path"]).geometry.values(), key=lambda g: len(g.faces))
+    dists, _faces = trimesh.proximity.ProximityQuery(g0).vertex(np.asarray(g2.vertices))
+    d = np.abs(np.asarray(dists, dtype=np.float64))
+    diag = float(np.linalg.norm(g0.extents)) + 1e-9
+    p95 = 100.0 * float(np.percentile(d, 95)) / diag
+    mean = 100.0 * float(np.mean(d)) / diag
+    ok = mean <= tol_mean_pct and p95 <= tol_p95_pct
+    return ok, (f"moy {mean:.2f} % (<= {tol_mean_pct} %) / p95 {p95:.2f} % "
+                f"(<= {tol_p95_pct} %) de la diagonale")
+
+
+def _uv_fill(man: dict) -> tuple[bool, str]:
+    """Couverture d'atlas UV du LOD0 (densité texel) + bornes [0, 1]."""
+    import numpy as np
+    import trimesh
+    from PIL import Image, ImageDraw
+    g0 = max(trimesh.load(man["lods"]["LOD0"]["path"]).geometry.values(), key=lambda g: len(g.faces))
+    uv = np.asarray(g0.visual.uv, dtype=np.float64)
+    if uv.size == 0:
+        return False, "pas d'UV"
+    oob = float(np.mean((uv < -0.001) | (uv > 1.001)))
+    S = 256
+    im = Image.new("L", (S, S), 0)
+    dr = ImageDraw.Draw(im)
+    pts = np.clip(uv, 0.0, 1.0) * (S - 1)
+    for tri in np.asarray(g0.faces):
+        dr.polygon([tuple(pts[tri[0]]), tuple(pts[tri[1]]), tuple(pts[tri[2]])], fill=255)
+    cov = float(np.mean(np.asarray(im) > 0))
+    return (cov >= 0.5 and oob <= 0.001), f"couverture atlas {cov:.2f} (>= 0.5), hors [0,1] {oob:.4f}"
+
+
+def _ucx_budget(ue_glb: Path, max_hulls: int = 6, max_tris: int = 64) -> tuple[bool, str]:
+    g = _glb_json(ue_glb) or {}
+    meshes = g.get("meshes", [])
+    accs = g.get("accessors", [])
+    hulls = []
+    for n in g.get("nodes", []):
+        if n.get("name", "").startswith("UCX_"):
+            tris = 0
+            mi = n.get("mesh")
+            if mi is not None and mi < len(meshes):
+                for pr in meshes[mi].get("primitives", []):
+                    ai = pr.get("indices")
+                    if ai is not None and ai < len(accs):
+                        tris += accs[ai].get("count", 0) // 3
+            hulls.append(tris)
+    ok = 0 < len(hulls) <= max_hulls and all(t <= max_tris for t in hulls)
+    return ok, (f"{len(hulls)} hulls (<= {max_hulls}), max "
+                f"{max(hulls) if hulls else 0} tris/hull (<= {max_tris})")
 
 
 def check_package(out_dir: str | Path, target: str = "hero") -> dict:
@@ -198,6 +302,50 @@ def check_package(out_dir: str | Path, target: str = "hero") -> dict:
     # --- QA visuelle ---------------------------------------------------------
     qa = man.get("qa_sheet")
     g.add("qa_sheet", "qa_game_sheet.png présent", bool(qa) and Path(qa).is_file(), qa, "png")
+
+    # --- gates de comportement (v5.3) ----------------------------------------
+    # animations : des joints déclarés doivent exporter gltf.animations
+    if man.get("joints"):
+        gj = _glb_json(Path(lods["LOD0"]["path"])) if lods.get("LOD0") else None
+        names = [a.get("name") for a in (gj or {}).get("animations", [])]
+        g.add("animations", "gltf.animations (Idle_Action) présent si joints déclarés",
+              "Idle_Action" in names, names, "contient Idle_Action")
+
+    # normales : cohérence pixel DirectX -Y (Unreal) vs OpenGL +Y (Roblox)
+    rbx_n = out_p / "roblox" / f"T_{name}_NormalMap.png"
+    ue_n = ue.get("normal_directx_neg_y") or ue.get("normal_dx") if ue else None
+    if rbx_n.is_file() and ue_n and Path(ue_n).is_file():
+        ok, val = _normals_cross_ok(rbx_n, Path(ue_n))
+        g.add("normal_dx_vs_gl", "G_Unreal == 255 - G_Roblox (DirectX -Y exact)", ok, val, "0 pixel")
+
+    # silhouette LOD2 vs LOD0
+    if lods.get("LOD0") and lods.get("LOD2"):
+        try:
+            ok, val = _lod_silhouette(man)
+            g.add("lod_silhouette", "écart LOD0↔LOD2 : moy <= 1 % / p95 <= 3 % diagonale",
+                  ok, val, "moy <= 1 % / p95 <= 3 %")
+        except Exception as exc:
+            g.add("lod_silhouette", "écart LOD0↔LOD2 mesurable", False, str(exc), "mesure ok")
+
+    # densité texel / bornes UV
+    if lods.get("LOD0"):
+        try:
+            ok, val = _uv_fill(man)
+            g.add("uv_fill", "couverture d'atlas UV >= 0.5 et UV dans [0, 1]", ok, val, ">= 0.5")
+        except Exception as exc:
+            g.add("uv_fill", "UV mesurables", False, str(exc), "mesure ok")
+
+    # structure du script Luau
+    lua_p = rbx.get("luau_setup_script")
+    if lua_p and Path(lua_p).is_file():
+        issues = luau_issues(Path(lua_p).read_text(encoding="utf-8"), man)
+        g.add("luau_structure", "setup_<Name>.lua : blocs balancés + Neon + sockets",
+              not issues, issues or "ok", "0 issue")
+
+    # budget colliders convexes
+    if ue_glb and Path(ue_glb).is_file():
+        ok, val = _ucx_budget(Path(ue_glb))
+        g.add("ucx_budget", "UCX : <= 6 hulls et <= 64 tris/hull", ok, val, "<= 6 hulls / 64 tris")
 
     return g.to_dict(target, out_p)
 

@@ -701,7 +701,7 @@ def transfer_uv_to_lod(lod0_uv_mesh: trimesh.Trimesh, decimated_mesh: trimesh.Tr
 def generate_convex_colliders(
     source_meshes: list[trimesh.Trimesh],
     max_hulls: int = 6,
-    max_tris_per_hull: int = 28,
+    max_tris_per_hull: int = 64,
 ) -> list[trimesh.Trimesh]:
     """Décompose un objet en `<= max_hulls` coques convexes propres (`<= max_tris_per_hull` tris)
     préservant les ouvertures (sous une table, embrasure de porte, passages de roues, garde d'épée)."""
@@ -735,7 +735,51 @@ def generate_convex_colliders(
             continue
         hull = trimesh.convex.convex_hull(pts)
         if len(hull.faces) > max_tris_per_hull:
-            hull = trimesh.convex.convex_hull(decimate_mesh_clean(hull, max_tris_per_hull).vertices)
+            # v5.3 — garantie dure du budget + englobement au millimètre.
+            # `fast_simplification` ne converge pas sur une coque convexe (résidu
+            # mesuré : 108 faces pour une cible de 28), et gonfler les plans d'un
+            # polytope explose la triangulation (facettes polygonales). La seule
+            # garantie simple est SIMPLICIALE : un hull de V points génériques a
+            # au plus 2V-4 triangles, donc V = (max_tris+4)//2 points suffisent.
+            #  1) farthest-point sampling sélectionne V sommets extrêmes sources ;
+            #  2) raffinement glouton : tant qu'un point source viole le hull, on
+            #     remplace le point sélectionné dont l'échange réduit le plus la
+            #     violation maximale. Budget invariant (toujours V points),
+            #     englobement convergé (<= 1 mm) en quelques itérations.
+            max_v = max(4, (max_tris_per_hull + 4) // 2)
+            if len(pts) > max_v:
+                sel = [0]
+                dmin = np.linalg.norm(pts - pts[0], axis=1)
+                while len(sel) < max_v:
+                    i = int(np.argmax(dmin))
+                    sel.append(i)
+                    dmin = np.minimum(dmin, np.linalg.norm(pts - pts[i], axis=1))
+
+                def _worst_excess(idx: list[int]):
+                    h = trimesh.convex.convex_hull(pts[idx])
+                    nr = h.face_normals
+                    dd = (nr * h.triangles_center).sum(axis=1)
+                    ex = (pts @ nr.T - dd).max(axis=1)  # >0 : dehors
+                    return float(ex.max()), int(np.argmax(ex))
+
+                viol, p_star = _worst_excess(sel)
+                for _ in range(12):
+                    if viol <= 1e-3:
+                        break
+                    best = None
+                    for r in range(len(sel)):
+                        if sel[r] == p_star:
+                            continue
+                        trial = list(sel)
+                        trial[r] = p_star
+                        v, _ = _worst_excess(trial)
+                        if best is None or v < best[1]:
+                            best = (trial, v)
+                    if best is None or best[1] >= viol:
+                        break  # aucun progrès possible
+                    sel, viol = best[0], best[1]
+                    _, p_star = _worst_excess(sel)
+                hull = trimesh.convex.convex_hull(pts[sel])
         hulls.append(hull)
     return hulls
 
@@ -1206,7 +1250,7 @@ def export_game_package(
         np.min([m.bounds[0] for m in collider_inputs], axis=0),
         np.max([m.bounds[1] for m in collider_inputs], axis=0),
     ])
-    colliders = generate_convex_colliders(collider_inputs, max_hulls=6, max_tris_per_hull=28)
+    colliders = generate_convex_colliders(collider_inputs, max_hulls=6, max_tris_per_hull=64)
     sockets = infer_gameplay_sockets(clean_name, all_bounds, joints=joints, declared=declared_sockets)
 
     sc_lod0 = _assemble_lod_scene(lod0_mesh)
@@ -1532,6 +1576,7 @@ def export_game_package(
             "total_tris": int(sum(len(h.faces) for h in colliders)),
             "path": str(col_glb),
         },
+        "joints": joints,
         "sockets": sockets,
         "has_explicit_mikk_tangents": True,
         "webp_compressed": bool(webp),

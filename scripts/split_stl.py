@@ -15,7 +15,8 @@ Pourquoi ce script est crucial :
        respect strict du volume plateau, puis rend une vue éclatée `exploded_preview.png`.
 
 CLI :
-    python scripts/split_stl.py examples/katana/katana.stl -o out/katana_print --bed 0.256 0.256 0.256
+    python scripts/split_stl.py out/katana/katana.stl -o out/katana_print --bed 0.256 0.256 0.256
+    # (pack katana complet : python scripts/fetch_examples.py --only katana)
 """
 from __future__ import annotations
 

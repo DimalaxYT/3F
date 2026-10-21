@@ -64,21 +64,19 @@ Objet demandé : [ÉCRIS TON IDÉE ICI — ex: un sabre laser gravé noir et arg
 ```bash
 # 1. Pipeline Express TOUT-EN-UN (`scripts/turbo_forge.py`) — 1 seule commande = Géométrie + LOD0/1/2 + Roblox + UE5 + QA !
 #    • Katana Dual-1024² (Blade + Hilt) : 67.91 s -> 12.66 s (x5,4 plus rapide !)
-python3 scripts/turbo_forge.py katana --lod0-tris 8200 -o examples/katana/game_ready
+python3 scripts/turbo_forge.py katana --lod0-tris 8200 -o out/katana
 
 #    • Caisse blindée Sci-Fi articulée + Peinture Z-Buffer GPU : 60.54 s -> 20.46 s (x3,0 plus rapide !)
-python3 scripts/turbo_forge.py sci_fi_crate --lod0-tris 3800 \
-  --ai-front examples/sci_fi_crate/ortho_guides/ai_paint_front.png \
-  --ai-side  examples/sci_fi_crate/ortho_guides/ai_paint_side.png \
-  --ai-top   examples/sci_fi_crate/ortho_guides/ai_paint_top.png \
-  -o examples/sci_fi_crate/game_ready
+python3 scripts/turbo_forge.py sci_fi_crate --lod0-tris 3800 --emit-guides -o out/sci_fi_crate
+# puis peinture GPU des guides : generate_image(..., images=[out/sci_fi_crate/ortho_guides/...])
+# et re-run avec --ai-front/--ai-side/--ai-top pointant sur tes peintures
 
 #    • Buste de Dragon 3-Vues GPU -> Sculpture 123k tris + STL étanche + Pack Roblox & UE5 : 102.11 s -> 18.85 s (x5,4 plus rapide !)
 python3 scripts/turbo_forge.py \
   --front assets/ai_multiview/dragon_front.png \
   --side  assets/ai_multiview/dragon_side.png \
   --back  assets/ai_multiview/dragon_back.png \
-  --name dragon_buste --lod0-tris 4800 -o examples/dragon_buste/game_ready
+  --name dragon_buste --lod0-tris 4800 -o out/dragon_buste
 
 # 2. Objet 3D 100 % inédit écrit par l'IA (`def build() -> mk.Builder`) en 1 seule passe (< 15 s CPU) :
 python3 scripts/turbo_forge.py mon_arme_custom.py --lod0-tris 4200 -o out/mon_arme
@@ -412,7 +410,7 @@ b.export_glb("table_basse.glb")
 │   └── recipes/              ← catalogue 18 recettes (registry + furniture/containers/props)
 ├── specs/epee_rouillee.json  ← exemple de référence du workflow C
 ├── references/               ← cookbook.md (méthode sur mesure) + materials.md
-├── examples/                 ← modèles générés prêts à télécharger (épée, motocross…)
+├── examples/                 ← exemples légers (CI visuelle) ; packs complets via fetch_examples.py
 ├── tests/                    ← pytest : smoke 18/18, meshgen, img2mesh, motocross
 ├── evals/evals.json          ← prompts d'évaluation du skill
 ├── docs/img/                 ← galerie générée par le pipeline lui-même
@@ -425,13 +423,15 @@ Galerie générée par le pipeline (rendus `three_quarter`, qualité 0.75) :
 
 ![galerie](docs/img/gallery.png)
 
-Des modèles finis, prêts à télécharger, vivent dans [`examples/`](examples/) :
+Des modèles finis vivent dans [`examples/`](examples/) : 3 exemples légers en
+arbre (références de la CI visuelle), packs complets (~174 Mo : katana, épée,
+moto, caisse, dragon) restaurables via `python3 scripts/fetch_examples.py` :
 
 | Exemple | Workflow | Points forts |
 |---|---|---|
-| [`examples/katana/`](examples/katana/) | D — multi-parties | 5 parties vectorielles générées **en parallèle** (`kashira`, `tsuka` losanges *tsuka-maki*, `tsuba` *sukashi* ajourée, `habaki` laiton, `blade` courbée *sori* + *hamon*), **STL union 100 % étanche**, `preview.html` WebGL hors-ligne |
-| [`examples/epee_rouillee/`](examples/epee_rouillee/) | C — multi-vues v2 | GLB **texturé PBR** (rouille multi-octaves piquée, normal map tangente, cuir spiralé, pommeau or), **IoU moyen = 0.9152** (`profil = 0.8725`), 6 faces + turntable + `preview.html` hors-ligne |
-| [`examples/motocross/`](examples/motocross/) | A/B — CAD + photo | 154 pièces, moteur & cadre twin-spar en relief 3D, union étanche en **0.19 s**, overlay silhouette sans ombre au sol (`IoU = 0.7468`, bas `0.7936`) |
+| `examples/katana/` *(fetch)* | D — multi-parties | 5 parties vectorielles générées **en parallèle** (`kashira`, `tsuka` losanges *tsuka-maki*, `tsuba` *sukashi* ajourée, `habaki` laiton, `blade` courbée *sori* + *hamon*), **STL union 100 % étanche**, `preview.html` WebGL hors-ligne |
+| `examples/epee_rouillee/` *(fetch)* | C — multi-vues v2 | GLB **texturé PBR** (rouille multi-octaves piquée, normal map tangente, cuir spiralé, pommeau or), **IoU moyen = 0.9152** (`profil = 0.8725`), 6 faces + turntable + `preview.html` hors-ligne |
+| `examples/motocross/` *(fetch)* | A/B — CAD + photo | 154 pièces, moteur & cadre twin-spar en relief 3D, union étanche en **0.19 s**, overlay silhouette sans ombre au sol (`IoU = 0.7468`, bas `0.7936`) |
 | [`examples/chaise_scandinave/`](examples/chaise_scandinave/) · [`vase/`](examples/vase/) · [`rocket/`](examples/rocket/) | A — recettes | paramétrique, STL prêts impression |
 
 Sorties d'une génération complète d'épée (workflow C + Stage 0 + boucle 9.5) :

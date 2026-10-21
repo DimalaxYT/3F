@@ -38,7 +38,8 @@ The primary production target of this skill is **Roblox Studio** (realistic `Fut
 python3 scripts/generate.py sci_fi_crate -f glb stl -q high --game-ready --engine all --lod0-tris 2800 -o out
 
 # Convert ANY high-poly .glb sculpture (from gpu_sculpt.py) or recipe into an optimized game pack:
-python3 scripts/game_ready.py examples/dragon_buste/dragon_buste.glb --engine unreal --lod0-tris 4200 -o out/dragon_ue5
+python3 scripts/game_ready.py out/dragon_buste/sculpt_source/dragon_buste.glb --engine unreal --lod0-tris 4200 -o out/dragon_ue5
+# (pack vitrine commité historiquement : python scripts/fetch_examples.py --only dragon_buste)
 
 # Standalone Albedo De-Lighting for AI multi-view / tile textures:
 python3 scripts/delight.py raw_ai_albedo.png -o clean_albedo.png --strength 0.85

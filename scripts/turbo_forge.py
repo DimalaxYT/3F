@@ -113,6 +113,7 @@ def run_turbo(
     engine: str = "roblox_unreal",
     gate_target: str = "hero",
     run_gates: bool = True,
+    make_gif: bool = False,
 ) -> dict:
     t0 = time.perf_counter()
     out_p = Path(out_dir)
@@ -208,6 +209,17 @@ def run_turbo(
             manifest["preview_html"] = prev_html
             manifest["preview_glb_source"] = Path(preview_glb).name
 
+    if make_gif:
+        try:
+            import trimesh
+            import renderer as rn
+            sc = trimesh.load(manifest["lods"]["LOD0"]["path"])
+            frames = rn.render_turntable(sc, str(out_p), asset_name, n=10, size=320)
+            manifest["turntable_gif"] = rn.make_gif(
+                frames, str(out_p / f"{asset_name}_turntable.gif"))
+        except Exception as exc:
+            manifest["turntable_gif_error"] = str(exc)
+
     if guides_info is not None:
         manifest["ortho_guides"] = guides_info
     if sculpt_info is not None:
@@ -259,6 +271,53 @@ def run_turbo(
     return manifest
 
 
+CACHE_NAME = "_forge_cache.json"
+CACHE_VERSION = "v5.3-1"
+
+
+def _cache_key(args) -> str:
+    """Hash des ENTRÉES du run (source géométrique + vues + paramètres) :
+    identique => livrables reproductibles à l'identique, donc réutilisables."""
+    import hashlib
+    h = hashlib.sha256()
+    h.update(CACHE_VERSION.encode())
+    volatile = {"dry_run", "resume", "json"}
+    for k, v in sorted(vars(args).items()):
+        if k in volatile:
+            continue
+        h.update(f"{k}={v}".encode())
+    for blob in (args.target, args.front, args.side, args.back):
+        if blob and Path(blob).is_file():
+            h.update(Path(blob).read_bytes())
+    return h.hexdigest()[:16]
+
+
+def _plan(args, key: str, out_p: Path) -> None:
+    tgt = args.target
+    if args.front and args.side:
+        kind = "sculpture organique multi-vues (gpu_sculpt)"
+    elif tgt and Path(tgt).suffix.lower() == ".py":
+        kind = "builder Python custom (`def build() -> mk.Builder`)"
+    elif tgt and tgt in recipes.REGISTRY:
+        kind = f"recette catalogue `{tgt}`"
+    elif tgt and Path(tgt).exists():
+        kind = "fichier .glb existant (conversion game-ready)"
+    else:
+        kind = f"CIBLE INCONNUE : {tgt!r}"
+    prev = out_p / CACHE_NAME
+    state = "identique au run précédent" if (
+        prev.is_file() and json.loads(prev.read_text()).get("hash") == key
+    ) else ("différent du run précédent" if prev.is_file() else "premier run")
+    print(f"[plan] cible      : {kind}")
+    print(f"[plan] sortie     : {out_p}")
+    print(f"[plan] livrables  : <name>_game.glb + LOD1/2 | roblox/ (glb PNG + 4 maps + "
+          f"setup lua) | unreal/ (SM_ + UCX_ + BC/ORM/N) | .stl étanche | "
+          f"preview.html | qa_game_sheet.png (10 panneaux) | gates.json | "
+          f"qa_summary.md | report.json" + (" | turntable.gif" if args.gif else ""))
+    print(f"[plan] gates      : --target {args.gate_target} (19 gates, exit code)")
+    print(f"[plan] cache      : {key} ({state})")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("target", nargs="?", default=None,
@@ -285,12 +344,47 @@ def main(argv=None) -> int:
     ap.add_argument("--no-gates", action="store_true", help="Saute l'évaluation gates.py (gates.json/qa_summary.md)")
     ap.add_argument("--json", action="store_true",
                     help="Imprime le manifest JSON complet (défaut : résumé 8 lignes économe en tokens)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="Imprime le plan (cible, livrables, gates, cache) sans rien exécuter")
+    ap.add_argument("--resume", action="store_true",
+                    help="Si le hash des entrées est identique au run précédent du dossier, "
+                         "réutilise les livrables (gates re-vérifiées) au lieu de tout reconstruire")
+    ap.add_argument("--gif", action="store_true",
+                    help="Ajoute un turntable GIF 10 vues (320 px) au dossier de sortie")
     ap.add_argument("--engine", default="roblox_unreal",
                     choices=["roblox_unreal", "roblox", "unreal", "unity", "godot", "gltf", "all"])
     ap.add_argument("--lod0-tris", type=int, default=3800)
     ap.add_argument("--tex-size", type=int, default=1024)
     ap.add_argument("--sculpt-res", type=int, default=152)
     args = ap.parse_args(argv)
+    out_p = Path(args.out)
+    key = _cache_key(args)
+
+    if args.dry_run:
+        _plan(args, key, out_p)
+        return 0
+
+    cache_p = out_p / CACHE_NAME
+    cached = (args.resume and cache_p.is_file()
+              and json.loads(cache_p.read_text(encoding="utf-8")).get("hash") == key)
+    manifest_p = out_p / "game_manifest.json"
+    if cached and manifest_p.is_file() and (out_p / "qa_game_sheet.png").is_file():
+        res = json.loads(manifest_p.read_text(encoding="utf-8"))
+        if not args.no_gates:
+            try:
+                import gates as gt
+                gates_res = gt.check_package(out_p, args.gate_target)
+                gt.write_outputs(out_p, gates_res)
+                res["gates"] = {"target": args.gate_target, "all_pass": gates_res["all_pass"],
+                                "n_pass": gates_res["n_pass"], "n_total": gates_res["n_total"]}
+            except Exception as exc:
+                res["gates"] = {"target": args.gate_target, "error": str(exc)}
+        print(f"[resume] hash {key} identique : livrables réutilisés, gates re-vérifiées.")
+        if args.json:
+            print(json.dumps(res, indent=2, ensure_ascii=False))
+        else:
+            _print_summary(res)
+        return 0 if res.get("gates", {}).get("all_pass", True) else 1
 
     ai_v = {k: v for k, v in (("front", args.ai_front), ("side", args.ai_side), ("top", args.ai_top)) if v} or None
     res = run_turbo(
@@ -312,7 +406,11 @@ def main(argv=None) -> int:
         engine=args.engine,
         gate_target=args.gate_target,
         run_gates=not args.no_gates,
+        make_gif=args.gif,
     )
+    out_p.mkdir(parents=True, exist_ok=True)
+    cache_p.write_text(json.dumps({"hash": key, "version": CACHE_VERSION}, indent=2),
+                       encoding="utf-8")
     if args.json:
         print(json.dumps(res, indent=2, ensure_ascii=False))
     else:

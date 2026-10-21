@@ -907,6 +907,16 @@ def _font(px=16):
         return ImageFont.load_default()
 
 
+def make_gif(paths, out_path, fps=8) -> str:
+    """Assemble une liste de PNG en GIF animé (turntable livrable en chat/README)."""
+    ims = [Image.open(p).convert("RGB") for p in paths]
+    if not ims:
+        raise ValueError("aucune image pour le GIF")
+    ims[0].save(out_path, save_all=True, append_images=ims[1:],
+                duration=int(1000 / fps), loop=0, optimize=True)
+    return str(out_path)
+
+
 def render_all_faces(scene, outdir, stem, size=768, prefix="",
                      make_sheet=True):
     """Photos des 6 faces canoniques (face/dos/gauche/droite/dessus/dessous)."""
