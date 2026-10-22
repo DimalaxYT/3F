@@ -72,6 +72,7 @@ MAT_CLEAN_ENAMEL  = 8
 MAT_REPTILE_SCALES = 9
 MAT_WING_MEMBRANE = 10
 MAT_BELLY_SCUTES  = 11
+MAT_KERATIN_HORN  = 12
 
 _ARMOR_KEYWORDS = (
     "armor", "hull", "crate", "container", "panel", "mech", "tank",
@@ -83,6 +84,8 @@ _ARMOR_KEYWORDS = (
 def classify_material_id(mat_use: mk.Material, part_label: str = "") -> int:
     """Déduit l'archétype physique exact d'une pièce à partir de son nom et de ses paramètres PBR."""
     nm = (getattr(mat_use, "name", "") + " " + part_label).lower()
+    if any(k in nm for k in ("keratin_horn", "dragon_horn", "claw_keratin", "dorsal_spine")):
+        return MAT_KERATIN_HORN
     if any(k in nm for k in ("belly_scute", "ventral_", "scutes")):
         return MAT_BELLY_SCUTES
     if any(k in nm for k in ("wing_membrane", "patagium")):
@@ -591,6 +594,22 @@ def apply_game_weathering(
         rough[is_wing] = np.clip(0.62 - 0.10 * veins + 0.12 * (micro[is_wing] - 0.5), 0.44, 0.88)
         metal[is_wing] = 0.0
         height[is_wing] = (0.42 * veins + 0.18 * (macro[is_wing] - 0.5)).astype(np.float32)
+
+    # 10. Cornes, griffes & épines de kératine striées (`MAT_KERATIN_HORN` : base sombre acajou -> pointe os vieilli)
+    is_horn = mat_id == MAT_KERATIN_HORN
+    if is_horn.any():
+        ph = pos[is_horn]
+        # Anneaux de croissance transversaux le long de la corne + dégradé organique racine sombre -> pointe dorée
+        ring_p = np.sin((ph[:, 1] * 145.0 + ph[:, 2] * 125.0 + 1.5 * micro[is_horn]) * math.pi)
+        rings = 0.5 + 0.5 * ring_p
+        dark_root = np.array([0.19, 0.075, 0.04], dtype=np.float32)
+        bone_tip = np.array([0.74, 0.56, 0.37], dtype=np.float32)
+        tip_t = np.clip(0.30 + 0.65 * ao[is_horn] + 0.22 * (macro[is_horn] - 0.4), 0.0, 1.0)[:, None]
+        h_col = dark_root[None, :] * (1.0 - tip_t) + bone_tip[None, :] * tip_t
+        col[is_horn] = h_col * (0.80 + 0.26 * rings[:, None])
+        rough[is_horn] = np.clip(0.46 + 0.22 * (1.0 - rings), 0.34, 0.78)
+        metal[is_horn] = 0.0
+        height[is_horn] = (0.45 * (rings - 0.5) + 0.12 * (micro[is_horn] - 0.5)).astype(np.float32)
 
     # v5.6 — contrainte DURE en sortie : les additifs (éclats, decals, boosts)
     # pouvaient rendre métallique une famille qui ne doit jamais l'être. Mesuré
@@ -1477,6 +1496,7 @@ def export_game_package(
     decal_strength: float = 0.65,
     roblox_scale: str = "studs",
     ai_views: dict[str, str | Path] | None = None,
+    joint_tex_size: int | None = None,
 ) -> dict:
     """Pipeline de bout en bout produisant un asset Game-Ready complet (`v5.1`) :
       - Fusionne les Draw Calls statiques opaques + cuit les sous-ensembles articulés en PBR complet,
@@ -1732,7 +1752,8 @@ def export_game_package(
         j_res = bake_high_to_low(
             j_hi, j_alb, j_rgh, j_mtl, j_low,
             high_vertex_mat_id=j_mid, ai_views=ai_views,
-            tex_size=max(tex_size // 2, 512), weathering=weathering,
+            tex_size=int(joint_tex_size) if joint_tex_size is not None else max(tex_size // 2, 512),
+            weathering=weathering,
             delight_pass=bool(delight_pass), decal_strength=decal_strength,
         )
         return grp, j_res
