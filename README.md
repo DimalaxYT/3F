@@ -1,6 +1,6 @@
-# 3d-forge v5.9 🎮🟥⚔️👺✨
+# 3d-forge v6.0 🎮🟥⚔️🐉📦
 
-**Moteur Ultra Design, Sculpture Organique SDF `C¹` (`organic.py`) & Texture PBR photoréaliste pensé en priorité pour Roblox Studio (`SurfaceAppearance` Dual-`1024²` + `Studs` + `< 10k tris` + `Neon` + `Luau`), Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`), l'impression 3D `100 % watertight` et le WebGL2 hors-ligne (`preview.html`) — `12 à 20 s` CPU tout compris, zéro GPU requis côté utilisateur et zéro boucle infinie !**
+**Moteur Ultra Design, Sculpture Organique SDF `C¹` (`organic.py`), Fidélité Photo → 3D (`photo_to_3d.py`) & Texture PBR photoréaliste pensé en priorité pour Roblox Studio (`SurfaceAppearance` Dual-`1024²` + `Studs` + `< 10k tris` + `Neon` + `Luau`), Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`), l'impression 3D `100 % watertight` et l'empaquetage automatique `.zip` (`packager.py`, zéro `preview.html`) — `12 à 25 s` CPU tout compris, zéro GPU requis côté utilisateur et zéro boucle infinie !**
 
 ![Vitrine Technique 3d-forge v5.1 — Ultra Design & Texture Engine](docs/img/v5_1_ultra_showcase.png)
 
@@ -12,21 +12,22 @@ Copie-colle simplement ce bloc dans ton Agent IA (bouton **📋** en haut à dro
 Utilise le skill 3D de ce dépôt GitHub : https://github.com/DimalaxYT/3F
 1. Clone le dépôt (s'il n'est pas déjà présent) et installe `requirements.txt` si nécessaire.
 2. Lis impérativement `SKILL.md` et `AUTOCRITIQUE.md` avant d'écrire une seule ligne de code.
-3. RÈGLES D'OR QUALITÉ & VITESSE (< 60 s au total — ZÉRO BOUCLE INFINIE !) :
-   - ZÉRO dessin 2D synthétique (`PIL` / `matplotlib`) dans `--front` / `--side` et ZÉRO « soupe de primitives » brutes !
-   - Utilise une recette du catalogue (`hero_bust`, `tengu_mask`, `stylized_character`, `dragon_creature`, `katana`, `sci_fi_crate`, `car`… — 24 recettes dans `references/recipes.md`) OU écris `custom_<nom>.py` avec :
-     • `scripts/meshkit.py` + `scripts/organic.py` (`org.Sculpt` + `s.sweep` + `b.trim_inside(cutter)` sur tout masque/casque creux + `mk.mat.lacquer`/`skin`/`enamel`) pour tout personnage, buste, masque ou créature ;
-     • `scripts/meshkit.py` + `scripts/greebles.py` pour le mécanique / hard-surface / armes / véhicules.
-   - Lance UNE SEULE commande : `python3 scripts/turbo_forge.py <recette | custom.py> -o out/<nom>` (~15 s CPU tout compris), inspecte `out/<nom>/qa_game_sheet.png`, fais AU MAXIMUM 1 passe de retouche si besoin, et livre immédiatement `.glb` (standard + Roblox + UE5), `.stl` 100 % étanche, `preview.html` et `qa_game_sheet.png` :
+3. RÈGLES D'OR QUALITÉ, FIDÉLITÉ PHOTO & LIVRAISON `.ZIP` :
+   - ZÉRO `preview.html` / serveur WebGL : tous les livrables sont automatiquement empaquetés dans **`exports/<nom>/<nom>.zip`** — livre toujours ce fichier `<nom>.zip` !
+   - SI L'UTILISATEUR FOURNIT UNE PHOTO DE RÉFÉRENCE (`<photo>`) :
+     1) Extrais d'abord le gabarit métrique exact et la vraie palette : `python3 scripts/photo_to_3d.py inspect <photo> -o exports/<nom>_ref --height <H_m>` et lis `exports/<nom>_ref/blueprint_grid.png`.
+     2) Écris `custom_<nom>.py` calibré au millimètre sur les coordonnées `(y, z)` mesurées sur `blueprint_grid.png` (`org.Sculpt`, `org.armored_scutes`, `org.bat_wing`, `org.ridge_spines` ou `scripts/greebles.py`).
+     3) Génère l'asset complet (`python3 scripts/turbo_forge.py custom_<nom>.py -o exports/<nom>`), puis vérifie côte à côte avec `python3 scripts/photo_to_3d.py verify <photo> exports/<nom>/<nom>_game.glb -o exports/<nom>/photo_match.png` !
+   - SANS PHOTO : construis un script `custom_<nom>.py` ultra-détaillé (ou une recette du catalogue `references/recipes.md`), lance `python3 scripts/turbo_forge.py <recette | custom.py> -o exports/<nom>`, inspecte `exports/<nom>/qa_game_sheet.png`, et livre immédiatement **`exports/<nom>/<nom>.zip`** !
 
-Objet demandé : [ÉCRIS TON IDÉE ICI — ex: un masque de Tengu japonais en bois laqué rouge et or avec son cordon, prêt pour Roblox Studio, UE5 et l'impression 3D]
+Objet demandé : [ÉCRIS TON IDÉE OU JOINS TA PHOTO ICI — ex: génère ce dragon en 3D fidèle à la photo jointe, livré en archive .zip]
 ```
 
-> ### Nouveautés `v5.2 → v5.7 — QA mesurable, vitesse, reproductibilité, design`
-> - **25 gates mesurables** (`scripts/gates.py`) au lieu d'une checklist humaine : budget de tris par cible (`hero`/`ugc`/`print`), cohérence des cartes PBR, anims, normales `DirectX -Y`, silhouette LOD0↔LOD2, UV, structure Luau, budget UCX, néon émissif. Chaque gate a un **test « mutant »** (`tests/test_gates_mutants.py`) qui casse volontairement un package et vérifie qu'elle passe au rouge.
-> - **`turbo_forge` : ~12 s** (contre ~19 s) — le patch PNG de trimesh ne s'appliquait jamais (PIL fige sa table de dispatch à l'import), cache d'encodage des textures ré-encodées, colliders convexes réécrits (4,4 s → 70 ms) et planche QA rendue en un seul pool (`ssaa=1.5`).
-> - **Reproductibilité** : deux runs identiques donnent désormais des octets identiques — `trimesh.sample.sample_surface` ignorait le seed global, l'AO variait donc à chaque exécution (jusqu'à 8 octets de GLB et des pixels différents).
-> - **Confort agent** : `--dry-run` (plan sans exécuter), `--resume` (re-run identique en **0,8 s**), `--gif` (turntable), `scripts/serve_preview.py` (live preview du `preview.html`).
+> ### Nouveautés `v5.2 → v6.0 — Fidélité Photo → 3D, Archive `.zip` Automatique, QA 26 Gates`
+> - **26 gates mesurables** (`scripts/gates.py`) dont `bundle_zip` : budget de tris par cible (`hero`/`ugc`/`print`), cohérence des cartes PBR, anims, normales `DirectX -Y`, silhouette LOD0↔LOD2, UV, structure Luau, budget UCX, néon émissif et intégrité de l'archive `<name>.zip` (**zéro `preview.html`**).
+> - **Reconstruction Fidèle Photo → 3D (`scripts/photo_to_3d.py` + `MAT_REPTILE_SCALES` / `MAT_BELLY_SCUTES` / `MAT_WING_MEMBRANE`)** : extraction automatique du gabarit métrique gradué (`blueprint_grid.png`), de l'aspect `L/H` réel et de la palette sRGB vraie de la photo, écailles reptiliennes organiques mates `1024²`, ailes `org.bat_wing` épaisses sans déchirure QEM, plaques imbriquées `org.armored_scutes`, et vérification côte à côte `photo_match.png` (`IoU` de silhouette).
+> - **`turbo_forge` : ~12 s** — cache d'encodage des textures ré-encodées, colliders convexes réécrits (4,4 s → 70 ms), planche QA rendue en un seul pool (`ssaa=1.5`) et packaging `.zip` instantané (`scripts/packager.py`).
+> - **Confort agent** : `--dry-run` (plan sans exécuter), `--resume` (re-run identique en **0,8 s**), `--gif` (turntable), livraison universelle `.zip`.
 > - **CI visuelle** : `scripts/visual_regression.py` compare l'IoU de silhouette des recettes à un baseline commité — une proportion cassée qui passe tous les tests unitaires échoue ici.
 > - **Qualité de rendu (v5.6-5.7)** : éclairage clé/remplissage réellement contrasté, ombre de contact à deux couches, bloom émissif, vignettage, netteté ; l'usure d'arêtes était déclenchée sur **80 % des sommets** (seuil de courbure trop bas : médiane 0.71) — recalibrée à 40 % ; ajout de variations à grande échelle (dérive de teinte par panneau, poussière verticale) ; le néon perdait son intensité à l'export (glTF borne `emissiveFactor` à 1) — exporté via `KHR_materials_emissive_strength` ; fond plat remplacé par un **cyclorama** (une lame à 0.886 de luminance était invisible sur un fond à 0.99) et trempe du katana remise à l'endroit (le tranchant trempé était plus spéculaire que le corps, ce qui écrasait le `hamon` sous la courbe ACES).
 > - **Modelé (v5.7)** : le vecteur d'intensités clé/remplissage/contre était construit puis **jamais utilisé** — trois lumières quasi égales (3.05 / 2.15 / 1.75) ne sculptaient aucune forme lisse. Le rendu passe en **linéaire** avec **auto-exposition** sur la silhouette et une seule tonemap : la dynamique du pion d'échecs passe de **0.09 à 0.17**. L'albédo reçoit un **budget** (plafond 0.86) sans lequel grain et variations étaient clippés, la crasse est dosée selon la clarté de la matière, et un asset **100 % verre** (`wine_glass`) se construit enfin.
@@ -100,8 +101,8 @@ python3 scripts/turbo_forge.py mon_arme_custom.py --lod0-tris 4200 -o out/mon_ar
 <!-- BENCH:START -->
 | asset | high-poly | LOD0 (poids) | LOD1 | LOD2 | draw calls | turbo CPU (indicatif) |
 |---|---|---|---|---|---|---|
-| `katana` | 6,840 tris | **6,516 tris** (896 Ko) | 3,129 tris | 1,721 tris | 10 ➔ 1 | 11.94 s |
-| `sci_fi_crate` | 10,726 tris | **3,656 tris** (1161 Ko) | 1,516 tris | 798 tris | 44 ➔ 3 | 12.06 s |
+| `katana` | 6,840 tris | **6,516 tris** (896 Ko) | 3,129 tris | 1,721 tris | 10 ➔ 1 | 16.13 s |
+| `sci_fi_crate` | 10,726 tris | **3,656 tris** (1161 Ko) | 1,516 tris | 798 tris | 44 ➔ 3 | 16.22 s |
 <!-- BENCH:END -->
 
 > Mesures reproductibles : `python3 scripts/bench.py` (régénère `docs/bench.json`

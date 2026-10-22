@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gpu_bridge as gb  # noqa: E402
 import meshkit as mk  # noqa: E402
 import pbr  # noqa: E402
-import preview as pv  # noqa: E402
+import packager as pkg  # noqa: E402
 import renderer  # noqa: E402
 import usdz_export as usdz  # noqa: E402
 
@@ -554,7 +554,7 @@ def main(argv=None) -> int:
     nrm_img.save(out_dir / f"{args.stem}_normal.png", compress_level=1)
 
     usdz.export_usdz(sc, out_dir / f"{args.stem}.usdz")
-    pv.build_preview(str(out_dir))
+    pkg.build_asset_zip(str(out_dir))
     vkeys = ["front", "back", "left", "side", "top", "bottom"]
     renderer.render_views(sc, str(out_dir), stem=args.stem, views=vkeys + ["three_quarter"], size=480)
     renderer.contact_sheet(

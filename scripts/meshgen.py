@@ -717,16 +717,13 @@ def main():
           f"({report['duration_s']}s)")
     for view, i in v["iou_views"].items():
         print(f"   IoU {view}: {i}")
-    if not args.no_preview:
-        try:
-            import preview
-            p = preview.build_preview(
-                args.out, title=spec.get("prompt") or spec.get("name"),
-                glb=report["files"]["glb"]["path"], report=report)
-            if p:
-                print(f"   preview → {p}")
-        except Exception as e:
-            print(f"[preview] échec ({e}) — génération conservée", file=sys.stderr)
+    try:
+        import packager
+        p = packager.build_asset_zip(args.out, name=spec.get("name"))
+        if p:
+            print(f"   archive zip → {p}")
+    except Exception as e:
+        print(f"[zip] échec ({e}) — génération conservée", file=sys.stderr)
 
 
 if __name__ == "__main__":

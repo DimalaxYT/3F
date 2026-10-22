@@ -11,7 +11,7 @@
       "lod2_tris": 1721,
       "draw_calls_before": 10,
       "draw_calls_after": 1,
-      "duration_s": 11.94
+      "duration_s": 16.13
     },
     {
       "asset": "sci_fi_crate",
@@ -22,7 +22,7 @@
       "lod2_tris": 798,
       "draw_calls_before": 44,
       "draw_calls_after": 3,
-      "duration_s": 12.06
+      "duration_s": 16.22
     }
   ]
 }

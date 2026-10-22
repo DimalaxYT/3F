@@ -355,16 +355,14 @@ def assemble(manifest: dict, outdir: str, faces_all: bool = False,
     with open(os.path.join(outdir, "report.json"), "w") as fh:
         json.dump(report, fh, indent=2, ensure_ascii=False)
 
-    # 8 : preview interactive
-    if not no_preview:
-        try:
-            import preview
-            p = preview.build_preview(outdir, title=manifest.get("prompt", name),
-                                      glb=glb, report=report)
-            if p:
-                print(f"   preview → {p}")
-        except Exception as e:
-            print(f"[preview] échec ({e})", file=sys.stderr)
+    # 8 : archive ZIP prête à télécharger
+    try:
+        import packager
+        p = packager.build_asset_zip(outdir, name=name)
+        if p:
+            print(f"   archive zip → {p}")
+    except Exception as e:
+        print(f"[zip] échec ({e})", file=sys.stderr)
     return report
 
 

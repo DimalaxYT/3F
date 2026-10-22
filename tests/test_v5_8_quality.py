@@ -113,9 +113,10 @@ def test_pbr_coherence_gate_catches_false_metallic_organic(tmp_path: Path):
     assert not ok, f"Expected pbr_coherence failure on forced-metal organic ORM, got {detail}"
 
 
-def test_hero_bust_full_pipeline_and_preview_webp_clean_grid(tmp_path: Path):
-    """End-to-end check on hero_bust: 25/25 gates OK, watertight STL, clean WebP preview without yellow wire bug."""
-    from preview import build_preview
+def test_hero_bust_full_pipeline_zip_bundle_and_photo_to_3d(tmp_path: Path):
+    """End-to-end check on hero_bust + packager.zip + photo_to_3d blueprint/verify pipeline."""
+    import zipfile
+    import photo_to_3d as p2d
     from turbo_forge import run_turbo
 
     out_dir = tmp_path / "hero_bust_qa"
@@ -128,25 +129,19 @@ def test_hero_bust_full_pipeline_and_preview_webp_clean_grid(tmp_path: Path):
         gate_target="hero",
     )
     assert manifest["stl_watertight"] is True
+    assert not (out_dir / "preview.html").exists(), "preview.html a été supprimé du pipeline !"
+    zip_path = Path(manifest["bundle_zip"])
+    assert zip_path.is_file() and zipfile.is_zipfile(zip_path)
     gates_doc = json.loads((out_dir / "gates.json").read_text())
     assert gates_doc.get("all_pass") is True, f"Hero bust gates failed: {gates_doc}"
 
-    # Verify preview.html v6.0 embeds WebP + universal zero-extension WebGL2/WebGL1 shader + accurate QA badges
-    html_path = out_dir / "preview.html"
-    assert html_path.is_file()
-    html = html_path.read_text(encoding="utf-8")
-    assert "EXT_texture_webp" in html
-    assert "gl_FragColor = vec4(0.88, 0.78, 0.48, 1.0)" not in html
-    for banned in ("dFdx(", "dFdy(", "OES_standard_derivatives", "URL.createObjectURL(blob)"):
-        assert banned not in html, f"Regression: {banned} breaks WebGL2 or sandboxed iframes"
-    assert "QA 25/25 ✓ LIVRABLE" in html
-    assert "✓ STL 100 % étanche" in html
-    assert "LODS_DATA" in html
-    assert html_path.stat().st_size < 4 * 1024 * 1024
-
-    # Check standalone build_preview works too
-    p2 = build_preview(out_dir, title="Hero Bust", glb=out_dir / "hero_bust_game.glb")
-    assert Path(p2).is_file()
+    # Vérifie le pipeline Photo -> Blueprint -> Verify sur une vue de référence
+    ref_img = ROOT / "assets" / "ai_multiview" / "dragon_side.png"
+    bp = p2d.inspect_photo(ref_img, tmp_path / "bp_test", target_height=0.36)
+    assert Path(bp["blueprint_png"]).is_file()
+    assert bp["aspect_l_over_h"] > 0.3
+    ver = p2d.verify_photo_match(ref_img, out_dir / "hero_bust_game.glb", tmp_path / "match.png")
+    assert Path(ver["out_png"]).is_file()
 
 
 def test_tengu_mask_concave_shell_zero_back_poke_and_under_30s(tmp_path: Path):

@@ -47,7 +47,7 @@ sys.path.insert(0, str(HERE))
 import delight as dl  # noqa: E402
 import meshkit as mk  # noqa: E402
 import pbr  # noqa: E402
-import preview as pv  # noqa: E402
+import packager as pkg  # noqa: E402
 import recipes  # noqa: E402
 import renderer  # noqa: E402
 
@@ -69,6 +69,9 @@ MAT_HAZARD_STRIPE = 5
 MAT_TSUKA_WRAP    = 6
 MAT_TAMAHAGANE    = 7
 MAT_CLEAN_ENAMEL  = 8
+MAT_REPTILE_SCALES = 9
+MAT_WING_MEMBRANE = 10
+MAT_BELLY_SCUTES  = 11
 
 _ARMOR_KEYWORDS = (
     "armor", "hull", "crate", "container", "panel", "mech", "tank",
@@ -80,6 +83,12 @@ _ARMOR_KEYWORDS = (
 def classify_material_id(mat_use: mk.Material, part_label: str = "") -> int:
     """Déduit l'archétype physique exact d'une pièce à partir de son nom et de ses paramètres PBR."""
     nm = (getattr(mat_use, "name", "") + " " + part_label).lower()
+    if any(k in nm for k in ("belly_scute", "ventral_", "scutes")):
+        return MAT_BELLY_SCUTES
+    if any(k in nm for k in ("wing_membrane", "patagium")):
+        return MAT_WING_MEMBRANE
+    if any(k in nm for k in ("reptile_scale", "scaled_", "wyvern_hide", "dragon_wing_arm")):
+        return MAT_REPTILE_SCALES
     if any(k in nm for k in ("tsuka", "ito_wrap", "hilt_wrap")):
         return MAT_TSUKA_WRAP
     if "blade" in nm:
@@ -508,6 +517,80 @@ def apply_game_weathering(
         )
         metal[is_clean] = np.clip(mtl_clean_src[is_clean], 0.0, 1.0)
         height[is_clean] = (0.14 * (micro[is_clean] - 0.5) + 0.06 * (macro[is_clean] - 0.5)).astype(np.float32)
+
+    # 7. Écailles reptiliennes organiques mates (`MAT_REPTILE_SCALES` : fines, distordues & sans reflet plastique !)
+    is_reptile = mat_id == MAT_REPTILE_SCALES
+    if is_reptile.any():
+        pr = pos[is_reptile]
+        nr = nrm[is_reptile]
+        an = np.abs(nr)
+        w3 = an / np.maximum(an.sum(axis=1, keepdims=True), 1e-6)
+        freq_s = 1.0 / np.clip(float(span.max()) * 0.0115, 0.0045, 0.010)
+
+        def _tex_hex_scales(u_c: np.ndarray, v_c: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+            # Distorsion organique douce pour briser tout alignement en grille « épi de maïs » !
+            uw = u_c + 0.0055 * np.sin(v_c * 37.0 + u_c * 19.0)
+            vw = v_c + 0.0045 * np.cos(u_c * 31.0 - v_c * 23.0)
+            row = vw * freq_s * 1.18
+            row_i = np.floor(row)
+            fu = uw * freq_s + 0.5 * np.mod(row_i, 2.0)
+            du = np.mod(fu, 1.0) - 0.5
+            dv = np.mod(row, 1.0) - 0.5
+            # Losange reptilien effilé (pas de bille ronde !)
+            d = np.abs(du) * 1.32 + np.abs(dv + 0.08) * 1.12
+            dome = np.clip(1.0 - (d / 0.62) ** 1.35, 0.0, 1.0)
+            crevice = np.clip((d - 0.44) / 0.18, 0.0, 1.0)
+            return dome, crevice
+
+        d_yz, c_yz = _tex_hex_scales(pr[:, 1], pr[:, 2])
+        d_xz, c_xz = _tex_hex_scales(pr[:, 0], pr[:, 2])
+        d_xy, c_xy = _tex_hex_scales(pr[:, 0], pr[:, 1])
+        s_dome = w3[:, 0] * d_yz + w3[:, 1] * d_xz + w3[:, 2] * d_xy
+        s_crev = w3[:, 0] * c_yz + w3[:, 1] * c_xz + w3[:, 2] * c_xy
+
+        warm_gold = np.array([0.66, 0.42, 0.22], dtype=np.float32)
+        dark_blood = np.array([0.14, 0.045, 0.02], dtype=np.float32)
+        base_c = col_clean_src[is_reptile]
+        bronze_kiss = np.clip(0.28 * (s_dome ** 1.6) + 0.34 * (macro[is_reptile] - 0.32), 0.0, 0.58)[:, None]
+        lit_scale = base_c * (1.0 - bronze_kiss) + warm_gold[None, :] * bronze_kiss
+        col[is_reptile] = lit_scale * (1.0 - 0.68 * s_crev[:, None]) + dark_blood[None, :] * (0.68 * s_crev[:, None])
+        ao[is_reptile] = np.clip(ao[is_reptile] * (1.0 - 0.42 * s_crev), 0.16, 1.0)
+        # Kératine reptilienne mate-satinée (`0.48..0.78`) : ZÉRO point blanc spéculaire plastique !
+        rough[is_reptile] = np.clip(0.54 + 0.24 * s_crev - 0.06 * s_dome, 0.46, 0.86)
+        metal[is_reptile] = 0.0
+        height[is_reptile] = (0.72 * (s_dome - 0.45) - 0.38 * s_crev + 0.14 * (micro[is_reptile] - 0.5)).astype(np.float32)
+
+    # 8. Plaques ventrales segmentées ocre-or (`MAT_BELLY_SCUTES`)
+    is_scute = mat_id == MAT_BELLY_SCUTES
+    if is_scute.any():
+        ps_v = pos[is_scute]
+        band_phase = np.mod((ps_v[:, 2] * 38.0 - ps_v[:, 1] * 14.0), 1.0)
+        seam = np.exp(-((band_phase / 0.14) ** 2)) + np.exp(-(((1.0 - band_phase) / 0.10) ** 2))
+        seam = np.clip(seam, 0.0, 1.0)
+        ochre_hi = np.array([0.74, 0.54, 0.31], dtype=np.float32)
+        umber_lo = np.array([0.24, 0.11, 0.05], dtype=np.float32)
+        shade_s = np.clip(0.45 + 0.55 * band_phase * (0.7 + 0.3 * macro[is_scute]), 0.0, 1.0)[:, None]
+        sc_col = col_clean_src[is_scute] * 0.55 + ochre_hi[None, :] * 0.45 * shade_s
+        col[is_scute] = sc_col * (1.0 - 0.72 * seam[:, None]) + umber_lo[None, :] * (0.72 * seam[:, None])
+        ao[is_scute] = np.clip(ao[is_scute] * (1.0 - 0.45 * seam), 0.18, 1.0)
+        rough[is_scute] = np.clip(0.50 + 0.25 * seam, 0.42, 0.82)
+        metal[is_scute] = 0.0
+        height[is_scute] = (0.55 * band_phase - 0.65 * seam).astype(np.float32)
+
+    # 9. Membrane d'aile cuirasse parcheminée veinée (`MAT_WING_MEMBRANE`)
+    is_wing = mat_id == MAT_WING_MEMBRANE
+    if is_wing.any():
+        pw = pos[is_wing]
+        vein_f = np.abs(np.sin((pw[:, 1] * 26.0 + pw[:, 2] * 19.0 + 1.8 * macro[is_wing]) * math.pi))
+        veins = np.clip(1.0 - vein_f / 0.16, 0.0, 1.0)
+        parchment = np.array([0.65, 0.42, 0.25], dtype=np.float32)
+        dark_umbr = np.array([0.24, 0.10, 0.05], dtype=np.float32)
+        mottled = np.clip(0.32 + 0.68 * macro[is_wing] * (0.55 + 0.45 * micro[is_wing]), 0.0, 1.0)[:, None]
+        w_col = dark_umbr[None, :] * (1.0 - mottled) + parchment[None, :] * mottled
+        col[is_wing] = w_col * (1.0 - 0.45 * veins[:, None]) + dark_umbr[None, :] * (0.45 * veins[:, None])
+        rough[is_wing] = np.clip(0.62 - 0.10 * veins + 0.12 * (micro[is_wing] - 0.5), 0.44, 0.88)
+        metal[is_wing] = 0.0
+        height[is_wing] = (0.42 * veins + 0.18 * (macro[is_wing] - 0.5)).astype(np.float32)
 
     # v5.6 — contrainte DURE en sortie : les additifs (éclats, decals, boosts)
     # pouvaient rendre métallique une famille qui ne doit jamais l'être. Mesuré
@@ -1986,8 +2069,6 @@ def export_game_package(
         mk.export_glb_pbr(sc_gd, str(gd_glb), webp=webp)
         exported_profiles["godot"] = {"scene_with_colonly": str(gd_glb)}
 
-    pv.build_preview(str(out_path), title=f"{clean_name} — Game-Ready LOD0 ({len(lod0_mesh.faces)} tris)", glb=str(glb_main))
-
     # Planche de contrôle Technical Artist `qa_game_sheet.png` rendue en parallèle sur 4 threads !
     az, el = renderer.DEFAULT_VIEWS["three_quarter"]
     hi_vis = high_body.copy()
@@ -2091,6 +2172,9 @@ def export_game_package(
         "qa_sheet": str(qa_sheet),
         "duration_s": round(time.perf_counter() - t0, 2),
     }
+    (out_path / "game_manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    zip_path = pkg.build_asset_zip(out_path, name=clean_name)
+    manifest["bundle_zip"] = str(zip_path)
     (out_path / "game_manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
     return manifest
 
