@@ -377,7 +377,8 @@ _PAGE = r"""<!doctype html>
     <div id="err"></div>
   </div>
   <div class="actions">
-    <a class="dl" id="dl" download="{filename}">⬇ Télécharger le modèle 3D ({filename})</a>
+    <a class="dl" id="dl" target="_blank" rel="noopener">⬇ Télécharger le modèle 3D ({filename})</a>
+    <span id="dl-hint" style="display:none;font-size:12.5px;color:#cbd5e8;background:#161d2b;border:1px solid #2e3d5c;padding:6px 11px;border-radius:8px;align-items:center;gap:8px;flex-wrap:wrap"></span>
   </div>
   {stats}
   {photos}
@@ -418,61 +419,85 @@ _PAGE = r"""<!doctype html>
     return "data:" + (mime || "image/png") + ";base64," + btoa(bin);
   }}
 
+  const dlHint = document.getElementById("dl-hint");
   let currentLodEntry = LODS_DATA[0];
   let currentBlobUrl = null;
+  const isHttpOrigin = Boolean(window.location && (window.location.protocol === "http:" || window.location.protocol === "https:"));
+  const isOpaqueSandbox = Boolean(!isHttpOrigin && window.location && window.origin === "null");
+
+  function directUrlFor(entry) {{
+    if (isHttpOrigin) {{
+      return new URL(encodeURIComponent(entry.name) + "?download=1", window.location.href).href;
+    }}
+    return "https://github.com/DimalaxYT/3F/raw/main/examples/yamaha_yz125/" + encodeURIComponent(entry.name);
+  }}
+
   function updateDownload(lodIdx) {{
     const entry = LODS_DATA[lodIdx] || LODS_DATA[0];
     currentLodEntry = entry;
-    dlLink.download = entry.name;
     dlLink.textContent = "⬇ Télécharger " + entry.id + " (" + entry.name + ")";
-    if (window.location && (window.location.protocol === "http:" || window.location.protocol === "https:")) {{
-      dlLink.href = encodeURIComponent(entry.name) + "?download=1";
+    if (isHttpOrigin) {{
+      // CRITIQUE CHROMIUM IFRAME SANDBOX : ne JAMAIS poser l'attribut `download` sur HTTP/HTTPS !
+      // Avec `target="_blank"` SANS `download`, le clic ouvre un onglet top-level hors-sandbox
+      // qui reçoit `Content-Disposition: attachment` de `serve_preview.py` et télécharge le .glb immédiatement !
+      dlLink.removeAttribute("download");
+      dlLink.target = "_blank";
+      dlLink.rel = "noopener";
+      dlLink.href = directUrlFor(entry);
+      return;
+    }}
+    if (isOpaqueSandbox) {{
+      dlLink.removeAttribute("download");
+      dlLink.target = "_blank";
+      dlLink.rel = "noopener";
+      dlLink.href = directUrlFor(entry);
       return;
     }}
     try {{
       if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
       const bytes = b64ToBytes(entry.b64);
       currentBlobUrl = URL.createObjectURL(new Blob([bytes], {{ type: "model/gltf-binary" }}));
+      dlLink.download = entry.name;
+      dlLink.removeAttribute("target");
       dlLink.href = currentBlobUrl;
     }} catch (_) {{
+      dlLink.download = entry.name;
       dlLink.href = "data:application/octet-stream;base64," + entry.b64;
     }}
   }}
-  dlLink.addEventListener("click", async e => {{
-    if (window.location && (window.location.protocol === "http:" || window.location.protocol === "https:")) {{
-      return; // Téléchargement HTTP natif direct via `Content-Disposition: attachment`
-    }}
+
+  dlLink.addEventListener("click", () => {{
     const entry = currentLodEntry || LODS_DATA[0];
-    if (window.showSaveFilePicker) {{
-      e.preventDefault();
-      try {{
-        const handle = await window.showSaveFilePicker({{
-          suggestedName: entry.name,
-          types: [{{ description: "Modèle 3D Binary glTF (.glb)", accept: {{ "model/gltf-binary": [".glb"] }} }}],
-        }});
-        const writable = await handle.createWritable();
-        await writable.write(b64ToBytes(entry.b64));
-        await writable.close();
-        hudTxt.textContent = "✓ Fichier enregistré : " + entry.name;
-        return;
-      }} catch (err) {{
-        if (err && err.name === "AbortError") return;
-      }}
+    const url = directUrlFor(entry);
+    hudTxt.textContent = "⬇ Téléchargement direct lancé : " + entry.name;
+    if (dlHint) {{
+      dlHint.style.display = "inline-flex";
+      dlHint.innerHTML = "";
+      const lbl = document.createElement("span");
+      lbl.textContent = "Lien direct .glb :";
+      const inp = document.createElement("input");
+      inp.type = "text";
+      inp.readOnly = true;
+      inp.value = url;
+      inp.style.cssText = "width:290px;background:#0d111a;color:#eef2f8;border:1px solid #384b70;border-radius:5px;padding:3px 7px;font-size:12px";
+      inp.onclick = () => inp.select();
+      const cpBtn = document.createElement("button");
+      cpBtn.type = "button";
+      cpBtn.textContent = "📋 Copier l'URL";
+      cpBtn.style.cssText = "background:#263654;color:#fff;border:0;border-radius:6px;padding:4px 9px;cursor:pointer;font-size:12px;font-weight:600";
+      cpBtn.onclick = () => {{
+        inp.select();
+        if (navigator.clipboard && navigator.clipboard.writeText) {{
+          navigator.clipboard.writeText(url).catch(() => document.execCommand("copy"));
+        }} else {{
+          document.execCommand("copy");
+        }}
+        cpBtn.textContent = "✓ URL copiée !";
+      }};
+      dlHint.appendChild(lbl);
+      dlHint.appendChild(inp);
+      dlHint.appendChild(cpBtn);
     }}
-    // Fallback iframe sandboxée (`origin === "null"`) : ouvre / déclenche le flux binaire
-    try {{
-      const bytes = b64ToBytes(entry.b64);
-      const url = URL.createObjectURL(new Blob([bytes], {{ type: "application/octet-stream" }}));
-      const tmp = document.createElement("a");
-      tmp.href = url;
-      tmp.download = entry.name;
-      tmp.target = "_blank";
-      tmp.rel = "noopener";
-      document.body.appendChild(tmp);
-      tmp.click();
-      tmp.remove();
-      hudTxt.textContent = "⬇ Téléchargement lancé : " + entry.name + " (si bloqué par l'aperçu, utilisez l'onglet Live Preview)";
-    }} catch (_) {{}}
   }});
   updateDownload(0);
 
