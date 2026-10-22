@@ -43,6 +43,10 @@ def valid_pkg(tmp_path_factory):
     man["stl_watertight"] = bool(solid.is_watertight)
     (out / "game_manifest.json").write_text(
         json.dumps(man, indent=2, ensure_ascii=False), encoding="utf-8")
+    import packager
+    man["bundle_zip"] = packager.build_asset_zip(out, name=NAME)
+    (out / "game_manifest.json").write_text(
+        json.dumps(man, indent=2, ensure_ascii=False), encoding="utf-8")
     return out
 
 

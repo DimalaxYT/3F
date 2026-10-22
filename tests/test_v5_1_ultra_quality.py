@@ -171,7 +171,8 @@ def test_turbo_forge_single_command_under_25_seconds(tmp_path):
     assert (tmp_path / "turbo_katana_check" / "roblox" / "katana_roblox.glb").is_file()
     assert (tmp_path / "turbo_katana_check" / "unreal" / "SM_katana.glb").is_file()
     assert (tmp_path / "turbo_katana_check" / "katana.stl").is_file()
-    assert (tmp_path / "turbo_katana_check" / "preview.html").is_file()
+    assert (tmp_path / "turbo_katana_check" / "katana.zip").is_file()
+    assert not (tmp_path / "turbo_katana_check" / "preview.html").exists()
     assert (tmp_path / "turbo_katana_check" / "qa_game_sheet.png").is_file()
     assert manifest["stl_watertight"] is True
     assert manifest["engine_exports"]["roblox"]["under_10k_tris_limit"] is True

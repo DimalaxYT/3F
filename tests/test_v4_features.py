@@ -15,7 +15,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import gpu_sculpt  # noqa: E402
 import meshkit as mk  # noqa: E402
 import pbr  # noqa: E402
-import preview as pv  # noqa: E402
+import packager as pkg  # noqa: E402
 import recipes  # noqa: E402
 import renderer  # noqa: E402
 import split_stl  # noqa: E402
@@ -59,8 +59,7 @@ def test_pillar1_organic_gpu_sculpture_watertight_and_textured():
     stl_path = ROOT / "examples" / "dragon_buste" / "dragon_buste.stl"
     glb_path = ROOT / "examples" / "dragon_buste" / "dragon_buste.glb"
     usdz_path = ROOT / "examples" / "dragon_buste" / "dragon_buste.usdz"
-    prev_path = ROOT / "examples" / "dragon_buste" / "preview.html"
-    assert stl_path.exists() and glb_path.exists() and usdz_path.exists() and prev_path.exists()
+    assert stl_path.exists() and glb_path.exists() and usdz_path.exists()
 
     m = trimesh.load(stl_path, force="mesh")
     assert m.is_watertight, "La sculpture organique .stl doit être 100 % étanche (manifold3d) !"
@@ -110,11 +109,8 @@ def test_pillar4_gltf_extensions_glass_refraction_and_preview_v2(tmp_path):
     assert "KHR_materials_transmission" in used
     assert "KHR_materials_ior" in used
 
-    html_out = pv.build_preview(str(tmp_path))
-    html_txt = Path(html_out).read_text(encoding="utf-8")
-    assert 'id="envSel"' in html_txt
-    assert 'id="chanSel"' in html_txt
-    assert 'id="animBtn"' in html_txt
+    zip_out = pkg.build_asset_zip(str(tmp_path), name="pbr_ext")
+    assert Path(zip_out).is_file()
 
 
 def test_pillar5_articulated_joints_and_3d_printer_bed_splitter(tmp_path):

@@ -398,113 +398,33 @@ def build_stylized_character(
     ],
 )
 def build_dragon_creature(
-    height: float = 0.30,
-    scale_color: str = "#1e2430",
-    belly_color: str = "#d4a034",
-    horn_color: str = "#e5dac0",
-    eye_color: str = "#f59e0b",
+    height: float = 0.44,
+    scale_color: str = "#6d2918",
+    belly_color: str = "#b58348",
+    horn_color: str = "#c9ae8c",
+    eye_color: str = "#ff9914",
 ) -> mk.Builder:
-    """Buste de dragon cornu 100 % procédural CPU : cou en S musclé, museau ciselé, mâchoire,
-    cornes recourbées en S (`tapered_curve`), crocs d'ivoire, crête dorsale et yeux ambrés."""
-    s = float(height) / 0.30
-    b = mk.Builder("dragon_creature", {"height": height})
+    """Dragon quadrupède ailé complet haute-fidélité : cou fier en S, crâne ciselé à crocs,
+    plaques pectorales imbriquées (`armored_scutes`), grandes ailes membraneuses solides (`bat_wing`),
+    queue fouet enroulée à 32 épines dorsales et vraies écailles 3D (`displace_scales`)."""
+    from pathlib import Path as _Path
+    import importlib.util as _ilu
 
-    m_scales = mk.mat.clay(scale_color, roughness=0.42)
-    m_gold = mk.mat.metal(belly_color, roughness=0.26, metallic=0.84)
-    m_horn = mk.mat.clay(horn_color, roughness=0.46)
-    m_fang = mk.mat.enamel("#f5f0e1", roughness=0.18)
-    m_eye = mk.mat.emissive(eye_color, strength=2.0)
-    m_plinth = mk.mat.stone("#23262d", roughness=0.70)
-
-    p_base, p_ring = org.museum_plinth(0.158 * s, 0.158 * s, 0.036 * s, round_profile=True)
-    b.add(p_base, m_plinth, name="plinth_stone")
-    b.add(p_ring, m_gold, name="plinth_gold_ring")
-
-    # 1. Cou en S, crâne, arcades sourcilières ciselées, arête nasale, museau & mâchoire
-    dr_s = org.Sculpt(
-        bounds=((-0.095 * s, -0.135 * s, 0.020 * s), (0.095 * s, 0.095 * s, 0.255 * s)),
-        res=72,
+    spec = _ilu.spec_from_file_location(
+        "_crimson_dragon_ref",
+        str(_Path(__file__).resolve().parents[2] / "examples" / "crimson_dragon" / "build_crimson_dragon.py"),
     )
-    dr_s.ellipsoid((0.0, 0.010 * s, 0.068 * s), (0.066 * s, 0.058 * s, 0.046 * s))
-    dr_s.capsule((0.0, 0.016 * s, 0.072 * s), (0.0, 0.022 * s, 0.145 * s), 0.046 * s, 0.038 * s, k=0.016 * s)
-    dr_s.capsule((0.0, 0.020 * s, 0.145 * s), (0.0, -0.010 * s, 0.190 * s), 0.038 * s, 0.042 * s, k=0.016 * s)
-    dr_s.ellipsoid((0.0, -0.014 * s, 0.196 * s), (0.046 * s, 0.052 * s, 0.038 * s), k=0.014 * s)
-    dr_s.capsule((0.0, -0.030 * s, 0.188 * s), (0.0, -0.100 * s, 0.172 * s), 0.031 * s, 0.020 * s, k=0.012 * s)
-    dr_s.capsule((0.0, -0.024 * s, 0.160 * s), (0.0, -0.088 * s, 0.149 * s), 0.025 * s, 0.015 * s, k=0.010 * s)
-    # Arcades sourcilières féroces + pommettes écailleuses + crête nasale
-    dr_s.capsule((0.018 * s, -0.058 * s, 0.204 * s), (0.040 * s, -0.010 * s, 0.216 * s), 0.011 * s, 0.014 * s, k=0.007 * s, mirror_x=True)
-    dr_s.capsule((0.024 * s, -0.050 * s, 0.176 * s), (0.040 * s, -0.008 * s, 0.182 * s), 0.009 * s, 0.011 * s, k=0.006 * s, mirror_x=True)
-    dr_s.capsule((0.0, -0.038 * s, 0.202 * s), (0.0, -0.096 * s, 0.183 * s), 0.009 * s, 0.007 * s, k=0.006 * s)
-    dr_s.ellipsoid((0.013 * s, -0.100 * s, 0.180 * s), (0.008 * s, 0.010 * s, 0.008 * s), k=0.006 * s, mirror_x=True)
-    dr_s.round_box((0.0, -0.090 * s, 0.161 * s), (0.030 * s, 0.062 * s, 0.010 * s), r=0.003 * s, mode="sub", k=0.005 * s)
-    dr_s.plane_cut((0.0, 0.0, 0.024 * s), (0.0, 0.0, -1.0), k=0.004 * s)
-    b.add(dr_s.to_mesh(smooth_iter=4, target_tris=5600), m_scales, name="dragon_body_scales")
-
-    # Couronne frontale dorée en V ciselée sur le crâne
-    crown = org.curved_visor(width=0.048 * s, length=0.042 * s, thickness=0.008 * s, arch=0.012 * s, droop=-0.010 * s, sections=22)
-    b.add(crown, m_gold, name="forehead_crest_gold", at=(0.0, -0.024 * s, 0.214 * s))
-
-    # 2. Plaques pectorales dorées chevauchantes profondément ancrées dans le buste
-    for k_pl in range(5):
-        t = k_pl / 4.0
-        pz = (0.052 + 0.090 * t) * s
-        py = (-0.038 + 0.016 * math.sin(t * 2.2)) * s
-        w_pl = (0.044 - 0.014 * t) * s
-        plate = org.curved_visor(width=w_pl * 2.0, length=0.026 * s, thickness=0.010 * s, arch=0.011 * s, droop=0.006 * s, sections=22)
-        mk.rot_x(plate, 65.0)
-        b.add(plate, m_gold, name=f"throat_gold_plate_{k_pl}", at=(0.0, py, pz))
-
-    # 3. Grandes cornes royales en S + cornes jugales + grands yeux en amande + crocs
-    for tag, sx in (("r", 1.0), ("l", -1.0)):
-        horn = org.tapered_curve(
-            [
-                (sx * 0.024 * s, 0.006 * s, 0.210 * s),
-                (sx * 0.050 * s, 0.042 * s, 0.244 * s),
-                (sx * 0.064 * s, 0.078 * s, 0.276 * s),
-                (sx * 0.056 * s, 0.096 * s, 0.298 * s),
-            ],
-            [0.0175 * s, 0.0130 * s, 0.0078 * s, 0.0028 * s],
-            sections=20,
-        )
-        b.add(horn, m_horn, name=f"royal_horn_{tag}")
-
-        cheek_spike = org.tapered_curve(
-            [
-                (sx * 0.032 * s, -0.004 * s, 0.178 * s),
-                (sx * 0.058 * s, 0.024 * s, 0.184 * s),
-                (sx * 0.072 * s, 0.048 * s, 0.194 * s),
-            ],
-            [0.011 * s, 0.0070 * s, 0.0025 * s],
-            sections=16,
-        )
-        b.add(cheek_spike, m_horn, name=f"cheek_horn_{tag}")
-
-        eye_orb = org.ellipsoid(0.0105 * s, 0.0165 * s, 0.0085 * s, subdivisions=2)
-        mk.rot_y(eye_orb, sx * 18.0)
-        b.add(eye_orb, m_eye, name=f"dragon_eye_{tag}", at=(sx * 0.027 * s, -0.043 * s, 0.195 * s))
-
-        for fi, fy in enumerate((-0.093, -0.072)):
-            fang = org.tapered_curve(
-                [
-                    (sx * 0.013 * s, fy * s, 0.173 * s),
-                    (sx * 0.014 * s, (fy - 0.002) * s, 0.156 * s),
-                ],
-                [0.0044 * s, 0.0013 * s],
-                sections=12,
-            )
-            b.add(fang, m_fang, name=f"fang_{tag}_{fi}")
-
-    for si in range(5):
-        tz = (0.088 + si * 0.028) * s
-        ty = (0.042 - 0.010 * math.sin(si * 0.7)) * s
-        sp = org.tapered_curve(
-            [(0.0, ty, tz), (0.0, ty + 0.030 * s, tz + 0.022 * s)],
-            [0.0095 * s, 0.0024 * s],
-            sections=14,
-        )
-        b.add(sp, m_gold, name=f"dorsal_spine_{si}")
-
-    b.def_socket("SOCKET_jaw_fire", (0.0, -0.105 * s, 0.162 * s))
+    mod = _ilu.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(mod)
+    b = mod.build(
+        height=height,
+        scale_color=scale_color,
+        belly_color=belly_color,
+        horn_color=horn_color,
+        eye_color=eye_color,
+    )
+    b.name = "dragon_creature"
     return b
 
 

@@ -280,19 +280,15 @@ def main(argv=None):
                  render_engine=args.render_engine, texture_ai=args.texture_ai,
                  game_ready_mode=args.game_ready, game_engine=args.game_engine,
                  lod0_tris=args.lod0_tris)
-    if report and not args.no_preview:
+    if report:
         try:
-            import preview
-            glb = (report.get("files") or {}).get("glb")
-            glb_path = glb["path"] if isinstance(glb, dict) else glb
-            p = preview.build_preview(report["output_dir"],
-                                      title=str(args.recipe),
-                                      glb=glb_path, report=report)
-            if p and not args.quiet:
-                print(f"  preview → {p}")
+            import packager
+            z = packager.build_asset_zip(report["output_dir"], name=str(args.recipe))
+            if z and not args.quiet:
+                print(f"  archive zip → {z}")
         except Exception as e:
             if not args.quiet:
-                print(f"[preview] échec ({e}) — génération conservée", file=sys.stderr)
+                print(f"[zip] échec ({e}) — génération conservée", file=sys.stderr)
     return 0
 
 

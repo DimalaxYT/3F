@@ -768,3 +768,310 @@ def museum_plinth(
     ring = mk.chamfer_box(width * 0.88, depth * 0.88, height * 0.16, c=min(width, depth) * 0.05)
     mk.place(ring, 0.0, 0.0, height * 0.50)
     return base, ring
+
+
+# --------------------------------------------------------------------------- #
+# 4. Primitives Anatomiques Avancées : Écailles 3D, Plaques Ventrales, Crêtes & Ailes
+# --------------------------------------------------------------------------- #
+
+def displace_scales(
+    mesh: trimesh.Trimesh,
+    scale_size: float = 0.016,
+    depth: float = 0.0022,
+    sharpness: float = 1.45,
+) -> trimesh.Trimesh:
+    """Sculpte un vrai réseau 3D d'écailles reptiliennes hexagonales imbriquées directement
+    sur les sommets de `mesh` le long de ses normales (visible dans le `.stl` ET cuit dans
+    les Normal/AO maps 1024² !)."""
+    if len(mesh.vertices) < 36 or float(scale_size) <= 1e-6:
+        return mesh
+    out = mesh.copy()
+    v = np.asarray(out.vertices, dtype=np.float64)
+    nrm = np.asarray(out.vertex_normals, dtype=np.float64)
+
+    # Coordonnées curvilignes triplanaires pondérées par les normales (zéro couture UV !)
+    an = np.abs(nrm)
+    w = an / np.maximum(an.sum(axis=1, keepdims=True), 1e-6)
+    freq = 1.0 / float(scale_size)
+
+    def _hex_scales_2d(u_coord: np.ndarray, v_coord: np.ndarray) -> np.ndarray:
+        row = v_coord * freq * 1.1547
+        row_i = np.floor(row)
+        fu = u_coord * freq + 0.5 * np.mod(row_i, 2.0)
+        du = np.mod(fu, 1.0) - 0.5
+        dv = np.mod(row, 1.0) - 0.5
+        # Profil d'écaille imbriquée en goutte/losange (imbrication vers le bas/arrière)
+        d = np.sqrt((du * 1.18) ** 2 + ((dv + 0.14) * 1.02) ** 2)
+        dome = np.clip(1.0 - (d / 0.58) ** float(sharpness), -0.35, 1.0)
+        lip = 0.28 * np.exp(-(((dv - 0.34) / 0.14) ** 2)) * np.clip(1.0 - np.abs(du) * 1.9, 0.0, 1.0)
+        return dome + lip
+
+    s_yz = _hex_scales_2d(v[:, 1], v[:, 2])
+    s_xz = _hex_scales_2d(v[:, 0], v[:, 2])
+    s_xy = _hex_scales_2d(v[:, 0], v[:, 1])
+    field = w[:, 0] * s_yz + w[:, 1] * s_xz + w[:, 2] * s_xy
+    field = field - float(np.mean(field))
+
+    out.vertices = v + nrm * (field[:, None] * float(depth))
+    out.fix_normals(multibody=False)
+    return out
+
+
+def armored_scutes(
+    spine_pts,
+    widths,
+    outward_hint=(0.0, -1.0, -0.35),
+    thickness_ratio: float = 0.42,
+    arch_ratio: float = 0.30,
+) -> trimesh.Trimesh:
+    """Génère une rangée de plaques ventrales/pectorales imbriquées (`scutes`)
+    mathématiquement tangentes à `spine_pts` et profondément ancrées dans le corps
+    (élimine 100 % des plaques flottantes détachées du cou ou du torse !)."""
+    pts = np.asarray(spine_pts, dtype=float)
+    wds = np.asarray(widths, dtype=float)
+    if len(pts) < 2:
+        raise ValueError("armored_scutes: au moins 2 points requis")
+    if len(wds) != len(pts):
+        wds = np.interp(np.linspace(0.0, 1.0, len(pts)), np.linspace(0.0, 1.0, len(wds)), wds)
+
+    hint = np.asarray(outward_hint, dtype=float)
+    hint /= max(float(np.linalg.norm(hint)), 1e-8)
+
+    plates: list[trimesh.Trimesh] = []
+    n = len(pts)
+    for i in range(n):
+        t_vec = pts[min(i + 1, n - 1)] - pts[max(i - 1, 0)]
+        t_norm = float(np.linalg.norm(t_vec))
+        t_vec = t_vec / max(t_norm, 1e-8)
+
+        # Repère orthonormé local : X = latéral, Z_loc = tangent le long du cou, -Y_loc = vers l'extérieur !
+        x_ax = np.array([1.0, 0.0, 0.0], dtype=float)
+        out_ax = np.cross(t_vec, x_ax)
+        if float(np.dot(out_ax, hint)) < 0.0:
+            out_ax = -out_ax
+        out_ax /= max(float(np.linalg.norm(out_ax)), 1e-8)
+        z_ax = np.cross(x_ax, out_ax)
+        z_ax /= max(float(np.linalg.norm(z_ax)), 1e-8)
+
+        step_len = float(np.linalg.norm(pts[min(i + 1, n - 1)] - pts[i])) if i < n - 1 else float(np.linalg.norm(pts[i] - pts[i - 1]))
+        w_cur = float(wds[i])
+        h_plate = max(step_len * 1.48, w_cur * 0.42)
+        thk = max(w_cur * float(thickness_ratio), 0.010)
+
+        pl = curved_visor(
+            width=w_cur,
+            length=thk,
+            thickness=h_plate,
+            arch=w_cur * float(arch_ratio),
+            droop=-h_plate * 0.14,
+            sections=18,
+        )
+        # Dans `curved_visor`, l'arc pointe vers `-Y` : on aligne `-Y` sur `out_ax` et `Z` sur `z_ax`
+        R4 = np.eye(4, dtype=float)
+        R4[:3, 0] = x_ax
+        R4[:3, 1] = -out_ax
+        R4[:3, 2] = z_ax
+        # Recule de `0.38 * thk` vers l'intérieur du cou/poitrail pour un ancrage solide à 100 % !
+        R4[:3, 3] = pts[i] - out_ax * (thk * 0.35)
+        pl.apply_transform(R4)
+        if float(pl.volume) < 0.0:
+            pl.invert()
+        plates.append(pl)
+
+    return mk.union(plates) if len(plates) > 1 else plates[0]
+
+
+def ridge_spines(
+    spine_pts,
+    heights,
+    radii,
+    up_hint=(0.0, 0.25, 1.0),
+    lean_back: float = 0.42,
+    sections: int = 10,
+) -> trimesh.Trimesh:
+    """Génère automatiquement une crête d'épines dorsales courbées le long de n'importe
+    quelle courbe 3D `spine_pts` (cou en S, échine, queue enroulée)."""
+    pts = np.asarray(spine_pts, dtype=float)
+    hts = np.interp(np.linspace(0.0, 1.0, len(pts)), np.linspace(0.0, 1.0, len(heights)), heights)
+    rds = np.interp(np.linspace(0.0, 1.0, len(pts)), np.linspace(0.0, 1.0, len(radii)), radii)
+    hint = np.asarray(up_hint, dtype=float)
+    hint /= max(float(np.linalg.norm(hint)), 1e-8)
+
+    spines: list[trimesh.Trimesh] = []
+    n = len(pts)
+    for i in range(n):
+        tang = pts[min(i + 1, n - 1)] - pts[max(i - 1, 0)]
+        tang /= max(float(np.linalg.norm(tang)), 1e-8)
+        lat = np.array([1.0, 0.0, 0.0], dtype=float)
+        nrm = np.cross(lat, tang)
+        if float(np.dot(nrm, hint)) < 0.0:
+            nrm = -nrm
+        nrm /= max(float(np.linalg.norm(nrm)), 1e-8)
+
+        h = float(hts[i])
+        r = float(rds[i])
+        base = pts[i] - nrm * (r * 0.9)
+        mid = pts[i] + nrm * (h * 0.56) + tang * (h * float(lean_back) * 0.42)
+        tip = pts[i] + nrm * h + tang * (h * float(lean_back))
+        sp = tapered_curve([base, mid, tip], [r, r * 0.58, max(r * 0.16, 0.0018)], sections=sections, smooth_pts=10)
+        spines.append(sp)
+
+    return mk.union(spines) if len(spines) > 1 else spines[0]
+
+
+def bat_wing(
+    shoulder,
+    elbow,
+    wrist,
+    finger_tips: list[tuple[float, float, float]],
+    body_anchors: list[tuple[float, float, float]] | None = None,
+    membrane_thickness: float = 0.011,
+    camber: float = 0.026,
+    arm_radius: float = 0.024,
+    claw_len: float = 0.046,
+) -> tuple[trimesh.Trimesh, trimesh.Trimesh, trimesh.Trimesh]:
+    """Construit une aile de dragon / chauve-souris 100 % solide, étanche et cambrée :
+      - `(arm_and_fingers_mesh, membrane_mesh, thumb_claw_mesh)`
+      - Membrane pleine épaisse (`>= membrane_thickness`) à festons arqués entre phalanges :
+        ne se déchire JAMAIS à la décimation QEM (`LOD0 / LOD1 / LOD2`) !"""
+    sh = np.asarray(shoulder, dtype=float)
+    el = np.asarray(elbow, dtype=float)
+    wr = np.asarray(wrist, dtype=float)
+    tips = [np.asarray(p, dtype=float) for p in finger_tips]
+    if len(tips) < 2:
+        raise ValueError("bat_wing: au moins 2 extrémités de phalanges requises")
+
+    sx = 1.0 if wr[0] >= 0.0 else -1.0
+
+    # 1. Os musclés : humérus -> avant-bras -> phalanges arquées
+    arm_mesh = tapered_curve(
+        [sh, 0.5 * (sh + el) + np.array([0.0, 0.0, 0.012]), el, wr],
+        [arm_radius * 1.28, arm_radius * 1.02, arm_radius * 0.88, arm_radius * 0.72],
+        sections=18,
+        smooth_pts=24,
+    )
+    bone_parts = [arm_mesh]
+
+    finger_curves: list[np.ndarray] = []
+    n_u = 14
+    us = np.linspace(0.0, 1.0, n_u)
+    for fi, tip in enumerate(tips):
+        mid1 = wr + 0.36 * (tip - wr) + np.array([sx * camber * 0.55, 0.0, camber * 0.85])
+        mid2 = wr + 0.72 * (tip - wr) + np.array([sx * camber * 0.30, 0.0, camber * 0.42])
+        ctrl = np.vstack([wr, mid1, mid2, tip])
+        t_c = np.linspace(0.0, 1.0, 4)
+        curve = np.column_stack([CubicSpline(t_c, ctrl[:, k], bc_type="natural")(us) for k in range(3)])
+        finger_curves.append(curve)
+        r_f = arm_radius * max(0.46 - 0.06 * fi, 0.24)
+        bone_parts.append(
+            tapered_curve([wr, mid1, mid2, tip], [r_f, r_f * 0.72, r_f * 0.46, max(r_f * 0.20, 0.0025)], sections=12, smooth_pts=18)
+        )
+
+    # Courbe d'attache interne contre le flanc du corps (`patagium`)
+    if body_anchors and len(body_anchors) >= 2:
+        ba_ctrl = np.asarray(body_anchors, dtype=float)
+    else:
+        flank_end = sh + np.array([0.0, abs(tips[-1][1] - sh[1]) * 0.58, -abs(wr[2] - sh[2]) * 0.30])
+        ba_ctrl = np.vstack([sh, 0.5 * (sh + flank_end) + np.array([sx * 0.012, 0.0, -0.015]), flank_end])
+    t_b = np.linspace(0.0, 1.0, len(ba_ctrl))
+    flank_curve = np.column_stack([PchipInterpolator(t_b, ba_ctrl[:, k])(us) for k in range(3)])
+    all_ribs = [
+        np.column_stack([PchipInterpolator([0.0, 0.5, 1.0], np.vstack([sh, el, wr])[:, k])(us) for k in range(3)]),
+        *finger_curves,
+        flank_curve,
+    ]
+
+    # 2. Panneaux de membrane solides fermés et festonnés entre chaque paire de nervures !
+    mem_panels: list[trimesh.Trimesh] = []
+    n_u_mem = 13
+    us_mem = np.linspace(0.07, 1.0, n_u_mem)
+    all_ribs_mem = [
+        np.column_stack([PchipInterpolator(np.linspace(0.0, 1.0, len(r)), r[:, k])(us_mem) for k in range(3)])
+        for r in all_ribs
+    ]
+    n_v = 9
+    vs = np.linspace(0.0, 1.0, n_v)
+    half_t = max(float(membrane_thickness) * 0.5, 0.0045)
+
+    for ri in range(len(all_ribs_mem) - 1):
+        cA = all_ribs_mem[ri]
+        cB = all_ribs_mem[ri + 1]
+        # Grille surfacique `(n_u_mem, n_v, 3)` avec feston concave au bord de fuite (`u -> 1`)
+        grid = np.zeros((n_u_mem, n_v, 3), dtype=np.float64)
+        for iu, u_val in enumerate(us_mem):
+            scallop = np.sin(math.pi * vs) * (u_val ** 2.2)
+            # Le bord de fuite remonte élégamment en arc gothique vers le poignet !
+            pull_to_wrist = 0.20 * scallop[:, None] * (wr - (0.5 * (cA[iu] + cB[iu])))[None, :]
+            arch_lift = (float(camber) * 0.55 * math.sin(math.pi * u_val)) * scallop[:, None] * np.array([[sx * 0.6, 0.0, 1.0]])
+            base_row = (1.0 - vs)[:, None] * cA[iu][None, :] + vs[:, None] * cB[iu][None, :]
+            grid[iu] = base_row + pull_to_wrist + arch_lift
+
+        # Normales locales lissées de la feuille de membrane pour l'extrusion bilatérale épaisse
+        du_g = np.gradient(grid, axis=0)
+        dv_g = np.gradient(grid, axis=1)
+        nrm_g = np.cross(du_g, dv_g)
+        nrm_len = np.maximum(np.linalg.norm(nrm_g, axis=2, keepdims=True), 1e-8)
+        nrm_g = nrm_g / nrm_len
+
+        top_v = (grid + nrm_g * half_t).reshape(-1, 3)
+        bot_v = (grid - nrm_g * half_t).reshape(-1, 3)
+        nv_sheet = n_u_mem * n_v
+        verts = np.vstack([top_v, bot_v])
+        faces: list[list[int]] = []
+
+        def _idx_t(i_u: int, i_v: int) -> int:
+            return i_u * n_v + i_v
+
+        def _idx_b(i_u: int, i_v: int) -> int:
+            return nv_sheet + i_u * n_v + i_v
+
+        for i_u in range(n_u_mem - 1):
+            for i_v in range(n_v - 1):
+                a, b0 = _idx_t(i_u, i_v), _idx_t(i_u, i_v + 1)
+                c, d = _idx_t(i_u + 1, i_v + 1), _idx_t(i_u + 1, i_v)
+                faces.append([a, b0, c])
+                faces.append([a, c, d])
+                ab, bb = _idx_b(i_u, i_v), _idx_b(i_u, i_v + 1)
+                cb, db = _idx_b(i_u + 1, i_v + 1), _idx_b(i_u + 1, i_v)
+                faces.append([ab, cb, bb])
+                faces.append([ab, db, cb])
+
+        # Couture étanche des 4 bords périmétriques de la feuille
+        perim = (
+            [(0, j) for j in range(n_v - 1)]
+            + [(i, n_v - 1) for i in range(n_u_mem - 1)]
+            + [(n_u_mem - 1, j) for j in range(n_v - 1, 0, -1)]
+            + [(i, 0) for i in range(n_u_mem - 1, 0, -1)]
+        )
+        for k_p in range(len(perim)):
+            u0, v0 = perim[k_p]
+            u1, v1 = perim[(k_p + 1) % len(perim)]
+            t0, t1 = _idx_t(u0, v0), _idx_t(u1, v1)
+            b00, b11 = _idx_b(u0, v0), _idx_b(u1, v1)
+            faces.append([t0, b00, b11])
+            faces.append([t0, b11, t1])
+
+        panel = trimesh.Trimesh(vertices=verts, faces=np.asarray(faces, dtype=np.int64), process=True)
+        panel.fix_normals(multibody=False)
+        if float(panel.volume) < 0.0:
+            panel.invert()
+        mem_panels.append(panel)
+
+    # 3. Griffe crochue d'alula au sommet du poignet (`wrist`)
+    fwd_dir = np.array([sx * 0.14, -0.86, -0.48], dtype=float)
+    fwd_dir /= np.linalg.norm(fwd_dir)
+    claw = tapered_curve(
+        [
+            wr - fwd_dir * (arm_radius * 0.5),
+            wr + fwd_dir * (claw_len * 0.52) + np.array([0.0, 0.0, claw_len * 0.18]),
+            wr + fwd_dir * claw_len - np.array([0.0, 0.0, claw_len * 0.24]),
+        ],
+        [arm_radius * 0.52, arm_radius * 0.30, max(arm_radius * 0.08, 0.002)],
+        sections=12,
+        smooth_pts=14,
+    )
+
+    bones_union = mk.union(bone_parts)
+    mem_union = mk.union(mem_panels) if len(mem_panels) > 1 else mem_panels[0]
+    return bones_union, mem_union, claw
+

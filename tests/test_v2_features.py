@@ -26,7 +26,7 @@ import compare       # noqa: E402
 import meshgen as mg # noqa: E402
 import meshkit as mk # noqa: E402
 import pbr           # noqa: E402
-import preview       # noqa: E402
+import packager      # noqa: E402
 import renderer      # noqa: E402
 import research      # noqa: E402
 import usdz_export   # noqa: E402
@@ -232,14 +232,16 @@ def test_compare_ground_shadow_stripping():
     assert clean_mask[210:, :].sum() < raw_mask[210:, :].sum() * 0.25
 
 
-def test_preview_offline_zero_cdn(tmp_path):
+def test_packager_builds_valid_zip_archive(tmp_path):
+    from pathlib import Path
+    import zipfile
     b = mk.Builder("offline_check", {})
     b.add(mk.sphere(0.1), mk.mat.named_metal("gold", 0.25), name="orb")
     glb = tmp_path / "orb.glb"
     b.scene().export(str(glb))
 
-    html_path = preview.build_preview(str(tmp_path), title="Test Offline", glb=str(glb))
-    html = open(html_path, encoding="utf-8").read()
-    assert "http://" not in html and "https://" not in html, (
-        "preview.html ne doit contenir AUCUNE dépendance CDN externe !")
-    assert "gl_Position" in html and "UNPACK_FLIP_Y_WEBGL" in html
+    zip_path = packager.build_asset_zip(tmp_path, name="offline_check")
+    assert Path(zip_path).is_file()
+    assert zipfile.is_zipfile(zip_path)
+    with zipfile.ZipFile(zip_path) as zf:
+        assert "offline_check/orb.glb" in zf.namelist()

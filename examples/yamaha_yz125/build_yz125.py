@@ -1279,7 +1279,7 @@ def build() -> mk.Builder:
 
 if __name__ == "__main__":
     import game_ready as _gr
-    import preview as _pv
+    import packager as _pk
     import renderer as _rn
 
     t0 = time.perf_counter()
@@ -1330,12 +1330,7 @@ if __name__ == "__main__":
     rep_stl = json.loads(
         subprocess.check_output(["python3", "scripts/validate.py", "--json", "--max-tris", "120000", str(stl_out)], text=True)
     )
-    _pv.build_preview(
-        str(out_dir),
-        title="Yamaha YZ125 Factory Works v4.1 — Roues 32 Rayons + Châssis Deltabox + Moteur YPVS Plein",
-        report=rep_stl,
-        glb=str(glb_path),
-    )
+    zip_out = _pk.build_asset_zip(out_dir, name="yamaha_yz125")
 
     dt = time.perf_counter() - t0
     total_tris = sum(int(g.faces.shape[0]) for g in sc.geometry.values())

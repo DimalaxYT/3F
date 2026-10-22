@@ -49,7 +49,7 @@ import game_ready as gr  # noqa: E402
 import gpu_bridge as gb  # noqa: E402
 import gpu_sculpt as gs  # noqa: E402
 import meshkit as mk  # noqa: E402
-import preview as pv  # noqa: E402
+import packager as pkg  # noqa: E402
 import recipes  # noqa: E402
 import split_stl  # noqa: E402
 
@@ -322,16 +322,10 @@ def run_turbo(
             (out_p / "game_manifest.json").write_text(
                 json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    if export_preview:
-        game_glb = manifest["lods"]["LOD0"]["path"]
-        rbx_glb = manifest.get("engine_exports", {}).get("roblox", {}).get("studio_ready_glb_png")
-        preview_glb = game_glb if Path(game_glb).is_file() else rbx_glb
-        prev_html = pv.build_preview(str(out_p), title=asset_name, report=report, glb=preview_glb)
-        if prev_html:
-            manifest["preview_html"] = prev_html
-            manifest["preview_glb_source"] = Path(preview_glb).name
-            (out_p / "game_manifest.json").write_text(
-                json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+    zip_bundle = pkg.build_asset_zip(out_p, name=asset_name)
+    manifest["bundle_zip"] = str(zip_bundle)
+    (out_p / "game_manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
 
     return manifest
 
@@ -377,7 +371,7 @@ def _plan(args, key: str, out_p: Path) -> None:
     print(f"[plan] sortie     : {out_p}")
     print(f"[plan] livrables  : <name>_game.glb + LOD1/2 | roblox/ (glb PNG + 4 maps + "
           f"setup lua) | unreal/ (SM_ + UCX_ + BC/ORM/N) | .stl étanche | "
-          f"preview.html | qa_game_sheet.png (10 panneaux) | gates.json | "
+          f"<name>.zip | qa_game_sheet.png (10 panneaux) | gates.json | "
           f"qa_summary.md | report.json" + (" | turntable.gif" if args.gif else ""))
     print(f"[plan] gates      : --target {args.gate_target} (19 gates, exit code)")
     print(f"[plan] cache      : {key} ({state})")
@@ -494,7 +488,7 @@ def main(argv=None) -> int:
 def _print_summary(res: dict) -> None:
     """Résumé 8 lignes (économe en tokens) — le manifest complet reste dans
     `game_manifest.json` et s'imprime avec `--json`."""
-    out = Path(res.get("preview_html", "")).parent if res.get("preview_html") else Path(".")
+    out = Path(res.get("bundle_zip", res.get("qa_sheet", ""))).parent if (res.get("bundle_zip") or res.get("qa_sheet")) else Path(".")
     lods = res.get("lods", {})
     rbx = res.get("engine_exports", {}).get("roblox", {})
     gates = res.get("gates", {})
@@ -513,8 +507,7 @@ def _print_summary(res: dict) -> None:
     else:
         print(f"  Gates     : {gates.get('n_pass', '?')}/{gates.get('n_total', '?')} OK "
               f"({'LIVRABLE' if gates.get('all_pass') else 'NON LIVRABLE — voir gates.json'})")
-    print(f"  QA        : {Path(res.get('qa_sheet', '-')).name} | "
-          f"{Path(res.get('preview_html', '-')).name} | qa_summary.md")
+    print(f"  Archive   : {Path(res.get('bundle_zip', '-')).name} | {Path(res.get('qa_sheet', '-')).name} | qa_summary.md")
     print(f"  Dossier   : {out}")
     print("  (manifest complet : game_manifest.json / --json)")
 

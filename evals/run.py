@@ -61,11 +61,12 @@ def run_check(check: str, out: Path) -> tuple[bool, str]:
         lim = int(check.split("<=")[1])
         val = int(man.get("engine_exports", {}).get("roblox", {}).get("max_part_tris", -1))
         return 0 < val <= lim, f"{val} <= {lim}"
-    if check.startswith("preview_size_mb<="):
-        lim = float(check.split("<=")[1])
-        p = out / "preview.html"
-        mb = p.stat().st_size / 1e6 if p.is_file() else -1.0
-        return 0 < mb <= lim, f"{mb:.2f} Mo <= {lim}"
+    if check == "bundle_zip":
+        import zipfile
+        zp_str = man.get("bundle_zip") or ""
+        p = Path(zp_str) if zp_str else next(out.glob("*.zip"), out / "missing.zip")
+        ok = p.is_file() and zipfile.is_zipfile(p)
+        return ok, p.name if ok else "zip absent"
     if check.startswith("stl_watertight:"):
         import trimesh
         p = out / check.split(":", 1)[1]

@@ -24,7 +24,7 @@ jobs:
           pip install -r requirements.txt pytest
       - name: Verify 3D environment stack
         run: python scripts/detect_env.py
-      - name: Run full pytest suite (recipes, meshkit, PBR, meshgen v2, renderer, compare, offline preview)
+      - name: Run full pytest suite (recipes, meshkit, PBR, photo_to_3d, packager ZIP)
         run: pytest -v
       - name: E2E generation (vase & katana, 4 formats + validate)
         run: |

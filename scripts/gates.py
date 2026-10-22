@@ -494,6 +494,16 @@ def check_package(out_dir: str | Path, target: str = "hero") -> dict:
     elif cfg["require_stl"]:
         g.add("stl_watertight", "STL présent (cible print)", False, stl, "<name>.stl")
 
+    # --- archive ZIP prête à télécharger (v6.1) ------------------------------
+    zip_cand = man.get("bundle_zip") or str(out_p / f"{name}.zip")
+    zp = Path(zip_cand) if zip_cand else None
+    zip_ok = False
+    if zp and zp.is_file() and zp.stat().st_size > 256:
+        import zipfile
+        zip_ok = zipfile.is_zipfile(zp)
+    g.add("bundle_zip", "archive <name>.zip complète et valide", zip_ok,
+          zp.name if zp else None, f"{name}.zip")
+
     # --- design de l'albédo (v5.7) -------------------------------------------
     try:
         ok, val = _albedo_design(out_p, name)

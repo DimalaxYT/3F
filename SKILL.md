@@ -8,12 +8,28 @@ description: >-
   3D assets engineered for **Roblox Studio** (`PNG`-embedded `.glb`, exact `Studs`
   scaling `1 Stud = 0.28 m`, budget `< 9 800 tris`/`MeshPart`, `SurfaceAppearance`
   `1024²` avec AO baked, `Neon_*` auto-split, `setup_<Name>.lua`), **Unreal Engine 5**
-  (`SM_<Name>.glb` + `UCX_*` + `ORM` + DirectX `-Y`), 3D printing (`100 % watertight`
-  `.stl`), and interactive offline WebGL2 studio preview (`preview.html`) — works 100 %
-  offline on pure CPU in **Claude.ai**, CLI, or Arena without requiring `generate_image`.
+  (`SM_<Name>.glb` + `UCX_*` + `ORM` + DirectX `-Y`), and 3D printing (`100 % watertight`
+  `.stl`), automatically bundled into a ready-to-download **`<name>.zip`** archive — works
+  100 % offline on pure CPU in **Claude.ai**, CLI, or Arena without `preview.html`.
 ---
 
-# 3d-forge v5.8 — High-Design CAD + Organic SDF Sculptor (**Roblox Studio**, **UE5**, **Print & WebGL**)
+# 3d-forge v6.1 — Photo-Faithful 3D Engine + Organic SDF + Exact CAD (**`.zip` Bundle Ready**)
+
+> ## 🚨 RÈGLE N°0 ABSOLUE : QUAND L'UTILISATEUR ENVOIE UNE PHOTO (« génère-moi ça ») !
+> - **INTERDICTION TOTALE** de prendre une recette générique du catalogue (`dragon_creature`, `car`, `hero_bust`, etc.) ou d'improviser des formes « patate / ballon » quand une photo de référence est fournie !
+> - **PROTOCOLE OBLIGATOIRE PHOTO → 3D EN 3 COMMANDES (`scripts/photo_to_3d.py`)** :
+>   1. **Mesurer la photo (`< 0.5 s`)** :
+>      `python3 scripts/photo_to_3d.py inspect <photo.png> -o exports/ref --height 0.40`
+>      Lis `exports/ref/blueprint_grid.png` avec `read_file` : tu obtiens la silhouette détourée sans ombre au sol, le **ratio exact `L/H`**, la grille métrique graduée `(y, z)` en mètres et la **vraie palette `#RRGGBB` mesurée sur les pixels internes** (zéro couleur criarde inventée !).
+>   2. **Sculpter / modéliser `custom_<nom>.py` sur les vraies coordonnées `(y, z)` du blueprint** :
+>      - **Créatures / dragons / monstres / animaux** : combine `org.Sculpt(res=80)` (corps élancé, cou en S, mâchoire ouverte, muscles) + **`org.displace_scales(mesh, scale_size=0.013, depth=0.0022)`** (vraies écailles 3D gravées, jamais un boudin rouge lisse !) + **`org.armored_scutes(neck_belly_pts, widths)`** (plaques pectorales imbriquées tangentes au cou, jamais de tranches flottantes !) + **`org.bat_wing(shoulder, elbow, wrist, finger_tips, membrane_thickness=0.011)`** (membranes solides épaisses qui ne se déchirent jamais en décimation !) + **`org.ridge_spines`** + `org.tapered_curve` (cornes, griffes, crocs, queue enroulée).
+>      - **Objets mécaniques / véhicules / armes / meubles** : `scripts/meshkit.py` + `scripts/greebles.py` aux cotes exactes lues sur `blueprint_grid.png`.
+>   3. **Forger, comparer côte-à-côte à la photo, et livrer `<nom>.zip`** :
+>      ```bash
+>      python3 scripts/turbo_forge.py custom_<nom>.py --lod0-tris 9200 -o exports/<nom>
+>      python3 scripts/photo_to_3d.py verify <photo.png> exports/<nom>/<nom>_game.glb -o exports/<nom>/photo_match.png
+>      ```
+>      Inspecte **obligatoirement** `exports/<nom>/photo_match.png` (`[Photo demandée | Modèle 3D généré]`) avec `read_file`. Corrige toute divergence de posture/proportion, remets à jour l'archive via `packager.build_asset_zip("exports/<nom>", "<nom>")`, puis **présente / livre `exports/<nom>/<nom>.zip`** (aucun `preview.html` n'est généré !).
 
 > ## 🚨 RÈGLE D'OR ABSOLUE (CLAUDE.AI / CLI / ARENA) — ZÉRO DESSIN 2D `PIL` !
 > - **INTERDICTION FORMELLE** de dessiner des images 2D synthétiques (`PIL.ImageDraw`, `matplotlib`, bruit RGB) pour les passer à `--front` / `--side` (`gpu_sculpt.py`) ! Une ellipse 2D extrudée donne une patate fondue aux couleurs sales.
@@ -68,16 +84,14 @@ python3 scripts/turbo_forge.py katana --lod0-tris 8200 -o out/katana
 python3 scripts/turbo_forge.py custom_asset.py --lod0-tris 4200 -o out/custom_asset
 
 # Sculpture multi-vues UNIQUEMENT depuis vraies images IA photoréalistes :
-python3 scripts/turbo_forge.py --front f.png --side s.png --name creature -o out/creature
+python3 scripts/turbo_forge.py --front f.png --side s.png --name creature -o exports/creature
 
 # Options : --target hero|ugc|print | --split-bed (plateau 256 mm) | --gif | --json
-# Live preview navigateur (sandbox Arena / serveur local) :
-python3 scripts/serve_preview.py out/<nom> --port 8000   # http://0.0.0.0:8000/preview.html
 ```
 
-Chaque run écrit dans `out/<nom>/` : `<nom>_game.glb` (échelle métrique vraie `1.0x`, WebP léger, verre/clearcoat/néon) + LOD1/LOD2, `roblox/` (`<name>_roblox.glb` PNG pur en `Studs` + 4 maps + `setup_<name>.lua`), `unreal/` (`SM_<name>.glb` + `UCX_*` + BC/ORM/N DirectX `-Y`), `<nom>.stl` 100 % étanche, `preview.html` WebGL studio hors-ligne, `qa_game_sheet.png`, `gates.json`, `qa_summary.md` et `game_manifest.json`.
+Chaque run écrit dans `exports/<nom>/` et empaquette automatiquement tout dans **`exports/<nom>/<nom>.zip`** : `<nom>_game.glb` (échelle métrique vraie `1.0x`, WebP léger, verre/clearcoat/néon) + LOD1/LOD2, `roblox/` (`<name>_roblox.glb` PNG pur en `Studs` + 4 maps + `setup_<name>.lua`), `unreal/` (`SM_<name>.glb` + `UCX_*` + BC/ORM/N DirectX `-Y`), `<nom>.stl` 100 % étanche, `qa_game_sheet.png`, `gates.json`, `qa_summary.md` et `game_manifest.json` (**sans aucun `preview.html`**).
 
-**Contrôle visuel obligatoire** : ouvre **toujours** `qa_game_sheet.png` avec `read_file` et vérifie **face (panneau 5), profil (panneau 6), 3/4 LOD0 (panneau 2) et ORM (panneau 9)** avant de livrer (`present_file` sur `preview.html`). Si un détail est enterré, mal proportionné ou mal placé, corrige les coordonnées une fois et relance !
+**Contrôle visuel & livraison `.zip` obligatoires** : ouvre **toujours** `qa_game_sheet.png` (et `photo_match.png` si généré depuis une photo) avec `read_file`, vérifie face, profil, 3/4 LOD0 et ORM, puis **livre `exports/<nom>/<nom>.zip` directement à l'utilisateur** (`present_file` sur `<nom>.zip`).
 
 ## 3. Cheatsheet API exact (`custom_<name>.py` — prêt à copier sans lire le code)
 
