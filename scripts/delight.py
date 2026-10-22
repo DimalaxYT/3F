@@ -92,46 +92,76 @@ def delight_albedo_3d(
     lin = _srgb_to_linear(flat_rgb[mask]).astype(np.float64)
     lum = 0.2126 * lin[:, 0] + 0.7152 * lin[:, 1] + 0.0722 * lin[:, 2]
 
-    # 1. Suppression douce des pics spéculaires studio (haute luminance + faible saturation)
+    # 1. Suppression douce des pics spéculaires studio isolés (< 3.5 % des texels)
+    # sans JAMAIS écraser un matériau intrinsèquement blanc (yeux, emblème, bande peinte) !
     spec_removed_frac = 0.0
     if remove_specular:
         mx = lin.max(axis=1)
         mn = lin.min(axis=1)
         sat = (mx - mn) / np.maximum(mx, 1e-4)
-        p90 = float(np.percentile(lum, 90))
-        p65 = float(np.percentile(lum, 65))
-        spec_w = np.clip((lum - p90) / max(p90 * 0.45, 1e-3), 0.0, 1.0) * np.clip(1.0 - sat * 2.2, 0.0, 1.0)
-        if spec_w.max() > 0.05:
-            scale_down = (p65 / np.maximum(lum, 1e-4))
-            lin = lin * (1.0 - spec_w[:, None] * 0.75 * (1.0 - scale_down[:, None]))
-            lum = 0.2126 * lin[:, 0] + 0.7152 * lin[:, 1] + 0.0722 * lin[:, 2]
-            spec_removed_frac = float((spec_w > 0.2).mean())
+        p96 = float(np.percentile(lum, 96.5))
+        p80 = float(np.percentile(lum, 80.0))
+        if p96 > p80 * 1.45:
+            spec_w = (
+                np.clip((lum - p96) / max(p96 * 0.35, 1e-3), 0.0, 1.0)
+                * np.clip(1.0 - sat * 2.5, 0.0, 1.0)
+            )
+            if 0.0 < float((spec_w > 0.2).mean()) < 0.04:
+                scale_down = p80 / np.maximum(lum, 1e-4)
+                lin = lin * (1.0 - spec_w[:, None] * 0.65 * (1.0 - scale_down[:, None]))
+                lum = 0.2126 * lin[:, 0] + 0.7152 * lin[:, 1] + 0.0722 * lin[:, 2]
+                spec_removed_frac = float((spec_w > 0.2).mean())
 
-    # 2. Estimation robuste IRLS du champ d'irradiance SH d'ordre 2 sur log-luminance
-    B = sh9_basis(n_valid)
+    # 2. Normalisation d'albédo intrinsèque par cluster chromatique avant SH IRLS :
+    # empêche de confondre un visage clair (-Y), une casquette rouge (+Z) et des cheveux
+    # sombres (+Y) avec un spot lumineux, tout en isolant l'ombrage directionnel pur !
     log_lum = np.log(np.clip(lum, 1e-3, 4.0))
-    weights = np.ones_like(log_lum)
+    rgb_sum = np.maximum(lin.sum(axis=1), 1e-5)
+    cr = np.clip((lin[:, 0] / rgb_sum * 12.0).astype(np.int32), 0, 11)
+    cg = np.clip((lin[:, 1] / rgb_sum * 12.0).astype(np.int32), 0, 11)
+    cmax = lin.max(axis=1)
+    cmin = lin.min(axis=1)
+    achrom = ((cmax - cmin) / np.maximum(cmax, 1e-4)) < 0.12
+    achrom_band = np.ones(len(lum), dtype=np.int32)
+    if np.count_nonzero(achrom) >= 32:
+        p10_a, p90_a = np.percentile(lum[achrom], [10.0, 90.0])
+        if p90_a / max(p10_a, 1e-4) > 8.0:
+            achrom_band = np.where(lum < 0.075, 0, np.where(lum > 0.55, 2, 1)).astype(np.int32)
+    bin_id = cr * 36 + cg * 3 + np.where(achrom, achrom_band, 1)
+
+    intrinsic_base = np.full_like(log_lum, float(np.median(log_lum)))
+    min_cluster = max(16, int(0.008 * len(lum)))
+    _, inv_idx, counts = np.unique(bin_id, return_inverse=True, return_counts=True)
+    for b_idx, cnt in enumerate(counts):
+        if cnt >= min_cluster:
+            m_b = inv_idx == b_idx
+            intrinsic_base[m_b] = float(np.median(log_lum[m_b]))
+    shade_obs = log_lum - intrinsic_base
+
+    # 3. Estimation robuste IRLS du champ d'irradiance SH d'ordre 2 sur le résidu d'ombrage
+    B = sh9_basis(n_valid)
+    weights = np.ones_like(shade_obs)
     reg = 1e-2 * np.eye(9)
     reg[0, 0] = 0.0
     coeffs = np.zeros(9, dtype=np.float64)
     for _ in range(4):
         Bw = B * weights[:, None]
-        coeffs = np.linalg.solve(B.T @ Bw + reg, Bw.T @ log_lum)
+        coeffs = np.linalg.solve(B.T @ Bw + reg, Bw.T @ shade_obs)
         pred = B @ coeffs
-        resid = np.abs(log_lum - pred)
+        resid = np.abs(shade_obs - pred)
         mad = float(np.median(resid)) * 1.4826 + 1e-3
-        # Huber-like weight : ignore les frontières nettes entre matériaux sombre/clair !
         weights = np.where(resid <= 1.5 * mad, 1.0, (1.5 * mad) / np.maximum(resid, 1e-6))
 
     log_shade = B @ coeffs
     mean_log_shade = float(np.median(log_shade))
-    rel_shade = np.exp(np.clip((log_shade - mean_log_shade) * float(strength), -0.85, 0.85))
+    rel_shade = np.exp(np.clip((log_shade - mean_log_shade) * float(strength), -0.75, 0.75))
 
     # Variance directionnelle avant / après de-lighting (métrique objective vérifiable en test !)
-    before_corr = float(np.std(B @ np.linalg.lstsq(B, log_lum, rcond=None)[0]))
+    before_corr = float(np.std(B @ np.linalg.lstsq(B, shade_obs, rcond=None)[0]))
     delit_lin = np.clip(lin / rel_shade[:, None], 0.0, 1.0)
     lum_after = 0.2126 * delit_lin[:, 0] + 0.7152 * delit_lin[:, 1] + 0.0722 * delit_lin[:, 2]
-    after_corr = float(np.std(B @ np.linalg.lstsq(B, np.log(np.clip(lum_after, 1e-3, 4.0)), rcond=None)[0]))
+    shade_after = np.log(np.clip(lum_after, 1e-3, 4.0)) - intrinsic_base
+    after_corr = float(np.std(B @ np.linalg.lstsq(B, shade_after, rcond=None)[0]))
     reduction = max(0.0, 1.0 - after_corr / max(before_corr, 1e-6))
 
     out_flat = flat_rgb.copy()

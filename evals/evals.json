@@ -1,6 +1,6 @@
 {
   "skill_name": "3d-forge",
-  "note": "Les evals 1-4 couvrent le catalogue v1 ; les evals 5-10 couvrent le chemin v5.2 obligatoire (turbo_forge, gates, Roblox/UE5, print, UGC). `harness.cmd` est exécuté headless par evals/run.py ({out} = dossier temporaire), `harness.checks` sont vérifiés sur game_manifest.json / gates.json / fichiers.",
+  "note": "Les evals 1-4 couvrent le catalogue v1 ; les evals 5-12 couvrent le chemin v5.8 obligatoire (turbo_forge, hard-surface, multi-vues, personnages & bustes organiques CPU purs Claude.ai, gates, Roblox/UE5, print, UGC). `harness.cmd` est exécuté headless par evals/run.py ({out} = dossier temporaire), `harness.checks` sont vérifiés sur game_manifest.json / gates.json / fichiers.",
   "evals": [
     {
       "id": 1,
@@ -101,6 +101,36 @@
         "cmd": ["python3", "scripts/gates.py", "{out5}", "--target", "hero"],
         "checks": ["gates_all_pass", "qa_summary"],
         "depends_on": 5
+      }
+    },
+    {
+      "id": 11,
+      "prompt": "Fais-moi un buste 3D expressif de Mario avec sa casquette rouge, son badge M blanc, sa moustache et son socle, prêt pour Roblox Studio, UE5 et l'impression 3D — sans aucun outil d'image externe (Claude.ai CPU pur).",
+      "expected_output": "Buste SDF organique + casquette + yeux 4 couches + badge M net + socle étanche, 25/25 gates OK, preview.html léger",
+      "files": [],
+      "harness": {
+        "cmd": ["python3", "scripts/turbo_forge.py", "hero_bust", "--lod0-tris", "4200", "-o", "{out}"],
+        "checks": ["gates_all_pass", "stl_watertight_manifest", "preview_size_mb<=4", "qa_summary"]
+      }
+    },
+    {
+      "id": 12,
+      "prompt": "Génère un personnage stylisé complet debout avec veste, yeux expressifs, coiffure sculptée et sockets de mains pour Roblox Studio.",
+      "expected_output": "Personnage complet stylisé watertight, gates 100 % OK, preview léger, < 9 800 tris",
+      "files": [],
+      "harness": {
+        "cmd": ["python3", "scripts/turbo_forge.py", "stylized_character", "--lod0-tris", "4400", "-o", "{out}"],
+        "checks": ["gates_all_pass", "stl_watertight_manifest", "max_part_tris<=9800", "preview_size_mb<=4"]
+      }
+    },
+    {
+      "id": 13,
+      "prompt": "Crée un masque japonais traditionnel de Tengu en bois laqué rouge urushi avec long nez sculpté, yeux dorés, crocs, bandeau doré, envers creux noir propre et cordon arrière, en moins de 30 secondes.",
+      "expected_output": "Masque Tengu sculpté SDF C¹ + trim_inside sans dépassement arrière + STL 100 % watertight + 25/25 gates OK",
+      "files": [],
+      "harness": {
+        "cmd": ["python3", "scripts/turbo_forge.py", "tengu_mask", "--lod0-tris", "4800", "-o", "{out}"],
+        "checks": ["gates_all_pass", "stl_watertight_manifest", "max_part_tris<=9800", "preview_size_mb<=4", "qa_summary"]
       }
     }
   ]

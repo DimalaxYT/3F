@@ -1,20 +1,25 @@
-# 3d-forge v5.7 🎮🟥⚔️🐉✨
+# 3d-forge v5.9 🎮🟥⚔️👺✨
 
-**Moteur Ultra Design & Texture PBR photoréaliste pensé en priorité pour Roblox Studio (`SurfaceAppearance` Dual-`1024²` + `Studs` + `< 10k tris` + `Neon` + `Luau`) et Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`) — propulsé par Kitbash Mécanique Hard-Surface (`greebles.py`) + Peinture Multi-Vues GPU Z-Buffer (`gpu_bridge.py`) + Sculpture Organique GPU (`gpu_sculpt.py`), zéro GPU requis côté utilisateur.**
+**Moteur Ultra Design, Sculpture Organique SDF `C¹` (`organic.py`) & Texture PBR photoréaliste pensé en priorité pour Roblox Studio (`SurfaceAppearance` Dual-`1024²` + `Studs` + `< 10k tris` + `Neon` + `Luau`), Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`), l'impression 3D `100 % watertight` et le WebGL2 hors-ligne (`preview.html`) — `12 à 20 s` CPU tout compris, zéro GPU requis côté utilisateur et zéro boucle infinie !**
 
 ![Vitrine Technique 3d-forge v5.1 — Ultra Design & Texture Engine](docs/img/v5_1_ultra_showcase.png)
 
-## 🤖 Prompt pour Agents IA (`Arena / GLM / Claude / Cursor / Codex`)
+## 🤖 Prompt pour Agents IA (`Arena / z.ai / GLM / Claude / Cursor / Codex`)
 
 Copie-colle simplement ce bloc dans ton Agent IA (bouton **📋** en haut à droite) et remplace la dernière ligne *(voir aussi [`PROMPT_AGENT_IA.md`](PROMPT_AGENT_IA.md) ; [`AGENTS.md`](AGENTS.md) et [`CLAUDE.md`](CLAUDE.md) sont également chargés automatiquement si tu connectes le repo)* :
 
 ```markdown
 Utilise le skill 3D de ce dépôt GitHub : https://github.com/DimalaxYT/3F
-1. Clone le dépôt (s'il n'est pas déjà présent) et vérifie les dépendances de `requirements.txt`.
-2. Lis impérativement `SKILL.md` et `AUTOCRITIQUE.md` avant de commencer.
-3. Crée l'objet suivant avec `3d-forge v5.1` (en utilisant `scripts/turbo_forge.py` avec `meshkit.py` + `greebles.py` si c'est mécanique/architectural, ou `gpu_sculpt.py` si c'est une sculpture organique, + `--split-bed` via `scripts/split_stl.py` s'il dépasse 256×256×256 mm) et livre-moi les `.glb` (standard + Roblox Studio + UE5), le `.stl` 100 % étanche, le `preview.html` interactif et le rendu studio :
+1. Clone le dépôt (s'il n'est pas déjà présent) et installe `requirements.txt` si nécessaire.
+2. Lis impérativement `SKILL.md` et `AUTOCRITIQUE.md` avant d'écrire une seule ligne de code.
+3. RÈGLES D'OR QUALITÉ & VITESSE (< 60 s au total — ZÉRO BOUCLE INFINIE !) :
+   - ZÉRO dessin 2D synthétique (`PIL` / `matplotlib`) dans `--front` / `--side` et ZÉRO « soupe de primitives » brutes !
+   - Utilise une recette du catalogue (`hero_bust`, `tengu_mask`, `stylized_character`, `dragon_creature`, `katana`, `sci_fi_crate`, `car`… — 24 recettes dans `references/recipes.md`) OU écris `custom_<nom>.py` avec :
+     • `scripts/meshkit.py` + `scripts/organic.py` (`org.Sculpt` + `s.sweep` + `b.trim_inside(cutter)` sur tout masque/casque creux + `mk.mat.lacquer`/`skin`/`enamel`) pour tout personnage, buste, masque ou créature ;
+     • `scripts/meshkit.py` + `scripts/greebles.py` pour le mécanique / hard-surface / armes / véhicules.
+   - Lance UNE SEULE commande : `python3 scripts/turbo_forge.py <recette | custom.py> -o out/<nom>` (~15 s CPU tout compris), inspecte `out/<nom>/qa_game_sheet.png`, fais AU MAXIMUM 1 passe de retouche si besoin, et livre immédiatement `.glb` (standard + Roblox + UE5), `.stl` 100 % étanche, `preview.html` et `qa_game_sheet.png` :
 
-Objet demandé : [ÉCRIS TON IDÉE ICI — ex: un sabre laser gravé noir et argent de 28 cm prêt pour Roblox Studio et l'impression 3D]
+Objet demandé : [ÉCRIS TON IDÉE ICI — ex: un masque de Tengu japonais en bois laqué rouge et or avec son cordon, prêt pour Roblox Studio, UE5 et l'impression 3D]
 ```
 
 > ### Nouveautés `v5.2 → v5.7 — QA mesurable, vitesse, reproductibilité, design`
@@ -95,8 +100,8 @@ python3 scripts/turbo_forge.py mon_arme_custom.py --lod0-tris 4200 -o out/mon_ar
 <!-- BENCH:START -->
 | asset | high-poly | LOD0 (poids) | LOD1 | LOD2 | draw calls | turbo CPU (indicatif) |
 |---|---|---|---|---|---|---|
-| `katana` | 6,508 tris | **6,840 tris** (965 Ko) | 3,129 tris | 1,228 tris | 10 ➔ 1 | 15.94 s |
-| `sci_fi_crate` | 13,076 tris | **3,796 tris** (1063 Ko) | 1,520 tris | 836 tris | 44 ➔ 3 | 15.64 s |
+| `katana` | 6,840 tris | **6,516 tris** (896 Ko) | 3,129 tris | 1,721 tris | 10 ➔ 1 | 11.94 s |
+| `sci_fi_crate` | 10,726 tris | **3,656 tris** (1161 Ko) | 1,516 tris | 798 tris | 44 ➔ 3 | 12.06 s |
 <!-- BENCH:END -->
 
 > Mesures reproductibles : `python3 scripts/bench.py` (régénère `docs/bench.json`

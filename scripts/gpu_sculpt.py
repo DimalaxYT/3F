@@ -116,20 +116,45 @@ def _prep_silhouette_view(path: str | Path, size: int = 384) -> tuple[np.ndarray
         inner_valid = mask_c
     _, idx = ndimage.distance_transform_edt(~inner_valid, return_indices=True)
     rgb_clean = rgb_c[idx[0], idx[1]].copy()
+    # Débruitage médian 3x3 préservant à 100 % les bords francs (yeux, badges) tout en
+    # éliminant le bruit granulaire parasite sur la peau et les tissus unis !
+    rgb_clean = ndimage.median_filter(rgb_clean, size=(3, 3, 1))
 
     gray = 0.299 * rgb_clean[..., 0] + 0.587 * rgb_clean[..., 1] + 0.114 * rgb_clean[..., 2]
     detail = gray - ndimage.gaussian_filter(gray, sigma=2.8)
     return rgb_clean, mask_c, detail.astype(np.float32)
 
 
+def _synthesize_clean_back_from_side(
+    f_rgb: np.ndarray,
+    s_rgb: np.ndarray,
+    s_mask: np.ndarray,
+) -> np.ndarray:
+    """Synthétise un dos cohérent sans jamais projeter le visage (yeux/nez/bouche) à l'arrière :
+    extrait à chaque hauteur Z la couleur arrière réelle visible sur la vue de profil `s_rgb`."""
+    h = f_rgb.shape[0]
+    out = f_rgb[:, ::-1, :].copy()
+    for r in range(h):
+        cols = np.nonzero(s_mask[r])[0]
+        if len(cols) >= 4:
+            c0 = int(cols[max(0, int(0.08 * len(cols)))])
+            c1 = int(cols[max(1, int(0.42 * len(cols)))])
+            row_col = np.median(s_rgb[r, c0:max(c0 + 1, c1 + 1), :], axis=0)
+            out[r, :] = row_col[None, :]
+    return ndimage.gaussian_filter(out, sigma=(4.5, 6.5, 0.0)).astype(np.float32)
+
+
 def sculpt_from_views(
     front_path: str | Path,
-    side_path: str | Path,
+    side_path: str | Path | None = None,
     back_path: str | Path | None = None,
     grid_res: int = 136,
     target_height: float = 0.28,
-    relief_mm: float = 1.15,
-    plinth_base: bool = True,
+    relief_mm: float = 0.85,
+    plinth_base: bool = False,
+    depth_path: str | Path | None = None,
+    depth_span: float | None = None,
+    hollow_thickness: float = 0.0,
 ) -> tuple[trimesh.Trimesh, dict]:
     """Reconstruit une sculpture 3D organique haute définition 100 % `is_watertight`
     orientée selon la convention standard `3d-forge` :
@@ -137,17 +162,28 @@ def sculpt_from_views(
       - `+Y` = DOS (`back_path`, crête dorsale vers `+Y`)
       - `+X` = CÔTÉ DROIT (`side_path` regarde le flanc droit, museau à droite = `-Y`)
       - `+Z` = HAUT (`z = 0` posé à plat sur le plateau d'impression / sol).
+    Supporte également :
+      - `depth_path` (`--depth`) : carte de profondeur alignée à `front_path` (blanc = proche
+        caméra `-Y`, sombre = en retrait `+Y`) pour préserver à 100 % le relief des nez longs,
+        orbites, crocs, pommettes et visières sans jamais gonfler le visage en ballon !
+      - `hollow_thickness` (`> 0`, en mètres, ex. `0.012`) : évide automatiquement la face
+        arrière pour les masques (Tengu, Oni), casques, boucliers et épaulières !
     """
     from skimage.measure import marching_cubes
 
     sz = int(grid_res)
     tex_sz = 768
     f_hi, f_mhi, _ = _prep_silhouette_view(front_path, size=tex_sz)
-    s_hi, s_mhi, _ = _prep_silhouette_view(side_path, size=tex_sz)
-    if back_path and Path(back_path).exists():
+    has_real_side = bool(side_path and Path(side_path).exists())
+    if has_real_side:
+        s_hi, s_mhi, _ = _prep_silhouette_view(side_path, size=tex_sz)
+    else:
+        s_hi, s_mhi = f_hi.copy(), f_mhi.copy()
+    has_real_back = bool(back_path and Path(back_path).exists())
+    if has_real_back:
         b_hi, b_mhi, _ = _prep_silhouette_view(back_path, size=tex_sz)
     else:
-        b_hi, b_mhi = f_hi[:, ::-1, :], f_mhi[:, ::-1]
+        b_hi, b_mhi = f_hi[:, ::-1, :].copy(), f_mhi[:, ::-1].copy()
 
     f_ys_hi = np.nonzero(f_mhi)[0]
     fy0_hi, fy1_hi = float(f_ys_hi.min()), float(f_ys_hi.max())
@@ -160,7 +196,10 @@ def sculpt_from_views(
         return rgb_in[src_y], m_in[src_y]
 
     s_hi, s_mhi = _align_vertical_hi(s_hi, s_mhi, fy0_hi, fy1_hi, tex_sz)
-    b_hi, b_mhi = _align_vertical_hi(b_hi, b_mhi, fy0_hi, fy1_hi, tex_sz)
+    if has_real_back:
+        b_hi, b_mhi = _align_vertical_hi(b_hi, b_mhi, fy0_hi, fy1_hi, tex_sz)
+    else:
+        b_hi = _synthesize_clean_back_from_side(f_hi, s_hi, s_mhi)
 
     idx_ds = np.linspace(0, tex_sz - 1, sz).round().astype(np.int32)
     f_mask = f_mhi[np.ix_(idx_ds, idx_ds)]
@@ -190,9 +229,68 @@ def sculpt_from_views(
     prof_x = _chord_medial_profile(fb_mask[::-1, :])    # (iz, ix)
     prof_y = _chord_medial_profile(s_mask_y[::-1, :])   # (iz, iy)
 
-    ux = 1.0 - prof_x[:, :, None]   # (iz, ix, 1)
-    uy = 1.0 - prof_y[:, None, :]   # (iz, 1, iy)
-    occ_zxy = (ux * ux + uy * uy) <= 1.0
+    voxel_m = float(target_height) / float(max(fy1 - fy0, 1.0))
+
+    has_depth = bool(depth_path and Path(depth_path).exists())
+    if has_depth:
+        # Aligne `depth_path` pixel-à-pixel sur le recadrage exact de `front_path` !
+        arr_f_raw = np.asarray(Image.open(front_path).convert("RGB"), dtype=np.float32) / 255.0
+        hf, wf, _ = arr_f_raw.shape
+        bf = max(4, min(hf, wf) // 32)
+        bg_f = np.median(np.concatenate([
+            arr_f_raw[:bf, :, :].reshape(-1, 3),
+            arr_f_raw[:, :bf, :].reshape(-1, 3),
+            arr_f_raw[:, -bf:, :].reshape(-1, 3),
+        ], axis=0), axis=0)
+        dist_f = np.linalg.norm(arr_f_raw - bg_f[None, None, :], axis=2)
+        sat_f = arr_f_raw.max(axis=2) - arr_f_raw.min(axis=2)
+        m_f0 = ndimage.binary_fill_holes(ndimage.binary_closing((dist_f > 0.135) | (sat_f > 0.085), iterations=2))
+        lbl_f, nc_f = ndimage.label(m_f0)
+        if nc_f > 1:
+            m_f0 = lbl_f == (int(np.argmax(ndimage.sum(m_f0, lbl_f, range(1, nc_f + 1)))) + 1)
+        ys0, xs0 = np.nonzero(m_f0)
+        span0 = int(max(int(ys0.max()) - int(ys0.min()) + 1, int(xs0.max()) - int(xs0.min()) + 1) * 1.05)
+        cy0, cx0 = 0.5 * (ys0.min() + ys0.max()), 0.5 * (xs0.min() + xs0.max())
+
+        d_raw = Image.open(depth_path).convert("L").resize((wf, hf), Image.Resampling.BILINEAR)
+        d_arr = np.asarray(d_raw, dtype=np.float32) / 255.0
+        yy_d = np.clip(np.round(cy0 + (np.linspace(0, 1, sz) - 0.5) * span0).astype(np.int32), 0, hf - 1)
+        xx_d = np.clip(np.round(cx0 + (np.linspace(0, 1, sz) - 0.5) * span0).astype(np.int32), 0, wf - 1)
+        d_crop = d_arr[np.ix_(yy_d, xx_d)]
+        fg_vals = d_crop[fb_mask]
+        lo_d = float(np.percentile(fg_vals, 2.0)) if fg_vals.size else 0.0
+        hi_d = float(np.percentile(fg_vals, 99.2)) if fg_vals.size else 1.0
+        d_norm = np.clip((d_crop - lo_d) / max(hi_d - lo_d, 1e-3), 0.0, 1.0)
+        d_norm = ndimage.gaussian_filter(d_norm, sigma=0.85)[::-1, :]  # (iz, ix), 1=proche caméra (-Y)
+
+        if has_real_side and s_mask_y.any():
+            ys_cols = np.nonzero(s_mask_y)[1]
+            span_y_vox = float(max(int(ys_cols.max()) - int(ys_cols.min()) + 1, sz * 0.22))
+        else:
+            span_y_m = float(depth_span) if depth_span else float(target_height) * 0.52
+            span_y_vox = max(span_y_m / max(voxel_m, 1e-5), 6.0)
+
+        iy_grid = np.arange(sz, dtype=np.float32)[None, None, :]
+        iy_front_min = max(3.0, 0.5 * (sz - span_y_vox))
+        y_front = iy_front_min + (1.0 - d_norm)[:, :, None] * (span_y_vox * (0.82 if hollow_thickness > 0 else 0.62))
+        fb_z = fb_mask[::-1, :][:, :, None]
+        if hollow_thickness > 0:
+            wall_vox = max(float(hollow_thickness) / max(voxel_m, 1e-5), 2.6)
+            occ_zxy = fb_z & (iy_grid >= y_front) & (iy_grid <= y_front + wall_vox)
+        else:
+            y_back = iy_front_min + span_y_vox * (0.60 + 0.40 * prof_x[:, :, None])
+            occ_zxy = fb_z & (iy_grid >= y_front) & (iy_grid <= np.maximum(y_front + 2.5, y_back))
+    else:
+        ux = 1.0 - prof_x[:, :, None]   # (iz, ix, 1)
+        uy = 1.0 - prof_y[:, None, :]   # (iz, 1, iy)
+        occ_zxy = (ux * ux + uy * uy) <= 1.0
+        if hollow_thickness > 0:
+            wall_vox = int(max(round(float(hollow_thickness) / max(voxel_m, 1e-5)), 3))
+            shifted = np.zeros_like(occ_zxy)
+            if wall_vox < sz:
+                shifted[:, :, wall_vox:] = occ_zxy[:, :, :-wall_vox]
+            occ_zxy = occ_zxy & (~shifted)
+
     occ = np.transpose(occ_zxy, (1, 2, 0))  # (ix, iy, iz)
 
     # Ne conserve que la composante principale 3D connectée (élimine tout îlot flottant !)
@@ -200,8 +298,6 @@ def sculpt_from_views(
     if n3 > 1:
         c_sizes = ndimage.sum(occ, lbl3, range(1, n3 + 1))
         occ = lbl3 == (int(np.argmax(c_sizes)) + 1)
-
-    voxel_m = float(target_height) / float(max(fy1 - fy0, 1.0))
 
     # VRAIE distance signée euclidienne 3D (mètres) + lissage organique doux !
     sdf = (ndimage.distance_transform_edt(~occ) - ndimage.distance_transform_edt(occ)).astype(np.float32) * voxel_m
@@ -249,7 +345,10 @@ def sculpt_from_views(
         p2 = mk.chamfer_box(pw * 0.88, pd * 0.88, plinth_h, c=min(pw, pd) * 0.05)
         raw_mesh = mk.union([raw_mesh, p1, p2])
     else:
-        raw_mesh = mk._from_manifold(mk._to_manifold(raw_mesh))
+        raw_mesh.fix_normals(multibody=False)
+        if not raw_mesh.is_watertight:
+            trimesh.repair.fill_holes(raw_mesh)
+            raw_mesh.fix_normals(multibody=False)
 
     raw_mesh.vertices[:, 2] -= raw_mesh.bounds[0][2]
 
@@ -271,7 +370,7 @@ def bake_sculpt_pbr(
     mesh: trimesh.Trimesh,
     view_pack: dict,
     resolution: int = 1024,
-    metallic_gold_boost: bool = True,
+    metallic_gold_boost: bool = False,
     delight_albedo: bool = True,
 ) -> tuple[trimesh.Trimesh, Image.Image, Image.Image, Image.Image]:
     """Déplie `mesh` avec `xatlas` (pré-décimé proprement en C++ à `<= 22 000 tris`
@@ -343,15 +442,18 @@ def bake_sculpt_pbr(
     c_side = _sample_bilin(view_pack["side_rgb"], uy_side, v_img)
 
     # Pondération angulaire par normales : `-Y` = AVANT (`front`), `+Y` = DOS (`back`), `±X` = PROFIL (`side`)
-    wf = np.maximum(0.0, -nrm[:, 1]) ** 2.2
-    wb = np.maximum(0.0, nrm[:, 1]) ** 2.2
-    ws = np.abs(nrm[:, 0]) ** 2.2 + 0.12 * np.abs(nrm[:, 2]) ** 2.0
+    wf = np.maximum(0.0, -nrm[:, 1]) ** 2.0 + 0.16 * np.where(nrm[:, 1] <= 0.0, np.abs(nrm[:, 2]) ** 2.0, 0.0)
+    wb = np.maximum(0.0, nrm[:, 1]) ** 2.0 + 0.16 * np.where(nrm[:, 1] > 0.0, np.abs(nrm[:, 2]) ** 2.0, 0.0)
+    ws = np.abs(nrm[:, 0]) ** 2.4
     wsum = wf + wb + ws + 1e-6
     rgb = (wf[:, None] * c_front + wb[:, None] * c_back + ws[:, None] * c_side) / wsum[:, None]
 
-    # Socle architectural de musée en basalte noir satiné pur sur toute la hauteur du socle (`z <= plinth_h`)
-    plinth_top = z_sculpt0 / 0.72 * 1.03
-    blend_p = np.clip((plinth_top - pos[:, 2]) / max(z_sculpt0 * 0.10, 1e-4), 0.0, 1.0)
+    # Socle architectural de musée en basalte noir satiné UNIQUEMENT si `plinth_base=True` (`z_sculpt0 > 0`)
+    if z_sculpt0 > 1e-5:
+        plinth_top = z_sculpt0 / 0.72 * 1.03
+        blend_p = np.clip((plinth_top - pos[:, 2]) / max(z_sculpt0 * 0.10, 1e-4), 0.0, 1.0)
+    else:
+        blend_p = np.zeros(len(pos), dtype=np.float32)
     basalt_col = np.array([0.095, 0.098, 0.106], dtype=np.float32)
     rgb = rgb * (1.0 - blend_p[:, None]) + basalt_col[None, :] * blend_p[:, None]
     is_plinth = blend_p > 0.5
@@ -360,14 +462,21 @@ def bake_sculpt_pbr(
     # d'éliminer les ombres/reflets studio cuits avant export vers Unreal / Unity / Godot !
     if delight_albedo:
         import delight as dl
-        rgb_non_plinth, _ = dl.delight_albedo_3d(rgb, nrm, strength=0.78)
+        rgb_non_plinth, _ = dl.delight_albedo_3d(rgb, nrm, strength=0.72)
         rgb = np.where(is_plinth[:, None], rgb, rgb_non_plinth)
 
     lum = 0.299 * rgb[:, 0] + 0.587 * rgb[:, 1] + 0.114 * rgb[:, 2]
-    warmth = np.clip(rgb[:, 0] - rgb[:, 2], 0.0, 1.0)
-    is_gold = np.clip((warmth - 0.075) * 6.5, 0.0, 1.0) if metallic_gold_boost else np.zeros_like(lum)
-    metal_px = np.clip(0.05 + 0.85 * is_gold, 0.0, 1.0)
-    rough_px = np.clip((0.76 - 0.30 * lum) * (1.0 - 0.55 * is_gold) + 0.20 * is_gold, 0.12, 0.94)
+    if metallic_gold_boost:
+        gold_hue = (
+            np.clip((rgb[:, 1] - rgb[:, 2] * 1.35) * 4.5, 0.0, 1.0)
+            * np.clip((rgb[:, 0] - 0.38) * 3.5, 0.0, 1.0)
+            * np.clip(1.65 - rgb[:, 0] / np.maximum(rgb[:, 1], 1e-3), 0.0, 1.0)
+        )
+        is_gold = np.clip(gold_hue, 0.0, 1.0)
+    else:
+        is_gold = np.zeros_like(lum)
+    metal_px = np.clip(0.85 * is_gold, 0.0, 1.0)
+    rough_px = np.clip((0.62 - 0.20 * lum) * (1.0 - 0.55 * is_gold) + 0.20 * is_gold, 0.14, 0.90)
     rough_px = np.where(is_plinth, 0.26, rough_px)
 
     albedo = np.zeros((S, S, 3), dtype=np.float32)
@@ -378,22 +487,20 @@ def bake_sculpt_pbr(
     mr[ys, xs, 1] = rough_px
     mr[ys, xs, 2] = metal_px
 
-    # Carte de hauteur fine extraite de la luminance locale pour faire scintiller chaque écaille !
+    # Carte de hauteur douce extraite de la luminance locale sans creuser la peau lisse !
     hmap = np.zeros((S, S), dtype=np.float32)
     hmap[ys, xs] = lum
-    # Dilatation exacte en 1 passe via transformée de distance euclidienne (0 couture UV !)
     _, nn_idx = ndimage.distance_transform_edt(~pix_mask, return_indices=True)
     albedo = albedo[nn_idx[0], nn_idx[1]]
     mr = mr[nn_idx[0], nn_idx[1]]
     hmap = hmap[nn_idx[0], nn_idx[1]]
-    # Extraction multi-bandes `v5.1` : micro-grain d'écailles (`sigma=1.1`) + biseaux ciselés (`sigma=3.8`) !
-    hp_micro = hmap - ndimage.gaussian_filter(hmap, sigma=1.1)
-    hp_meso = ndimage.gaussian_filter(hmap, sigma=1.0) - ndimage.gaussian_filter(hmap, sigma=3.8)
-    hmap_hp = 1.65 * hp_micro + 1.15 * hp_meso
+    hp_micro = hmap - ndimage.gaussian_filter(hmap, sigma=1.4)
+    hp_meso = ndimage.gaussian_filter(hmap, sigma=1.2) - ndimage.gaussian_filter(hmap, sigma=3.8)
+    hmap_hp = 0.85 * hp_micro + 0.70 * hp_meso
 
     alb_img = Image.fromarray((np.clip(albedo, 0.0, 1.0) * 255).astype(np.uint8), "RGB")
     mr_img = Image.fromarray((np.clip(mr, 0.0, 1.0) * 255).astype(np.uint8), "RGB")
-    dy, dx = np.gradient(hmap_hp.astype(np.float32) * 2.15)
+    dy, dx = np.gradient(hmap_hp.astype(np.float32) * 1.15)
     nz = np.ones_like(dx)
     nlen = np.sqrt(dx * dx + dy * dy + nz * nz) + 1e-12
     nmap = np.stack([-dx / nlen, dy / nlen, nz / nlen], axis=-1) * 0.5 + 0.5
@@ -416,8 +523,11 @@ def bake_sculpt_pbr(
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--front", required=True)
-    ap.add_argument("--side", required=True)
+    ap.add_argument("--side", default=None)
     ap.add_argument("--back", default=None)
+    ap.add_argument("--depth", default=None, help="Carte de profondeur alignée à --front (blanc = proche)")
+    ap.add_argument("--hollow-thickness", type=float, default=0.0,
+                    help="Épaisseur de coque creuse en mètres (ex: 0.012 pour masque/casque)")
     ap.add_argument("-o", "--out", required=True)
     ap.add_argument("--stem", default="dragon_buste")
     ap.add_argument("--res", type=int, default=136)
@@ -430,6 +540,7 @@ def main(argv=None) -> int:
     mesh, vpack = sculpt_from_views(
         args.front, args.side, args.back,
         grid_res=args.res, target_height=args.height,
+        depth_path=args.depth, hollow_thickness=args.hollow_thickness,
     )
     stl_path = out_dir / f"{args.stem}.stl"
     mesh.export(stl_path)

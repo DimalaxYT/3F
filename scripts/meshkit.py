@@ -109,6 +109,14 @@ class Material:
         self.clearcoat = float(np.clip(clearcoat, 0.0, 1.0))
         self.clearcoat_roughness = float(np.clip(clearcoat_roughness, 0.02, 1.0))
 
+    @property
+    def metallicFactor(self) -> float:
+        return self.metallic
+
+    @property
+    def roughnessFactor(self) -> float:
+        return self.roughness
+
     def gltf_extensions(self) -> dict:
         ext = {}
         if self.transmission > 0.001:
@@ -164,8 +172,8 @@ class mat:
     }
 
     @staticmethod
-    def metal(color="#9aa0a6", roughness=0.3):
-        return Material("metal", color, metallic=1.0, roughness=roughness)
+    def metal(color="#9aa0a6", roughness=0.3, metallic=1.0):
+        return Material("metal", color, metallic=metallic, roughness=roughness)
 
     @staticmethod
     def named_metal(kind="steel", roughness=None):
@@ -226,6 +234,50 @@ class mat:
     @staticmethod
     def fabric(color="#4a6fa5", roughness=0.85):
         return Material("fabric", color, roughness=roughness)
+
+    @staticmethod
+    def denim(color="#1d4ed8", roughness=0.78):
+        """Toile denim / vêtement tissé mat."""
+        return Material("denim", color, metallic=0.0, roughness=roughness)
+
+    @staticmethod
+    def skin(color="#f2bfa0", roughness=0.56):
+        """Peau humaine / personnage stylisé satinée (zéro métal)."""
+        return Material("skin", color, metallic=0.0, roughness=roughness,
+                        clearcoat=0.08, clearcoat_roughness=0.45)
+
+    @staticmethod
+    def clay(color="#c96b4b", roughness=0.66):
+        """Argile / terre cuite / résine figurine mate."""
+        return Material("clay", color, metallic=0.0, roughness=roughness)
+
+    @staticmethod
+    def enamel(color="#d62828", roughness=0.18):
+        """Laque / résine émaillée brillante (badges, jouets vinyle, casques)."""
+        return Material("enamel", color, metallic=0.0, roughness=roughness,
+                        clearcoat=0.85, clearcoat_roughness=0.06)
+
+    @staticmethod
+    def lacquer(color="#961818", roughness=0.22):
+        """Laque japonaise *urushi* vermillon/noire profonde à vernis brillant (masques Tengu/Noh, armures samouraï, fourreaux)."""
+        return Material("lacquer", color, metallic=0.0, roughness=roughness,
+                        clearcoat=0.88, clearcoat_roughness=0.05)
+
+    @staticmethod
+    def leather(color="#5c3a21", roughness=0.58):
+        """Cuir sellier / bottes / gants / sangles."""
+        return Material("leather", color, metallic=0.0, roughness=roughness)
+
+    @staticmethod
+    def stone(color="#4a4e57", roughness=0.72):
+        """Pierre taillée / basalte / marbre mat de socle."""
+        return Material("stone", color, metallic=0.0, roughness=roughness)
+
+    @staticmethod
+    def eye_gloss(color="#141619"):
+        """Cornée / pupille vitrifiée haute brillance."""
+        return Material("eye_gloss", color, metallic=0.0, roughness=0.06,
+                        clearcoat=1.0, clearcoat_roughness=0.03)
 
     @staticmethod
     def rubber(color="#222222", roughness=0.9):
@@ -809,18 +861,24 @@ class Builder:
         return clean
 
     def def_joint(self, group: str, pivot=(0.0, 0.0, 0.0), axis=(0.0, 1.0, 0.0),
-                  kind: str = "revolute"):
+                  kind: str = "revolute", parent: str | None = None):
         """Déclare un sous-assemblage articulé (`group`) doté d'un pivot physique exact
         en mètres (ex. essieu `front_wheel`, colonne `steering`, porte `door`).
-        Dans le `.glb` exporté, le nœud parent est placé exactement à `pivot` et ses
-        pièces sont exprimées dans son repère local — prêt à animer sans décalage !"""
+        Si `parent` est fourni (ex. `parent="front_steering"`), `group` devient enfant
+        hiérarchique de `parent` dans le graphe de scène glTF 2.0 !"""
         g = re.sub(r"[^A-Za-z0-9_\-]", "_", group)
-        self._joints[g] = {
+        info = {
             "pivot": [float(pivot[0]), float(pivot[1]), float(pivot[2])],
             "axis": [float(axis[0]), float(axis[1]), float(axis[2])],
             "kind": str(kind),
         }
+        if parent:
+            info["parent"] = re.sub(r"[^A-Za-z0-9_\-]", "_", parent)
+        self._joints[g] = info
         return g
+
+    socket = def_socket
+    joint = def_joint
 
     def add(self, mesh, material: Material | None = None, name=None,
             at=None, rot=None, group: str | None = None):
@@ -966,17 +1024,68 @@ class Builder:
         sc.metadata["sockets"] = dict(self._sockets)
         return sc
 
+    def trim_inside(
+        self,
+        cutter_mesh: trimesh.Trimesh,
+        exclude: tuple[str, ...] | list[str] = (),
+    ) -> "Builder":
+        """Évide proprement la cavité arrière/intérieure (masque Tengu/Oni, casque, plastron,
+        coque creuse) sur TOUTES les pièces déjà ajoutées (hors `exclude`) : garantit à 100 %
+        qu'aucun œil, sourcil, croc ou bouche ne dépasse jamais à travers l'envers du masque !"""
+        excl = tuple(exclude)
+        new_parts = []
+        for mesh, material, label in self._parts:
+            if label in excl or any(label.startswith(e) for e in excl):
+                new_parts.append((mesh, material, label))
+                continue
+            try:
+                trimmed = difference(mesh, [cutter_mesh])
+            except Exception:
+                trimmed = mesh
+            if len(trimmed.faces) >= 8:
+                new_parts.append((trimmed, material, label))
+        self._parts = new_parts
+        return self
+
+    def _clean_solid_debris(m: trimesh.Trimesh) -> trimesh.Trimesh:
+        comps = m.split(only_watertight=False)
+        if len(comps) > 1:
+            kept = [c for c in comps if len(c.faces) >= 8 and c.is_watertight]
+            if kept:
+                return trimesh.util.concatenate(kept) if len(kept) > 1 else kept[0]
+        return m
+
     def union_solid(self) -> trimesh.Trimesh:
-        """Fusionne toutes les pièces en un seul solide étanche (export STL)."""
-        meshes = [p[0].copy() for p in self._parts]
+        """Fusionne toutes les pièces en un seul solide étanche sans miettes CSG (export STL)."""
+        meshes = [p[0].copy() for p in self._parts if len(p[0].faces) >= 4]
         if len(meshes) == 1:
-            return meshes[0]
+            return Builder._clean_solid_debris(meshes[0])
         if HAS_MANIFOLD:
             try:
-                out = union(meshes)
-                return _finish(out)
+                out = Builder._clean_solid_debris(union(meshes))
+                if out.is_watertight:
+                    return _finish(out)
             except Exception:
                 pass
+            valid = []
+            for m in meshes:
+                if not m.is_watertight:
+                    m = m.copy()
+                    trimesh.repair.fill_holes(m)
+                    trimesh.repair.fix_winding(m)
+                    m.fix_normals(multibody=False)
+                if m.is_watertight and len(m.faces) >= 4:
+                    valid.append(m)
+            if valid:
+                acc = valid[0]
+                for m in valid[1:]:
+                    try:
+                        cand = Builder._clean_solid_debris(union([acc, m]))
+                        if cand.is_watertight and len(cand.faces) >= 4:
+                            acc = cand
+                    except Exception:
+                        continue
+                return _finish(acc)
         merged = trimesh.util.concatenate(meshes)
         return _finish(merged)
 
@@ -1333,8 +1442,17 @@ def export_glb_pbr(scene: trimesh.Scene, glb_path: str, webp: bool = False) -> s
             nm = n_def.get("name")
             if nm not in joints:
                 continue
+            # Spec officielle glTF 2.0 (§ 3.7.2.2) : tout nœud ciblé par `gltf.animations` DOIT
+            # utiliser des propriétés TRS décomposées (`translation` / `rotation` / `scale`) et
+            # JAMAIS `matrix`, sinon `trimesh`/Three.js/Unreal écrasent `matrix` et perdent le pivot !
+            if "matrix" in n_def:
+                m_col = n_def.pop("matrix")
+                n_def["translation"] = [float(m_col[12]), float(m_col[13]), float(m_col[14])]
+                n_def.setdefault("rotation", [0.0, 0.0, 0.0, 1.0])
             jinfo = joints[nm]
             n_def.setdefault("extras", {})["joint"] = jinfo
+            if str(jinfo.get("kind", "revolute")).lower() == "fixed":
+                continue
             ax = np.asarray(jinfo.get("axis", [0.0, 1.0, 0.0]), dtype=np.float64)
             ax /= np.linalg.norm(ax) + 1e-12
             is_spin = any(k in nm.lower() for k in ("wheel", "axle", "prop", "rotor", "fan", "turret"))
@@ -1420,6 +1538,43 @@ def export_glb_pbr(scene: trimesh.Scene, glb_path: str, webp: bool = False) -> s
     return glb_path
 
 
+def export_stl(mesh: trimesh.Trimesh, stl_path: str | Path, simplify_tol: float = 3e-4, keep_main_body: bool = True) -> str:
+    """Export STL binaire garanti 2-manifold (`is_watertight=True`, `is_volume=True`) après relecture `trimesh.load`.
+
+    Résout deux limitations classiques du format STL binaire non-indexé (float32) :
+      1. Simplification métrique contrôlée (`manifold3d.Manifold.simplify`) éliminant les arêtes sub-tolérance (< 0.3 mm).
+      2. Désolidarisation microscopique (50 µm suivant la normale locale de chaque éventail connexe) des sommets de
+         pincement (« pinch vertices » où deux solides tangents partagent une même coordonnée float32), évitant que
+         la fusion spatiale à la relecture STL ne crée d'arêtes à 4 faces incidentes.
+    """
+    out_p = str(stl_path)
+    mf = manifold3d.Manifold(
+        manifold3d.Mesh(
+            vert_properties=np.asarray(mesh.vertices, dtype=np.float32),
+            tri_verts=np.asarray(mesh.faces, dtype=np.uint32),
+        )
+    )
+    if simplify_tol and simplify_tol > 0:
+        mf = mf.simplify(float(simplify_tol))
+    if keep_main_body:
+        comps = mf.decompose()
+        if len(comps) > 1:
+            mf = max(comps, key=lambda c: c.volume())
+    mg = mf.to_mesh()
+    verts = np.asarray(mg.vert_properties[:, :3], dtype=np.float64).copy()
+    faces = np.asarray(mg.tri_verts, dtype=np.int64)
+    m_clean = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
+    v_keys = np.round(verts, 5)
+    _, inv, cnts = np.unique(v_keys, axis=0, return_inverse=True, return_counts=True)
+    dup_mask = cnts[inv] > 1
+    if np.any(dup_mask):
+        vn = m_clean.vertex_normals
+        verts[dup_mask] -= vn[dup_mask] * 5e-5
+        m_clean = trimesh.Trimesh(vertices=verts.astype(np.float32), faces=faces, process=False)
+    m_clean.export(out_p)
+    return out_p
+
+
 def capability_report() -> dict:
     """État des dépendances (utilisé par detect_env)."""
     return {
@@ -1429,3 +1584,21 @@ def capability_report() -> dict:
         "shapely": HAS_SHAPELY,
         "csg_engine": CSG_ENGINE if HAS_MANIFOLD else None,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Pont organique intégré : `mk.Sculpt`, `mk.ellipsoid`, `mk.tapered_curve`, etc.
+# --------------------------------------------------------------------------- #
+from organic import (  # noqa: E402,F401
+    Sculpt,
+    add_stylized_eyes,
+    curved_visor,
+    ellipsoid,
+    museum_plinth,
+    smooth_difference,
+    smooth_union,
+    subdivide_smooth,
+    superellipsoid,
+    tapered_curve,
+)
+
