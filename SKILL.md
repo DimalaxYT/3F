@@ -1,123 +1,158 @@
 ---
 name: 3d-forge
 description: >-
-  Use when the user asks for a 3D model, game asset, prop, weapon, vehicle,
-  creature bust, printable STL, or an export for Roblox Studio / Unreal Engine 5
-  (or Unity/Godot/AR). Roblox Studio (Primary) + Unreal Engine 5 (Secondary)
-  Realistic 3D Asset Engine + Hybrid Exact CAD + Organic GPU Sculpture toolkit
-  (v5.8): generates plug-and-play
-  realistic 3D assets engineered for **Roblox Studio** (`PNG`-embedded `.glb`, exact
-  `Studs` scaling `1 Stud = 0.28 m`, budget `< 9 800 tris`/`MeshPart` (plafond moteur
-  20 000), `SurfaceAppearance` `1024²` avec AO baked, `Neon_*` auto-split,
-  `setup_<Name>.lua`) and **Unreal Engine 5** (`SM_<Name>.glb` + `UCX_*` + `ORM` +
-  DirectX `-Y`), with measurable quality gates (`gates.py`) — zero GPU required.
+  Use when the user asks for a 3D model, character bust, mascot, figurine, creature,
+  game asset, prop, weapon, vehicle, printable STL, or an export for Roblox Studio /
+  Unreal Engine 5 (or Unity/Godot/AR). Pure-CPU & Hybrid Exact CAD + Smooth SDF Clay
+  Organic Sculpting toolkit (v5.8): generates clean, well-proportioned, color-accurate
+  3D assets engineered for **Roblox Studio** (`PNG`-embedded `.glb`, exact `Studs`
+  scaling `1 Stud = 0.28 m`, budget `< 9 800 tris`/`MeshPart`, `SurfaceAppearance`
+  `1024²` avec AO baked, `Neon_*` auto-split, `setup_<Name>.lua`), **Unreal Engine 5**
+  (`SM_<Name>.glb` + `UCX_*` + `ORM` + DirectX `-Y`), 3D printing (`100 % watertight`
+  `.stl`), and interactive offline WebGL2 studio preview (`preview.html`) — works 100 %
+  offline on pure CPU in **Claude.ai**, CLI, or Arena without requiring `generate_image`.
 ---
 
-# 3d-forge v5.2 — Fast Engine, Measurable QA (**Roblox Studio** primary, **UE5** secondary)
+# 3d-forge v5.8 — High-Design CAD + Organic SDF Sculptor (**Roblox Studio**, **UE5**, **Print & WebGL**)
+
+> ## 🚨 RÈGLE D'OR ABSOLUE (CLAUDE.AI / CLI / ARENA) — ZÉRO DESSIN 2D `PIL` !
+> - **INTERDICTION FORMELLE** de dessiner des images 2D synthétiques (`PIL.ImageDraw`, `matplotlib`, bruit RGB) pour les passer à `--front` / `--side` (`gpu_sculpt.py`) ! Une ellipse 2D extrudée donne une patate fondue aux couleurs sales.
+> - **Personnage, buste (Mario, héros, mascotte), figurine, animal ou créature sans vraies photos/rendus IA photoréalistes** : modélise **directement en vraie 3D propre** dans un script `custom_<nom>.py` avec **`meshkit.py` + `organic.py`** (`mk.Sculpt` argile SDF `C¹` lisse + `mk.curved_visor` + `mk.tapered_curve` + `mk.add_stylized_eyes` + matériaux séparés nets `mk.mat.skin` / `enamel` / `denim` / `clay`), en t'inspirant directement de **`scripts/recipes/characters.py`** (`hero_bust`, `stylized_character`, `dragon_creature`) !
+> - N'utilise `turbo_forge.py --front f.png --side s.png` **QUE** si l'utilisateur fournit de vraies vues orthographiques haute définition ou si tu appelles un vrai modèle de diffusion `generate_image` photoréaliste (`offer_options=False`, fond neutre uni `#e6e6e6`, zéro ombre au sol).
 
 > ## ⚡ CONTRAT DE VITESSE & PROFILS D'EXÉCUTION
 > Le chemin par défaut est **`turbo`** : **UNE** commande (`scripts/turbo_forge.py`,
-> 9–15 s CPU), **UNE** image lue (`qa_game_sheet.png`), gates mesurées (`gates.json`),
-> **max 1 retouche**. Trois profils, définis ici une seule fois :
+> 11–18 s CPU), **UNE** planche lue (`qa_game_sheet.png`), **25+ gates mesurées** (`gates.json`),
+> **1 passe + 1 retouche ciblée max** si un détail visuel ou une gate cloche :
 >
 > | profil | recherche web | vues lues | boucle notée | usage |
 > |---|---|---|---|---|
 > | `turbo` (défaut) | jamais (`research.py fetch` interdit) | `qa_game_sheet.png` seule | `critique.py --fast` (1 retouche max) | toute demande agent standard |
-> | `standard` | requêtes web, pas de download | 3 vues + planche | seuil/budget = `critique.py policy` | objet inédit sensible aux proportions |
+> | `standard` | requêtes web, pas de download | 3 vues + planche | seuil/budget = `critique.py policy` | objet complexe sensible aux proportions |
 > | `showcase` | Stage 0 complet (`research.py fetch`) | `--faces all` (14 images) | boucle complète | livraison vitrine / README |
 >
-> **Seuil & budget d'itérations : source de vérité = `python3 scripts/critique.py policy`**
-> (jamais recopiés dans un doc). Ne lance JAMAIS 4–5 reconstructions : le budget est
-> borné par le code (`MAX_ITERS`), et `FORCE_DELIVER` avec issues documentées est un
-> dénouement normal, pas un échec.
+> **Seuil & budget d'itérations : source de vérité = `python3 scripts/critique.py policy`**.
 
 ## 1. Choisir le workflow (arbre de décision)
 
 ```
 demande utilisateur
- ├─ une recette existe (`generate.py --list` / references/recipes.md) ?
- │    ├─ oui, livrable jeu  → turbo_forge.py <recette>            (profil turbo)
- │    └─ oui, livrable print/vitrine → generate.py + --faces all (profil standard/showcase)
- ├─ objet hard-surface inédit (arme, véhicule, coffre, bâtiment) ?
- │    → écrire `custom_<nom>.py` (`def build() -> mk.Builder`) + turbo_forge.py
- ├─ créature / buste / organique ?
- │    → generate_image front/side(/back) EN PARALLÈLE (offer_options=False)
- │      puis turbo_forge.py --front ... --side ...
- ├─ une photo de référence existe ?  → Workflow B (references/workflows.md)
- └─ organique sans photo ?           → Workflow C meshgen (references/workflows.md)
-      objet composite multi-pièces ? → Workflow D assemble (references/workflows.md)
+ ├─ une recette existe (`generate.py --list` / references/recipes.md, 23 recettes dont
+ │  `hero_bust`, `stylized_character`, `dragon_creature`, `katana`, `sci_fi_crate`, `car`...) ?
+ │    ├─ oui (ou variante couleur/taille via `--set`) → `turbo_forge.py <recette> --set ...`
+ │    └─ livrable print/vitrine multi-formats         → `generate.py <recette> ...`
+ ├─ personnage, buste, mascotte, jouet ou créature inédit (Claude.ai / CPU ou design net) ?
+ │    → écrire `custom_<nom>.py` avec **`meshkit` + `organic`** (voir §3B & `scripts/recipes/characters.py`)
+ │      puis `python3 scripts/turbo_forge.py custom_<nom>.py -o out/<nom>`
+ ├─ objet hard-surface inédit (arme, véhicule, meuble, outil, coffre, architecture) ?
+ │    → écrire `custom_<nom>.py` avec **`meshkit` + `greebles`** (voir §3A)
+ │      puis `python3 scripts/turbo_forge.py custom_<nom>.py -o out/<nom>`
+ └─ créature ultra-détaillée AVEC outil `generate_image` photoréaliste disponible ?
+      → `generate_image` orthographique `front` + `side` (+ `back`) EN PARALLÈLE (`offer_options=False`)
+        puis `python3 scripts/turbo_forge.py --front f.png --side s.png --name <nom> -o out/<nom>`
 ```
 
-Règle dure : **jamais `meshgen.py` sur du mécanique** (tubes, roues, lames, pieds de
-meubles) — `meshkit.py` (CAO exacte) ou `greebles.py` (kitbash étanche) uniquement.
+Règles dures :
+1. **Jamais `meshgen.py` sur du mécanique** — `meshkit.py` + `greebles.py` uniquement.
+2. **Jamais de PNG dessiné au code Python (`PIL` / `matplotlib`)** en entrée de `--front/--side`.
+3. **Sépare toujours chaque couleur franche en sa propre pièce `b.add(mesh, mat, name=...)`** : le bake booléen surfacique de `game_ready.py` découpe des frontières de matériaux nettes au pixel, zéro bavage et zéro fausse ombre interne !
 
 ## 2. Le protocole 1 commande (`turbo_forge.py`)
 
 ```bash
-# recette du catalogue (~11-14 s, tous livrables + gates)
+# Recette du catalogue (23 recettes, ~11-16 s CPU, tous livrables + gates)
+python3 scripts/turbo_forge.py hero_bust --set cap_color="#16a34a" shirt_color="#16a34a" -o out/luigi_bust
 python3 scripts/turbo_forge.py katana --lod0-tris 8200 -o out/katana
 
-# hard-surface inédit : d'abord write_file custom_<nom>.py (cheatsheet §3), puis :
+# Script 3D sur mesure (personnage organique OU hard-surface mécanique) :
 python3 scripts/turbo_forge.py custom_asset.py --lod0-tris 4200 -o out/custom_asset
 
-# organique : vues GPU générées EN PARALLÈLE dans le même tour, puis :
+# Sculpture multi-vues UNIQUEMENT depuis vraies images IA photoréalistes :
 python3 scripts/turbo_forge.py --front f.png --side s.png --name creature -o out/creature
 
-# options utiles : --target hero|ugc|print (gates) | --split-bed (plateau 256 mm)
-#                  --json (manifest complet) | --no-gates | --engine roblox_unreal|...
-#                  --dry-run (plan sans exécuter) | --resume (réutilise si hash identique)
-#                  --gif (turntable GIF 10 vues)
-
-# live preview navigateur (sandbox Arena / serveur local) :
+# Options : --target hero|ugc|print | --split-bed (plateau 256 mm) | --gif | --json
+# Live preview navigateur (sandbox Arena / serveur local) :
 python3 scripts/serve_preview.py out/<nom> --port 8000   # http://0.0.0.0:8000/preview.html
 ```
 
-Chaque run écrit dans `out/<nom>/` : `<nom>_game.glb` + LOD1/LOD2, `roblox/`
-(`_<name>_roblox.glb` PNG pur + 4 maps + `setup_<name>.lua`), `unreal/`
-(`SM_<name>.glb` + `UCX_*` + BC/ORM/N), `<nom>.stl` étanche, `preview.html`,
-`qa_game_sheet.png` (10 panneaux : LODs, colliders, **face/profil avec barre
-d'échelle cm+Studs**, ColorMap Roblox, normal, ORM, carte QA), **`gates.json`**,
-**`qa_summary.md`**, `report.json` (schéma QA unifié) et `game_manifest.json`.
+Chaque run écrit dans `out/<nom>/` : `<nom>_game.glb` (échelle métrique vraie `1.0x`, WebP léger, verre/clearcoat/néon) + LOD1/LOD2, `roblox/` (`<name>_roblox.glb` PNG pur en `Studs` + 4 maps + `setup_<name>.lua`), `unreal/` (`SM_<name>.glb` + `UCX_*` + BC/ORM/N DirectX `-Y`), `<nom>.stl` 100 % étanche, `preview.html` WebGL studio hors-ligne, `qa_game_sheet.png`, `gates.json`, `qa_summary.md` et `game_manifest.json`.
 
-**Tour de contrôle** : lire `qa_game_sheet.png` (et seulement elle) → si les gates
-sont OK et la planche propre : livrer (`present_file`). Sinon **une** retouche
-chirurgicale, pas deux.
+**Contrôle visuel obligatoire** : ouvre **toujours** `qa_game_sheet.png` avec `read_file` et vérifie **face (panneau 5), profil (panneau 6), 3/4 LOD0 (panneau 2) et ORM (panneau 9)** avant de livrer (`present_file` sur `preview.html`). Si un détail est enterré, mal proportionné ou mal placé, corrige les coordonnées une fois et relance !
 
-## 3. Cheatsheet API exact (`custom_<name>.py` — zéro lecture de fichier requise)
+## 3. Cheatsheet API exact (`custom_<name>.py` — prêt à copier sans lire le code)
+
+### 3A. Hard-Surface, Architecture & Mécanique (`meshkit` + `greebles`)
 
 ```python
 import sys; sys.path.insert(0, "scripts")
 import meshkit as mk, greebles as grb
 
 def build() -> mk.Builder:
-    b = mk.Builder("my_asset")  # Mètres: X=right, Y=front(-)/back(+), Z=up(+)
-    # Materials (`rubber`/`grip`/`poly` -> strict metallic=0; `emissive="#..."` -> Roblox `Neon_*`):
-    #   mk.Material(name, hex_color, metallic=0.0, roughness=0.5, opacity=1.0, emissive=None)
-    # Watertight CAD primitives (`scripts/meshkit.py`):
+    b = mk.Builder("my_prop")  # Mètres: X=droite(+), Y=AVANT(-)/DOS(+), Z=HAUT(+), sol à z=0 !
+    # Matériaux propres par défaut (ZÉRO boue ni rivets parasites hors pièces nommées `armor`/`crate`/`hull`) :
+    #   mk.mat.enamel("#e11d48"), mk.mat.ceramic("#f2efe9"), mk.mat.paint("#2563eb"),
+    #   mk.mat.car_clearcoat("#dc2626"), mk.mat.metal("#d4af37", roughness=0.22, metallic=0.9),
+    #   mk.mat.brushed_stainless(), mk.mat.wood("#7c4a24"), mk.mat.leather("#5c3a21"),
+    #   mk.mat.knobby_rubber("#1f2023"), mk.mat.glass("#bae6fd", opacity=0.28),
+    #   mk.mat.emissive("#00e5ff", strength=2.4)  # -> auto-extrait en `Neon_*` dans Roblox !
+    # Primitives CAO 100 % étanches :
     #   mk.box(w,d,h), mk.chamfer_box(w,d,h,c=None), mk.rounded_box(w,d,h,r=None),
-    #   mk.cylinder(r,h,sections=32), mk.tube(r_out,r_in,h), mk.cone(r,h), mk.frustum(r1,r2,h),
+    #   mk.cylinder(r,h,sections=36), mk.tube(r_out,r_in,h), mk.cone(r,h), mk.frustum(r1,r2,h),
     #   mk.sphere(r), mk.capsule(r,h_cyl), mk.torus(R,r), mk.extrude(pts2d,height),
-    #   mk.lathe(profile_rz,sections=48), mk.loft(sections,zs=None), mk.tube_sweep(path_xyz,r),
-    #   mk.helix_spring(r_coil,r_wire,pitch,turns=6), mk.union([...]), mk.difference(base,[...]),
-    #   mk.place(m,x,y,z), mk.rot_x(m,deg), mk.rot_y(m,deg), mk.rot_z(m,deg), mk.scale(m,s), mk.ground(m)
-    # Watertight Hard-Surface Greebles (`scripts/greebles.py`):
-    #   grb.picatinny_rail(length,width,height,teeth), grb.louver_vent(width,height,slats,depth),
-    #   grb.hex_bolt(r,h), grb.bolt_array(points,normals,r,h), grb.ribbed_conduit(path_xyz,r,rings),
-    #   grb.corner_armor_cap(size,height), grb.toggle_latch(w,h,d) -> [(m,role)], grb.ergonomic_handle(span,reach,r) -> [(m,role)]
-    # Assembly: b.add(mesh, mat, name, group=None); b.def_joint(group, pivot, axis); b.def_socket(name, pos)
+    #   mk.lathe(profile_rz,sections=48), mk.loft(sections), mk.tube_sweep(path_xyz,r),
+    #   mk.union([...]), mk.difference(base,[...]), mk.place(m,x,y,z), mk.rot_x/y/z(m,deg)
+    # Greebles mécaniques étanches : grb.picatinny_rail(), grb.louver_vent(), grb.hex_bolt(),
+    #   grb.bolt_array(pts,nrms), grb.ribbed_conduit(path), grb.corner_armor_cap(), grb.toggle_latch()
+    # Assemblage : b.add(mesh, mat, name, at=(x,y,z), rot=(rx,ry,rz), group=None)
+    #              b.def_joint(group, pivot, axis) ; b.def_socket("SOCKET_grip", (x,y,z))
     return b
 ```
 
-Enrichis systématiquement le hard-surface avec `greebles` + hulls `mk.loft`
-octogonaux/biseautés : jamais de boîte nue.
+### 3B. Organique, Masques Sculptés, Personnages, Bustes & Créatures (`meshkit` + `organic`)
 
-## 4. Conventions (à mémoriser)
+```python
+import sys; sys.path.insert(0, "scripts")
+import meshkit as mk, organic as org
 
-- **Unités** : mètres (mug = 0,095 ; porte = 2,0). « 30 cm » → `height=0.3`.
-- **Up** : Z, base posée à z=0. **Face** : vers **-Y**.
-- **Étanchéité** : garantie par construction (CSG manifold, lathe refermé). Un mesh
-  non watertight est un bug amont : on corrige la géométrie, on ne livre pas.
-- **Vues** : `front` (az 0), `three_quarter` (az 42), `side` (az 90), `top` (el 70), `back` (az 180).
+def build() -> mk.Builder:
+    b = mk.Builder("my_character")  # Face regardant TOUJOURS vers -Y ! Sol posé à z = 0 !
+    m_skin = mk.mat.skin("#f2a97e")          # peau chaude vivante (jamais blanc craie #ffffff !)
+    m_red  = mk.mat.lacquer("#a61c1c")       # laque japonaise urushi profonde (masques Tengu/Noh, armures)
+    m_hat  = mk.mat.enamel("#dc2626")        # émail brillant pur, zéro métal
+    m_hair = mk.mat.clay("#4a2512")          # brun mat sculpté
+
+    # 1. Sculpture argile SDF continue C¹ (`ellipsoid` + `capsule` + `sweep` en relief OU en creux !)
+    s = org.Sculpt(bounds=((-0.10, -0.18, 0.0), (0.10, 0.05, 0.26)), res=78)
+    s.ellipsoid((0, 0, 0.16), (0.075, 0.055, 0.088), k=0.012)                              # crâne / front
+    s.sweep([(0.025,-0.043,0.128),(0.056,-0.033,0.136),(0.075,-0.007,0.150)],              # pommettes C¹
+            [0.014, 0.018, 0.012], k=0.013, mirror_x=True)
+    s.sweep([(0,-0.038,0.148),(0,-0.110,0.142),(0,-0.170,0.127)],                          # long nez / museau C¹
+            [0.021, 0.018, 0.014], k=0.012)
+    s.sweep([(0.019,-0.052,0.141),(0.055,-0.036,0.156)], [0.010, 0.009],                   # orbites creusées !
+            mode="sub", k=0.0045, mirror_x=True)
+    b.add(s.to_mesh(smooth_iter=4, target_tris=5600), m_red, name="sculpted_shell")
+
+    # 2. Yeux anatomiques sculptés sans protubérance (`org.add_sculpted_eyes` pour masques/créatures/bustes
+    #    ou `org.add_stylized_eyes` pour mascottes), crocs/sourcils C² (`org.tapered_curve`), visières (`org.curved_visor`)
+    #    ⚠️ RÈGLE CRITIQUE CYLINDRE/ROTATION : `mk.cylinder(r, h)` va de `z=0` à `z=+h` ; `mk.rot_x(cyl, +90°)`
+    #    envoie `+Z -> -Y` VERS L'AVANT ! Toujours utiliser `org.add_sculpted_eyes(...)` (pupille concave taillée par
+    #    `mk.intersection` en retrait dans le globe) et toujours tourner un ellipsoïde centré à `(0,0,0)` AVANT `mk.place` !
+    org.add_sculpted_eyes(b, center_y=-0.052, center_z=0.181, spacing_x=0.028)
+
+    # 3. OBLIGATOIRE sur tout MASQUE, CASQUE ou COQUE CREUSE (`tengu_mask` dans `recipes/characters.py`) :
+    #    évide d'un seul coup TOUTES les pièces internes pour que RIEN ne dépasse jamais à l'arrière !
+    # b.trim_inside(inner_cavity_mesh, exclude=("cord", "eyelet"))
+    return b
+```
+
+## 4. Règles de Design, Couleurs & Proportions (obligatoires)
+
+- **Hiérarchie des formes** : volumes primaires lisses (`Sculpt` / `superellipsoid` / `lathe`) + silhouettes secondaires franches (casquette, visière, cornes, épaulières, anses) + détails tertiaires nets en léger relief franc (`>= 2.5 mm` devant la surface d'appui pour ne jamais être enterrés par le maillage `LOD0` !).
+- **Palette & albédos PBR** :
+  - Blancs propres = `#f2f2f5` (jamais `#ffffff` saturé) ; noirs profonds = `#181a20` (jamais `#000000` mort) ; peau = `#f2a97e` / `#e09468` (chaleureuse et saturée).
+  - N'utilise `metallic > 0.5` **que** sur de vrais métaux (or, laiton, acier, lame). Peau, tissu, céramique, casquette, émail, bois et cuir doivent toujours rester à **`metallic = 0.0`**.
+  - Évite de nommer une pièce non industrielle `armor` / `crate` / `hull` / `panel` (ces mots-clés activent volontairement les rivets et rainures sci-fi).
+- **Conventions spatiales** : mètres (`height=0.28` = 28 cm), **`Z` vers le haut (`z = 0` posé au sol)**, **face avant vers `-Y`**.
 
 ## 5. Quick start hors jeu vidéo (print / web / AR)
 
@@ -130,71 +165,22 @@ python3 scripts/validate.py out/vase/vase.stl      # exit 1 si non print-safe
 python3 scripts/detect_env.py --fix                # capacités + commande pip manquante
 ```
 
-`report.json` est le journal QA de `generate.py`/`meshgen.py` ; `turbo_forge.py`
-écrit le même schéma (+ `game_manifest.json`). Les deux alimentent `critique.py`.
-
 ## 6. QA mesurable — gates puis autocritique notée
 
 ```bash
 python3 scripts/gates.py out/<nom> --target hero   # exit 0/1 + gates.json + qa_summary.md
 python3 scripts/critique.py policy                 # seuil & budget actifs (source de vérité)
-python3 scripts/critique.py brief  --dir out/<nom> --iter 1   # fiche (métriques + photos à lire)
+python3 scripts/critique.py brief  --dir out/<nom> --iter 1
 python3 scripts/critique.py verdict --dir out/<nom> --iter 1 --note 8.9 \
     --justification "..." --issue "S|...|..." --deliver
 python3 scripts/critique.py status --dir out/<nom>
 ```
 
-**25 gates** (`--target hero|ugc|print`) — budget : tris/MeshPart ≤ 9 800 (hero) /
-4 000 (ugc) et ≤ plafond moteur 20 000 ; contenu : `roblox/*.glb` = PNG pur sans
-`EXT_texture_webp`, textures ≤ 1024², Studs ∈ [0.1, 2048], LOD0 > LOD1 > LOD2,
-STL watertight + volume > 0, `UCX_*` + BC/ORM/N côté Unreal, planche QA ;
-comportement : animations (`Idle_Action` si joints), normales `G_unreal = 255 −
-G_roblox`, silhouette LOD0↔LOD2 et LOD0↔LOD1, couverture UV, chevauchement d'îlots,
-structure Luau, budget UCX,
-cartes PBR non plates, néon émissif, **design de l'albédo**
-(saturation / contraste / budget de blancs). Chaque gate a un test « mutant » qui prouve
-qu'elle échoue quand on casse le package (`tests/test_gates_mutants.py`).
-Anti-complaisance codée : note ≥ seuil avec issues ouvertes = refusé ; note < seuil
-sans diagnostic = refusé ; IoU de formatage < 0.5 interdit une note ≥ seuil.
+**25+ gates automatiques** (`--target hero|ugc|print`) couvrent : budget triangles Roblox (`<= 9 800` hero / `<= 4 000` ugc), PNG pur sans `EXT_texture_webp` côté Roblox, échelle Studs, chaîne LOD décroissante, étanchéité binaire `.stl` rechargée sur disque (`stl_watertight`), `UCX_*` + `BC/ORM/N` DirectX `-Y` côté Unreal, cohérence des normales `G_Unreal == 255 - G_Roblox`, fidélité de silhouette `LOD0↔LOD1↔LOD2`, remplissage et zéro recouvrement UV, syntaxe Luau, réserve d'albédo, modelé lumineux et **cohérence physique ORM (`pbr_coherence` : AO non brûlé + anti-métal parasite)**.
 
-## 7. Catalogue, géométrie custom, matériaux, moteurs
+## 7. Références & non-régression
 
-- **Recettes (20)** : table générée depuis le registre → `references/recipes.md`
-  (`python3 scripts/generate.py --list --markdown`, vérifié en CI).
-- **Objet inédit** : méthode complète (décomposition, profils, CSG, exemple travaillé)
-  → `references/cookbook.md`. Étendre le catalogue = nouvelle recette `@register`
-  dans `scripts/recipes/` (voir PLAN.md §5).
-- **Matériaux PBR** : presets `mk.mat.*` + métaux physiques → `references/materials.md`.
-- **Roblox/UE5/Unity/Godot, piliers techniques, formats** → `references/engine_profiles.md`.
-- **Workflows B/C/D + Stage 0 + boucle notée détaillée** → `references/workflows.md`.
-
-## 8. Quality gates avant livraison (checklist)
-
-1. `gates.py` sort 0 (`gates.json` tout vert) pour la cible demandée.
-2. `qa_game_sheet.png` lue : silhouette face/profil cohérente avec la demande,
-   barre d'échelle crédible (un « cup » ne fait pas 2 m), matériaux lisibles.
-3. `report.json`/manifest : `watertight: true` ; tris dans le budget de la cible.
-4. Boucle notée close (`critique.py status` : DELIVER ou FORCE_DELIVER documenté).
-5. Profils `standard`/`showcase` seulement : chaque détail Stage 0 visible sur une photo.
-
-Non-régression (CI + local) : `python3 scripts/visual_regression.py` compare
-l'IoU de silhouette des recettes au baseline commité
-(`docs/visreg_baseline.json`) — une proportion cassée qui passe tous les tests
-unitaires échoue ici. Exemples lourds hors arbre :
-`python3 scripts/fetch_examples.py`.
-
-## 9. Neural fallback (optionnel, off par défaut)
-
-Si `detect_env.py` rapporte un GPU ≥ 6 Go : TripoSR / Hunyuan3D / TRELLIS peuvent
-compléter le catalogue pour l'organique (`neural/README.md`). Le procédural reste
-maître : le neuronal produit la forme, meshkit la fiabilise — jamais l'inverse.
-
-## 10. Troubleshooting
-
-- `manifold3d` manquant → CSG désactivé : `pip install manifold3d` (ou `detect_env.py --fix`).
-- Rendus KO mais exports OK → livrer les fichiers, le signaler, re-rendre en `--size 512`.
-- `usd-core` manquant → usdz bascule sur le fallback usda (signalé `experimental`).
-- Couleurs étranges dans un viewer externe : modèles Z-up ; Blender/three.js importent
-  Y-up → pivot -90° X (le `preview.html` le fait déjà).
-- `preview.html` trop lourd à partager : il embarque le GLB webp (≈ 1 Mo) ; les photos
-  y sont en vignettes JPEG.
+- **Recettes (23)** : `references/recipes.md` (`python3 scripts/generate.py --list --markdown`).
+- **Méthode détaillée Hard-Surface & Organique** : `references/cookbook.md` & `scripts/recipes/characters.py`.
+- **Matériaux PBR & profils moteurs** : `references/materials.md`, `references/engine_profiles.md`, `references/workflows.md`.
+- **CI locale complète** : `pytest -v && python3 scripts/visual_regression.py && python3 evals/run.py`.

@@ -311,61 +311,25 @@ the mean per-part IoU in `report.coherence`.
 
 ## Stage 3 — Scored self-critique (`critique.py` — seuil & budget : `critique.py policy`)
 
-You are your own QA. After every generation (recipes or meshgen), before any
-delivery, run the scored self-critique loop — the full prompt lives in
-`AUTOCRITIQUE.md` and applies verbatim:
-
-> **Rate yourself 1–10. Below 9.5, keep refining (fix the spec, regenerate,
-> re-critique). At 9.5 or above, deliver — and only then.**
-
-The deterministic engine structures the loop and protects you from
-complacency:
+> **GARDE-FOU DE VITESSE OBLIGATOIRE (`MAX_ITERS = 1`, `< 90 s` total)** :
+> Ne lance **JAMAIS** de boucle de 4, 8 ou 10 reconstructions ni `--faces all` en mode agent standard (`turbo`).
+> Source de vérité unique du seuil et du budget = **`python3 scripts/critique.py policy`** (`THRESHOLD = 8.8`, `MAX_ITERS = 1`) :
+> - **Passe 0 (`turbo_forge.py`, `~15 s`)** -> ouvre `qa_game_sheet.png` : si tout est net et `gates.json` = `all_pass: true`, **livre immédiatement**.
+> - **Si un défaut précis est visible** -> corrige tout en **UNE SEULE passe groupée (`iter_1`)**, relance `turbo_forge.py` une fois et **livre immédiatement (`FORCE_DELIVER`)**.
 
 ```bash
-# 1. BRIEF — regenerate the critique sheet for this iteration
+# 0. Consulter la politique active (seuil 8.8, budget MAX 1 retouche)
+python3 scripts/critique.py policy
+
+# 1. BRIEF — génère la fiche de critique de l'itération
 python3 scripts/critique.py brief --dir out/epee --iter 1
-#    -> iter_1/critique_brief.md: objective metrics (IoU views, watertight,
-#       budget, suggested T score), the PHOTOS you must open (all faces,
-#       turntable, control views, reference sheet), the Stage-0 details
-#       checklist, the 10-point grading rubric (S=3 V=2 M=2 D=2 T=1)
 
-# 2. VERDICT — after LOOKING at every photo, record your score.
-#    Each point lost = one concrete issue (AXE|problem|fix).
+# 2. VERDICT — enregistre la note et livre dès passe 0 ou après 1 retouche max
 python3 scripts/critique.py verdict --dir out/epee --iter 1 \
-    --note 7.2 --justification "proportions ok, details manquants" \
-    --issue "S|pointe trop fine, mangée par le lissage|res 80->96, smooth 10->7" \
-    --issue "D|fuller invisible de profil|peindre le fuller dans side aussi"
-#    -> REFINE (note < 9.5: fix the spec, regenerate into iter_2, re-critique)
-#       DELIVER (note >= 9.5 with --deliver) — only then ship
+    --note 9.0 --justification "volumes sculptés propres, 25/25 gates vertes" --deliver
 
-# 3. STATUS — history of the loop
+# 3. STATUS — historique
 python3 scripts/critique.py status --dir out/epee
-#    -> notes per iteration, trend, current decision
 ```
 
-Anti-complacency rules (enforced by the code, not by willpower):
-- a note >= 9.5 **with open issues** is REJECTED — fix first or lower the note;
-- a note < 9.5 **without any issue** is REJECTED — diagnosis is mandatory;
-- IoU mean < 0.5 makes any note >= 9.5 impossible (objective proportions);
-- a 10 given without having opened the photos is cheating — the brief lists
-  them, `critique_log.json` keeps the trace;
-- iteration budget (default 4) exhausted -> **FORCE_DELIVER**: honest final
-  note + residual issues documented and announced. Never a fake 9.5.
-- **9.5 is a deliberately demanding ceiling, not a target you must reach**:
-  the note is mechanically bounded by the technical grade and the IoU, so a
-  clean loop ends in FORCE_DELIVER at 8.5-9.2 with documented residuals —
-  that is the normal outcome, not a failure. `critique_log.json` keeps
-  `best_note` so the final grade is tracked, not decorative.
-
-Rubric (10 points): **S** silhouette & proportions /3 (IoU multi-view +
-photos), **V** volume consistency across faces /2, **M** materials & textures
-/2 (overlays visible and stable between angles), **D** details-to-respect /2
-(Stage 0 checklist, −0.5 per missing detail), **T** technique /1 (watertight,
-budget, degenerates — suggested automatically by the code).
-
-Each iteration regenerates into its own folder (`out/epee/iter_1/`,
-`iter_2/`, …) with the same spec workflow; the log is central
-(`out/epee/critique_log.json`). Two to three iterations are normal; if you
-still sit below 9.5 at iteration 3, the issue is usually the drawn views
-(redraw them from the reference sheet) rather than pipeline knobs.
 

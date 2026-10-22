@@ -216,6 +216,43 @@ renderer.render_views(scene, ".", "coffee_table", size=1024)
 Puis : lire les PNG, vérifier l'inclinaison des pieds et l'entretoise,
 ajuster. Temps total : 2 minutes, zéro API.
 
+## <a name="organique"></a>4B. Sculpture Organique, Personnages, Bustes & Créatures (`organic.py`)
+
+> **Règle absolue** : pour un personnage, un buste (Mario, héros, mascotte), un animal ou une créature sans vraies photos multi-vues, **n'invente jamais d'images 2D avec `PIL`/`matplotlib`**. Utilise `organic.py` + `meshkit.py` et passe le script à `scripts/turbo_forge.py` ! Voir les 3 architectures complètes de référence dans **`scripts/recipes/characters.py`** (`hero_bust`, `stylized_character`, `dragon_creature`).
+
+```python
+import sys; sys.path.insert(0, "scripts")
+import meshkit as mk, organic as org
+
+def build() -> mk.Builder:
+    b = mk.Builder("my_character")
+    # 1. Sculpture argile SDF continue C¹ (crâne, joues, museau, torse, orbites douces) :
+    s = org.Sculpt(bounds=((-0.09, -0.10, 0.08), (0.09, 0.09, 0.27)), res=72)
+    s.capsule((0, 0, 0.09), (0, 0, 0.15), 0.032, 0.035, k=0.012)
+    s.ellipsoid((0, 0, 0.18), (0.061, 0.065, 0.066), k=0.016)
+    s.ellipsoid((0.034, -0.034, 0.156), (0.030, 0.028, 0.025), k=0.018, mirror_x=True)
+    s.ellipsoid((0.023, -0.056, 0.182), (0.016, 0.010, 0.019), mode="sub", k=0.007, mirror_x=True)
+    s.ellipsoid((0, -0.067, 0.165), (0.019, 0.023, 0.016), k=0.006)
+    b.add(s.to_mesh(smooth_iter=4, target_tris=4600), mk.mat.skin("#f2a97e"), name="head")
+
+    # 2. Yeux 4 couches (sclère + iris + pupille + reflet spéculaire) :
+    org.add_stylized_eyes(b, center_y=-0.052, center_z=0.181, spacing_x=0.023,
+                          radius=0.0148, iris_color="#2563eb")
+
+    # 3. Courbes effilées étanches (sourcils, moustache, cornes, queue, mèches) :
+    b.add(org.tapered_curve([(0.009,-0.057,0.200),(0.023,-0.058,0.206),(0.037,-0.051,0.200)],
+                            [0.0046, 0.0056, 0.0040]),
+          mk.mat.clay("#4a2512"), name="brow_r")
+
+    # 4. Visière / épaulière courbée 3D + socle de galerie 100 % étanche :
+    b.add(org.curved_visor(width=0.114, length=0.052, arch=0.018),
+          mk.mat.enamel("#dc2626"), name="visor", at=(0, -0.045, 0.205))
+    p_base, p_ring = org.museum_plinth(0.15, 0.15, 0.036, round_profile=True)
+    b.add(p_base, mk.mat.stone("#262930"), name="plinth")
+    b.add(p_ring, mk.mat.metal("#f2c94c", roughness=0.22), name="plinth_ring")
+    return b
+```
+
 ## <a name="erreurs"></a>5. Erreurs classiques
 
 | Symptôme | Cause | Remède |

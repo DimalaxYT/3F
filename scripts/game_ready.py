@@ -59,7 +59,7 @@ import renderer  # noqa: E402
 _SCAN_CACHE: dict[str, np.ndarray] = {}
 
 
-# Identifiants sémantiques de matériaux PBR (`v5.1` — zéro métal sur le caoutchouc !)
+# Identifiants sémantiques de matériaux PBR (`v5.1+` — zéro métal/rivets sur surfaces propres !)
 MAT_PAINTED_ARMOR = 0
 MAT_BRUSHED_STEEL = 1
 MAT_GOLD_BRONZE   = 2
@@ -68,6 +68,13 @@ MAT_WOOD_FABRIC   = 4
 MAT_HAZARD_STRIPE = 5
 MAT_TSUKA_WRAP    = 6
 MAT_TAMAHAGANE    = 7
+MAT_CLEAN_ENAMEL  = 8
+
+_ARMOR_KEYWORDS = (
+    "armor", "hull", "crate", "container", "panel", "mech", "tank",
+    "turret", "bunker", "ordnance", "scifi", "sci_fi", "chassis",
+    "receiver", "bulkhead",
+)
 
 
 def classify_material_id(mat_use: mk.Material, part_label: str = "") -> int:
@@ -79,15 +86,17 @@ def classify_material_id(mat_use: mk.Material, part_label: str = "") -> int:
         return MAT_TAMAHAGANE
     if any(k in nm for k in ("hazard", "chevron", "warning", "accent_stripe")):
         return MAT_HAZARD_STRIPE
-    if any(k in nm for k in ("rubber", "tire", "grip", "knob", "boot", "skid", "bumper", "corner_cap", "vent", "lacquer", "plastic")):
+    if any(k in nm for k in ("rubber", "tire", "grip", "knob", "boot", "skid", "bumper", "corner_cap", "vent")):
         return MAT_RUBBER_POLY
-    if any(k in nm for k in ("wood", "fabric", "ito", "leather", "rope")):
+    if any(k in nm for k in ("wood", "fabric", "ito", "leather", "rope", "denim", "cloth", "wool")):
         return MAT_WOOD_FABRIC
     if any(k in nm for k in ("gold", "brass", "bronze", "copper", "menuki", "habaki", "seppa", "tsuba")):
         return MAT_GOLD_BRONZE
     if float(getattr(mat_use, "metallic", 0.0)) >= 0.72 or any(k in nm for k in ("steel", "chrome", "iron", "alu", "rail", "latch", "bolt", "hinge")):
         return MAT_BRUSHED_STEEL
-    return MAT_PAINTED_ARMOR
+    if any(k in nm for k in _ARMOR_KEYWORDS):
+        return MAT_PAINTED_ARMOR
+    return MAT_CLEAN_ENAMEL
 
 
 def _load_material_scan(kind: str) -> np.ndarray | None:
@@ -279,7 +288,12 @@ def apply_game_weathering(
     is_blade  = mat_id == MAT_TAMAHAGANE
     is_tsuka  = mat_id == MAT_TSUKA_WRAP
     is_hazard = mat_id == MAT_HAZARD_STRIPE
+    is_clean  = mat_id == MAT_CLEAN_ENAMEL
     is_nonmetal = is_rubber | is_wood | is_tsuka
+    # Sauvegarde les valeurs pures des surfaces propres (peau, céramique, émail, vernis auto, yeux)
+    col_clean_src = col.copy()
+    rgh_clean_src = rough.copy()
+    mtl_clean_src = metal.copy()
     extra_h = np.zeros(len(pos), dtype=np.float32)
 
     # 0a. Tressage japonais `tsuka-maki` ultra-haute définition (évalué au pixel exact 1024² !)
@@ -289,8 +303,8 @@ def apply_game_weathering(
         turns = pz_t / 0.0275
         u1 = np.abs(np.mod(turns + ang * 0.5, 1.0) * 2.0 - 1.0)
         u2 = np.abs(np.mod(turns - ang * 0.5, 1.0) * 2.0 - 1.0)
-        rib1 = np.clip((0.50 - u1) / 0.055, 0.0, 1.0)
-        rib2 = np.clip((0.50 - u2) / 0.055, 0.0, 1.0)
+        rib1 = np.clip((0.64 - u1) / 0.05, 0.0, 1.0)
+        rib2 = np.clip((0.64 - u2) / 0.05, 0.0, 1.0)
         silk_mask = np.maximum(rib1, rib2)
         # Micro-tissage chevron de la tresse de soie noire/indigo + nodules blancs de `samegawa` !
         weave = 0.5 + 0.5 * np.sin((turns * 46.0 + ang * 18.0) * math.pi)
@@ -300,7 +314,7 @@ def apply_game_weathering(
         # galuchat à 0.86 se lisait comme du plastique blanc.
         same_col = np.array([0.72, 0.70, 0.64], dtype=np.float32)[None, :] * (0.80 + 0.22 * pearls[:, None])
         # Ombre portée réaliste sous le ruban au bord des fenêtres de galuchat !
-        window_ao = np.clip(0.52 + 0.48 * np.minimum(np.abs(u1 - 0.50), np.abs(u2 - 0.50)) / 0.22, 0.52, 1.0)
+        window_ao = np.clip(0.52 + 0.48 * np.minimum(np.abs(u1 - 0.64), np.abs(u2 - 0.64)) / 0.18, 0.52, 1.0)
         col[is_tsuka] = same_col * window_ao[:, None] * (1.0 - silk_mask[:, None]) + silk_col * silk_mask[:, None]
         rough[is_tsuka] = np.where(silk_mask > 0.5, 0.68 - 0.10 * weave, 0.36 + 0.12 * pearls)
         metal[is_tsuka] = 0.0
@@ -466,17 +480,34 @@ def apply_game_weathering(
     col = col * (1.0 - grime[:, None]) + earth_col[None, :] * grime[:, None]
     rough = np.clip(rough + 0.18 * grime, 0.05, 1.0)
 
-    # 5. Normal Stamp Decals uniquement sur les panneaux blindés peints (jamais sur lame/tissu/caoutchouc !)
-    can_stamp = (~is_nonmetal) & (~is_blade) & (~is_gold)
+    # 5. Normal Stamp Decals strictement réservés aux panneaux industriels/blindés !
+    can_stamp = mat_id == MAT_PAINTED_ARMOR
     dh, ao_m, m_boost = stamp_normal_decals(pos, nrm, np.where(can_stamp, metal, 0.0), bounds, strength=decal_strength)
     dh = np.where(can_stamp, dh, 0.0)
     ao_m = np.where(can_stamp, ao_m, 1.0)
     ao = np.clip(ao * ao_m, 0.12, 1.0)
-    metal = np.where(is_nonmetal, 0.0, np.clip(metal + m_boost * 0.28, 0.0, 1.0))
+    metal = np.where(is_nonmetal, 0.0, np.clip(metal + np.where(can_stamp, m_boost * 0.28, 0.0), 0.0, 1.0))
     chevron_h = np.zeros_like(dh)
     if is_hazard.any():
         chevron_h[is_hazard] = 0.08
     height = (0.24 * (grain - 1.0) - 0.15 * eff_edge + dh + chevron_h + extra_h).astype(np.float32)
+
+    # 6. Finition Studio Propre (`MAT_CLEAN_ENAMEL` : céramique, émail, peau, figurines,
+    #    peintures vives, carrosserie vernie) — ZÉRO boue brune, ZÉRO éclat gris acier,
+    #    ZÉRO rivet sci-fi, ZÉRO dérive de teinte sale, micro-glaçure subtile naturelle !
+    if is_clean.any():
+        glaze_macro = (macro[is_clean] - 0.5) * 0.10
+        glaze_micro = (micro[is_clean] - 0.5) * 0.10
+        soft_grad = (z_norm[is_clean] - 0.5) * 0.055
+        # Centré à 0.955 pour ne jamais saturer contre le plafond 0.86 sur blanc/verre clair !
+        soft_shade = np.clip(0.955 + glaze_macro + glaze_micro + soft_grad, 0.86, 1.01)[:, None]
+        col[is_clean] = np.clip(col_clean_src[is_clean] * soft_shade, 0.0, 0.86)
+        rough[is_clean] = np.clip(
+            rgh_clean_src[is_clean] + 0.075 * (0.5 - micro[is_clean]) + 0.06 * np.clip(0.55 - ao[is_clean], 0.0, 0.4),
+            0.03, 1.0,
+        )
+        metal[is_clean] = np.clip(mtl_clean_src[is_clean], 0.0, 1.0)
+        height[is_clean] = (0.14 * (micro[is_clean] - 0.5) + 0.06 * (macro[is_clean] - 0.5)).astype(np.float32)
 
     # v5.6 — contrainte DURE en sortie : les additifs (éclats, decals, boosts)
     # pouvaient rendre métallique une famille qui ne doit jamais l'être. Mesuré
@@ -498,11 +529,15 @@ def apply_game_weathering(
 # 4. High-Poly -> Low-Poly Tangent-Space Baker & Génération `LOD0 / LOD1 / LOD2`
 # --------------------------------------------------------------------------- #
 
+import threading
+_FAST_SIMP_LOCK = threading.Lock()
+
+
 def decimate_mesh_clean(mesh: trimesh.Trimesh, target_tris: int) -> trimesh.Trimesh:
     """Soude d'abord 100 % des sommets 3D coïncidents (y compris les sommets dupliqués
     par `xatlas` le long des coutures UV !) afin d'obtenir une surface manifold fermée,
-    puis décime vers `target_tris` triangles en C++ (`fast_simplification`) sans jamais
-    ouvrir la moindre fissure."""
+    puis décime vers `target_tris` triangles en C++ (`fast_simplification`) sous verrou
+    (`Simplify::vertices` / `Simplify::triangles` sont globaux en C++ !)."""
     work = trimesh.Trimesh(
         vertices=np.asarray(mesh.vertices, dtype=np.float64),
         faces=np.asarray(mesh.faces, dtype=np.int64),
@@ -517,10 +552,11 @@ def decimate_mesh_clean(mesh: trimesh.Trimesh, target_tris: int) -> trimesh.Trim
     f_in = np.asarray(work.faces, dtype=np.int32)
     ratio = float(np.clip(1.0 - float(target_tris) / float(n_cur), 0.02, 0.992))
     v_out, f_out = v_in, f_in
-    for agg_val in (5, 7, 8, 9, 10):
-        v_out, f_out = fast_simplification.simplify(v_in, f_in, target_reduction=ratio, agg=agg_val)
-        if len(f_out) <= target_tris * 1.12:
-            break
+    with _FAST_SIMP_LOCK:
+        for agg_val in (5, 7, 8, 9, 10):
+            v_out, f_out = fast_simplification.simplify(v_in, f_in, target_reduction=ratio, agg=agg_val)
+            if len(f_out) <= target_tris * 1.12:
+                break
     # v5.2 — garde-fous anti-artefacts : aux ratios extrêmes (LOD2 ~15 %), le
     # décimiteur C++ peut sortir des pointes/slivers hors de la surface d'origine
     # (facettes noires visibles sur la planche QA). On re-clippe les sommets dans
@@ -537,29 +573,125 @@ def decimate_mesh_clean(mesh: trimesh.Trimesh, target_tris: int) -> trimesh.Trim
     return out
 
 
+def _bilinear_sample_pil_image(img: Image.Image, uv_pts: np.ndarray, linear_srgb: bool = False) -> np.ndarray:
+    """Échantillonne bilinéairement une image PIL aux coordonnées glTF `uv_pts` `(N, 2)` en `[0..1]`."""
+    arr = np.asarray(img.convert("RGB"), dtype=np.float32) / 255.0
+    if linear_srgb:
+        # Les textures glTF BaseColor sont encodées sRGB ; le bake interne travaille en sRGB `[0..1]`
+        pass
+    h, w, _ = arr.shape
+    fx = np.clip(uv_pts[:, 0], 0.0, 1.0) * (w - 1)
+    fy = np.clip(1.0 - uv_pts[:, 1], 0.0, 1.0) * (h - 1)
+    x0 = np.floor(fx).astype(np.int32)
+    y0 = np.floor(fy).astype(np.int32)
+    x1 = np.minimum(x0 + 1, w - 1)
+    y1 = np.minimum(y0 + 1, h - 1)
+    tx = (fx - x0)[:, None]
+    ty = (fy - y0)[:, None]
+    c00 = arr[y0, x0]
+    c10 = arr[y0, x1]
+    c01 = arr[y1, x0]
+    c11 = arr[y1, x1]
+    return ((1.0 - ty) * ((1.0 - tx) * c00 + tx * c10) + ty * ((1.0 - tx) * c01 + tx * c11)).astype(np.float32)
+
+
+def _build_exterior_high_poly_from_union(
+    union_mesh: trimesh.Trimesh,
+    part_entries: list[tuple[trimesh.Trimesh, mk.Material, str, int]],
+) -> tuple[trimesh.Trimesh, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Construit un High-Poly 100 % surfacique externe (zéro face interne enterrée aux
+    jonctions CSG !) en étiquetant chaque triangle de `union_mesh` par sa pièce d'origine
+    exacte, puis en séparant proprement les frontières de matériaux (zéro bavage d'albédo
+    entre cône rouge et fût blanc, yeux et visage, emblèmes et casquette !)."""
+    ao_u = pbr.compute_ambient_occlusion(union_mesh).astype(np.float32)
+    curv_u = pbr.compute_edge_wear(union_mesh).astype(np.float32)
+
+    all_pts, all_nrm, all_pid = [], [], []
+    total_area = sum(max(float(e[0].area), 1e-8) for e in part_entries) + 1e-12
+    for pid, (pm, _, _, _) in enumerate(part_entries):
+        share = max(float(pm.area), 1e-8) / total_area
+        n_s = min(max(int(200_000 * share), len(pm.faces) * 3, 512), 55_000)
+        ps, fi = trimesh.sample.sample_surface(pm, n_s, seed=42 + pid)
+        fn = pm.face_normals[fi]
+        ps = np.vstack([ps, pm.triangles_center])
+        fn = np.vstack([fn, pm.face_normals])
+        all_pts.append(ps.astype(np.float32))
+        all_nrm.append(fn.astype(np.float32))
+        all_pid.append(np.full(len(ps), pid, dtype=np.int32))
+
+    src_pts = np.vstack(all_pts)
+    src_nrm = np.vstack(all_nrm)
+    src_pid = np.concatenate(all_pid)
+    tree = cKDTree(src_pts)
+
+    fc = np.asarray(union_mesh.triangles_center, dtype=np.float32)
+    fn_u = np.asarray(union_mesh.face_normals, dtype=np.float32)
+    dists, idx = tree.query(fc, k=8, workers=-1)
+    dots = np.sum(src_nrm[idx] * fn_u[:, None, :], axis=2)
+    diag = float(np.linalg.norm(union_mesh.extents)) + 1e-6
+    # Départage coplanaire exact (`-1.5e-4 * pid`) en faveur des pièces de détail ajoutées après le corps
+    score = dists / diag + 0.11 * (1.0 - np.clip(dots, -0.2, 1.0)) - 1.5e-4 * src_pid[idx]
+    face_pid = src_pid[idx[np.arange(len(fc)), np.argmin(score, axis=1)]]
+
+    v_u = np.asarray(union_mesh.vertices, dtype=np.float64)
+    f_u = np.asarray(union_mesh.faces, dtype=np.int64)
+    sub_meshes, sub_alb, sub_rgh, sub_mtl, sub_mid, sub_ao, sub_crv = [], [], [], [], [], [], []
+    for pid in np.unique(face_pid):
+        f_sub = f_u[face_pid == pid]
+        used_v, inv_f = np.unique(f_sub.reshape(-1), return_inverse=True)
+        sm = trimesh.Trimesh(vertices=v_u[used_v], faces=inv_f.reshape(-1, 3), process=False)
+        sm.fix_normals(multibody=False)
+        _, mat_use, _, mid_val = part_entries[int(pid)]
+        nv = len(used_v)
+        sub_meshes.append(sm)
+        sub_alb.append(np.tile(np.asarray(mat_use.color, dtype=np.float32), (nv, 1)))
+        sub_rgh.append(np.full(nv, float(mat_use.roughness), dtype=np.float32))
+        sub_mtl.append(np.full(nv, float(mat_use.metallic), dtype=np.float32))
+        sub_mid.append(np.full(nv, int(mid_val), dtype=np.int32))
+        sub_ao.append(ao_u[used_v])
+        sub_crv.append(curv_u[used_v])
+
+    ext_hi = trimesh.util.concatenate(sub_meshes)
+    return (
+        ext_hi,
+        np.vstack(sub_alb),
+        np.concatenate(sub_rgh),
+        np.concatenate(sub_mtl),
+        np.concatenate(sub_mid),
+        np.concatenate(sub_ao),
+        np.concatenate(sub_crv),
+    )
+
+
 def prepare_high_poly_sampler(
     high_mesh: trimesh.Trimesh,
     high_vertex_albedo: np.ndarray,
     high_vertex_rough: np.ndarray,
     high_vertex_metal: np.ndarray,
     high_vertex_mat_id: np.ndarray | None = None,
+    ao_override: np.ndarray | None = None,
+    curv_override: np.ndarray | None = None,
 ) -> dict:
     """Pré-calcule UNE SEULE FOIS l'AO, la Courbure, l'échantillonnage de surface et le
     `cKDTree` multi-cœurs d'un maillage `high_mesh` afin de réutiliser ce cache instantanément
     sur `LOD0`, `Blade`, `Hilt`, etc. sans jamais recalculer 5 fois le High-Poly !"""
-    ao_hi = pbr.compute_ambient_occlusion(high_mesh).astype(np.float32)
-    curv_hi = pbr.compute_edge_wear(high_mesh).astype(np.float32)
+    ao_hi = ao_override.astype(np.float32) if ao_override is not None else pbr.compute_ambient_occlusion(high_mesh).astype(np.float32)
+    curv_hi = curv_override.astype(np.float32) if curv_override is not None else pbr.compute_edge_wear(high_mesh).astype(np.float32)
     v_hi = np.asarray(high_mesh.vertices, dtype=np.float32)
     n_hi = np.asarray(high_mesh.vertex_normals, dtype=np.float32)
     if high_vertex_mat_id is None:
         v_mid = np.where(high_vertex_metal > 0.72, MAT_BRUSHED_STEEL,
-                         np.where(high_vertex_rough > 0.68, MAT_RUBBER_POLY, MAT_PAINTED_ARMOR)).astype(np.int32)
+                         np.where(high_vertex_rough > 0.68, MAT_RUBBER_POLY, MAT_CLEAN_ENAMEL)).astype(np.int32)
     else:
         v_mid = np.asarray(high_vertex_mat_id, dtype=np.int32)
 
-    n_surf = min(max(len(high_mesh.faces) * 2, 48_000), 110_000)
+    n_surf = min(max(len(high_mesh.faces) * 3, 60_000), 130_000)
     pts_s, face_idx = trimesh.sample.sample_surface(high_mesh, n_surf, seed=42)
-    pts_s = pts_s.astype(np.float32)
+    # Ajoute systématiquement tous les centroïdes exacts des triangles High-Poly pour
+    # garantir une netteté laser sur les petits détails fins (liserés, pupilles, rivets) !
+    all_fi = np.arange(len(high_mesh.faces), dtype=np.int64)
+    pts_s = np.vstack([pts_s, high_mesh.triangles_center]).astype(np.float32)
+    face_idx = np.concatenate([face_idx, all_fi])
     f_hi = np.asarray(high_mesh.faces, dtype=np.int64)[face_idx]
     va, vb, vc = v_hi[f_hi[:, 0]], v_hi[f_hi[:, 1]], v_hi[f_hi[:, 2]]
     e0, e1, vp = vb - va, vc - va, pts_s - va
@@ -579,11 +711,31 @@ def prepare_high_poly_sampler(
     nrm_s = bw0[:, None] * n_hi[ia_h] + bw1[:, None] * n_hi[ib_h] + bw2[:, None] * n_hi[ic_h]
     nrm_s /= np.linalg.norm(nrm_s, axis=1, keepdims=True) + 1e-12
 
+    alb_s = bw0[:, None] * high_vertex_albedo[ia_h] + bw1[:, None] * high_vertex_albedo[ib_h] + bw2[:, None] * high_vertex_albedo[ic_h]
+    rgh_s = bw0 * high_vertex_rough[ia_h] + bw1 * high_vertex_rough[ib_h] + bw2 * high_vertex_rough[ic_h]
+    mtl_s = bw0 * high_vertex_metal[ia_h] + bw1 * high_vertex_metal[ib_h] + bw2 * high_vertex_metal[ic_h]
+
+    # Échantillonnage bilinéaire pleine résolution 1024²/2048² si `high_mesh` possède un atlas UV !
+    vis = getattr(high_mesh, "visual", None)
+    uv_hi = getattr(vis, "uv", None)
+    mat_hi = getattr(vis, "material", None)
+    if uv_hi is not None and len(uv_hi) == len(v_hi) and mat_hi is not None:
+        uv_arr = np.asarray(uv_hi, dtype=np.float32)
+        uv_s = bw0[:, None] * uv_arr[ia_h] + bw1[:, None] * uv_arr[ib_h] + bw2[:, None] * uv_arr[ic_h]
+        bc_tex = getattr(mat_hi, "baseColorTexture", None)
+        mr_tex = getattr(mat_hi, "metallicRoughnessTexture", None)
+        if bc_tex is not None:
+            alb_s = _bilinear_sample_pil_image(bc_tex, uv_s)
+        if mr_tex is not None:
+            mr_s = _bilinear_sample_pil_image(mr_tex, uv_s)
+            rgh_s = mr_s[:, 1]
+            mtl_s = mr_s[:, 2]
+
     return {
         "nrm_s": nrm_s,
-        "alb_s": bw0[:, None] * high_vertex_albedo[ia_h] + bw1[:, None] * high_vertex_albedo[ib_h] + bw2[:, None] * high_vertex_albedo[ic_h],
-        "rgh_s": bw0 * high_vertex_rough[ia_h] + bw1 * high_vertex_rough[ib_h] + bw2 * high_vertex_rough[ic_h],
-        "mtl_s": bw0 * high_vertex_metal[ia_h] + bw1 * high_vertex_metal[ib_h] + bw2 * high_vertex_metal[ic_h],
+        "alb_s": alb_s,
+        "rgh_s": rgh_s,
+        "mtl_s": mtl_s,
         "ao_s": bw0 * ao_hi[ia_h] + bw1 * ao_hi[ib_h] + bw2 * ao_hi[ic_h],
         "crv_s": bw0 * curv_hi[ia_h] + bw1 * curv_hi[ib_h] + bw2 * curv_hi[ic_h],
         "mid_s": v_mid[ia_h],
@@ -719,19 +871,66 @@ def bake_high_to_low(
     ai_hgt = np.zeros(len(pos_px), dtype=np.float32)
     if ai_views:
         import gpu_bridge as gb
-        ai_col, ai_hgt, ai_cov = gb.sample_orthographic_ai_views_zbuffer(
+        # 1) Micro-texture 360° sans couture depuis tuiles GPU Datacenter (`tile_*.png`) si présentes :
+        #    garantit 0 zone plastique même sous le menton, sous le nez, sur les 20 dents et au dos !
+        ai_folder = Path(next(iter(ai_views.values()))).parent
+        tile_lac_p = ai_folder / "tile_urushi_crimson.png"
+        tile_gld_p = ai_folder / "tile_gilded_teeth.png"
+        tile_brd_p = ai_folder / "tile_carved_beard.png"
+        is_dark_cav = col_px.max(axis=1) < 0.085
+        is_metallic = mtl_px > 0.50
+        # Détecte poils/barbe sculptés clairs (ivoire / argent) pour leur appliquer leur propre tuile GPU
+        is_hair_ivory = (~is_metallic) & (col_px.min(axis=1) > 0.52)
+        p_unit = (pos_px - high_mesh.bounds[0]) / max(float(np.linalg.norm(high_mesh.bounds[1] - high_mesh.bounds[0])), 1e-5)
+
+        if tile_lac_p.is_file():
+            t_lac = gb._load_tile(str(tile_lac_p))
+            s_lac = gb._triplanar_sample_tile(t_lac, p_unit, nhi_px, scale=3.2).astype(np.float32)
+            lac_mean = np.clip(s_lac.mean(axis=0, keepdims=True), 0.08, None)
+            lac_mod = np.clip(0.38 + 0.62 * (s_lac / lac_mean), 0.25, 1.55)
+            non_metal = (~is_metallic) & (~is_dark_cav) & (~is_hair_ivory)
+            col_px[non_metal] = np.clip(col_px[non_metal] * lac_mod[non_metal], 0.0, 1.0)
+            lac_lum = s_lac @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+            ai_hgt += np.where(non_metal, (lac_lum - float(lac_lum.mean())) * 0.55, 0.0)
+            rgh_px = np.where(non_metal, np.clip(rgh_px + (float(lac_lum.mean()) - lac_lum) * 0.30, 0.08, 0.90), rgh_px)
+
+        if tile_brd_p.is_file() and np.any(is_hair_ivory):
+            t_brd = gb._load_tile(str(tile_brd_p))
+            s_brd = gb._triplanar_sample_tile(t_brd, p_unit[is_hair_ivory], nhi_px[is_hair_ivory], scale=4.2).astype(np.float32)
+            brd_mean = np.clip(s_brd.mean(axis=0, keepdims=True), 0.12, None)
+            col_px[is_hair_ivory] = np.clip(col_px[is_hair_ivory] * (0.35 + 0.65 * (s_brd / brd_mean)), 0.0, 0.90)
+            brd_lum = s_brd @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+            ai_hgt[is_hair_ivory] += (brd_lum - float(brd_lum.mean())) * 0.85
+            rgh_px[is_hair_ivory] = np.clip(rgh_px[is_hair_ivory] + (float(brd_lum.mean()) - brd_lum) * 0.25, 0.28, 0.88)
+
+        if tile_gld_p.is_file() and np.any(is_metallic):
+            t_gld = gb._load_tile(str(tile_gld_p))
+            s_gld = gb._triplanar_sample_tile(t_gld, p_unit[is_metallic], nhi_px[is_metallic], scale=5.5).astype(np.float32)
+            gld_mean = np.clip(s_gld.mean(axis=0, keepdims=True), 0.10, None)
+            col_px[is_metallic] = np.clip(col_px[is_metallic] * (0.45 + 0.55 * (s_gld / gld_mean)), 0.0, 1.0)
+            gld_lum = s_gld @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+            ai_hgt[is_metallic] += (gld_lum - float(gld_lum.mean())) * 0.45
+            rgh_px[is_metallic] = np.clip(rgh_px[is_metallic] + (float(gld_lum.mean()) - gld_lum) * 0.24, 0.10, 0.65)
+
+        # 2) Projection Z-buffer multi-vues GPU Datacenter : 0 % sur les métaux dorés & cavités noires
+        #    (élimine à 100 % tout double reflet/pupille fantôme sur les yeux et les 20 dents !)
+        ai_col, ai_ortho_hgt, ai_cov = gb.sample_orthographic_ai_views_zbuffer(
             high_mesh, pos_px, nhi_px, {k: str(v) for k, v in ai_views.items()},
         )
-        # Fusionne la peinture GPU multi-vues Z-buffer tout en préservant les métaux polis purs !
-        ai_blend = ai_cov * np.where(mid_px == MAT_BRUSHED_STEEL, 0.30, 0.88)
+        ai_hgt = ai_hgt + np.where(is_metallic | is_dark_cav, 0.0, ai_ortho_hgt)
+        ai_blend = np.where(
+            is_dark_cav | is_metallic | (mid_px == MAT_BRUSHED_STEEL),
+            0.0,
+            ai_cov * np.where(is_hair_ivory, 0.55, 0.88),
+        )
         col_px = col_px * (1.0 - ai_blend[:, None]) + ai_col * ai_blend[:, None]
-        rgh_px = np.clip(rgh_px * (1.0 - 0.22 * ai_hgt * ai_cov), 0.05, 1.0)
+        rgh_px = np.clip(rgh_px * (1.0 - 0.28 * ai_ortho_hgt * ai_cov), 0.06, 0.95)
 
     if weathering:
-        w_amt = 0.05 if delight_pass else 0.42
-        d_amt = 0.14 if delight_pass else 0.30
-        g_amt = 0.08 if delight_pass else 0.18
-        dec_amt = 0.06 if delight_pass else decal_strength
+        w_amt = 0.0 if (delight_pass or ai_views) else 0.42
+        d_amt = 0.04 if ai_views else (0.14 if delight_pass else 0.30)
+        g_amt = 0.05 if ai_views else (0.08 if delight_pass else 0.18)
+        dec_amt = 0.0 if ai_views else (0.06 if delight_pass else decal_strength)
         col_px, rgh_px, mtl_px, ao_px, hgt_px = apply_game_weathering(
             col_px, rgh_px, mtl_px, ao_px, crv_px,
             pos_px, nhi_px, high_mesh.bounds,
@@ -739,9 +938,11 @@ def bake_high_to_low(
             wear_amount=w_amt, dirt_amount=d_amt, grime_amount=g_amt,
             decal_strength=dec_amt,
         )
-        hgt_px = hgt_px + ai_hgt * 0.45
+        hgt_px = hgt_px + ai_hgt * 1.35
     else:
-        hgt_px = ai_hgt * 0.45
+        col_px = compress_albedo_headroom(col_px)
+        lum_det = col_px @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+        hgt_px = (ai_hgt * 0.45 + 0.14 * (lum_det - float(np.median(lum_det)))).astype(np.float32)
 
     # Transformation de la normale High-Poly dans l'Espace Tangent Mikk du Low-Poly !
     ts_x = np.sum(nhi_px * T_px, axis=1)
@@ -1244,6 +1445,8 @@ def export_game_package(
     # v5.7 — défini pour TOUS les chemins d'entrée (Builder ET fichier externe).
     all_glass_asset = False
     glass_tint_value = None
+    ao_ext_override = None
+    curv_ext_override = None
 
     if isinstance(source, mk.Builder):
         raw_draw_calls = len(source.parts)
@@ -1307,7 +1510,76 @@ def export_game_package(
             v_mtl = np.concatenate(static_metal)
             v_mid = v_mid_raw
             all_glass_asset = False
-        low_base = decimate_mesh_clean(mk.union(static_meshes) if len(static_meshes) > 1 else static_meshes[0], lod0_tris)
+        union_solid_body = mk.union(static_meshes) if len(static_meshes) > 1 else static_meshes[0]
+        if (
+            not all_glass_asset
+            and len(static_part_entries) > 1
+            and len(union_solid_body.faces) >= 12
+        ):
+            try:
+                (
+                    high_body,
+                    v_alb,
+                    v_rgh,
+                    v_mtl,
+                    v_mid,
+                    ao_ext_override,
+                    curv_ext_override,
+                ) = _build_exterior_high_poly_from_union(union_solid_body, static_part_entries)
+            except Exception:
+                pass
+        # Décimation adaptative préservant la finesse anatomique des yeux/paupières/pupilles :
+        # en QEM uniforme, l'erreur quadrique varie en ~L⁴ (arête de 1,5 mm sur une pupille vs
+        # 25 mm sur un crâne = poids 70 000× plus faible !), ce qui écrase les yeux en facettes.
+        def _is_anatomical_eye_part(lbl_s: str) -> bool:
+            low_s = lbl_s.lower()
+            if "eyelet" in low_s or "eyebolt" in low_s:
+                return False
+            if any(tok in low_s for tok in ("eyeball", "eyelid", "pupil", "iris", "cornea", "sclera", "glint")):
+                return True
+            parts_s = [p for p in low_s.replace("-", "_").split("_") if p]
+            return "eye" in parts_s or "eyes" in parts_s
+
+        eye_meshes = [pm for pm, _pmat, plbl, _pmid in static_part_entries if _is_anatomical_eye_part(plbl)]
+        body_meshes = [pm for pm, _pmat, plbl, _pmid in static_part_entries if not _is_anatomical_eye_part(plbl)]
+        if eye_meshes and body_meshes and lod0_tris >= 800:
+            eye_solid = mk.union(eye_meshes) if len(eye_meshes) > 1 else eye_meshes[0]
+            body_solid = mk.union(body_meshes) if len(body_meshes) > 1 else body_meshes[0]
+            # Supprime l'hémisphère arrière caché dans le crâne : 100 % des triangles et texels UV
+            # sont concentrés sur la cornée visible, le bord circulaire de pupille et les paupières !
+            eye_visible = mk.difference(eye_solid, [body_solid])
+            if len(eye_visible.faces) >= 24:
+                eye_budget = min(len(eye_visible.faces), max(280, int(lod0_tris * 0.16)))
+                body_budget = max(240, int(lod0_tris) - eye_budget)
+                low_body = decimate_mesh_clean(body_solid, body_budget)
+                low_eyes = decimate_mesh_clean(eye_visible, eye_budget)
+                low_base = trimesh.util.concatenate([low_body, low_eyes])
+            else:
+                low_base = decimate_mesh_clean(union_solid_body, lod0_tris)
+        elif not ai_views and len(static_part_entries) >= 3 and lod0_tris >= 3200:
+            # Décimation multi-matériaux propre : regroupe par matériau PBR identique afin
+            # d'éliminer 100 % des bavures d'atlas UV aux frontières métal/plastique/caoutchouc
+            # et préserver les détails fins (boulons, ailettes, durites) via pondération `sqrt` !
+            mat_buckets: dict[tuple, list[trimesh.Trimesh]] = {}
+            for pm, pmat, _plbl, pmid in static_part_entries:
+                c_key = tuple(np.round(np.asarray(pmat.color, dtype=np.float32), 2).tolist())
+                m_key = (c_key, round(float(pmat.roughness), 2), round(float(pmat.metallic), 2), int(pmid))
+                mat_buckets.setdefault(m_key, []).append(pm)
+            if len(mat_buckets) >= 2:
+                b_solids = [mk.union(ms) if len(ms) > 1 else ms[0] for ms in mat_buckets.values()]
+                b_weights = np.array([math.sqrt(max(len(s_m.faces), 12)) for s_m in b_solids], dtype=np.float64)
+                b_weights /= max(float(b_weights.sum()), 1e-9)
+                low_parts = [
+                    decimate_mesh_clean(s_m, max(int(round(lod0_tris * w_b)), 36))
+                    for s_m, w_b in zip(b_solids, b_weights)
+                ]
+                low_base = trimesh.util.concatenate(low_parts)
+                if len(low_base.faces) > lod0_tris:
+                    low_base = decimate_mesh_clean(low_base, lod0_tris)
+            else:
+                low_base = decimate_mesh_clean(union_solid_body, lod0_tris)
+        else:
+            low_base = decimate_mesh_clean(union_solid_body, lod0_tris)
         if delight_pass is None:
             delight_pass = False
     else:
@@ -1322,22 +1594,26 @@ def export_game_package(
         nv = len(high_body.vertices)
         if ext_uv is not None:
             v_alb, v_rgh, v_mtl = ext_uv
+            has_prebaked_uv = True
         else:
             v_alb = np.tile(np.array([0.55, 0.56, 0.58], dtype=np.float32), (nv, 1))
             v_rgh = np.full(nv, 0.50, dtype=np.float32)
             v_mtl = np.full(nv, 0.10, dtype=np.float32)
         v_mid = np.where(v_mtl > 0.72, MAT_BRUSHED_STEEL,
-                         np.where(v_rgh > 0.68, MAT_RUBBER_POLY, MAT_PAINTED_ARMOR)).astype(np.int32)
+                         np.where(v_rgh > 0.68, MAT_RUBBER_POLY, MAT_CLEAN_ENAMEL)).astype(np.int32)
         low_base = decimate_mesh_clean(high_body, lod0_tris)
         if delight_pass is None:
-            delight_pass = True
+            delight_pass = not has_prebaked_uv
 
     from concurrent.futures import ThreadPoolExecutor
 
     use_weather = weathering and (not has_prebaked_uv)
     if all_glass_asset and glass_tint_value is None:
         glass_tint_value = np.array([0.86, 0.94, 0.97, 0.30], dtype=np.float32)
-    hp_cache = prepare_high_poly_sampler(high_body, v_alb, v_rgh, v_mtl, v_mid)
+    hp_cache = prepare_high_poly_sampler(
+        high_body, v_alb, v_rgh, v_mtl, v_mid,
+        ao_override=ao_ext_override, curv_override=curv_ext_override,
+    )
 
     def _bake_body_task() -> dict:
         return bake_high_to_low(
@@ -1356,7 +1632,20 @@ def export_game_package(
         j_rgh = np.concatenate([np.full(len(p[0].vertices), float(p[1].roughness), dtype=np.float32) for p in plist])
         j_mtl = np.concatenate([np.full(len(p[0].vertices), float(p[1].metallic), dtype=np.float32) for p in plist])
         j_mid = np.concatenate([np.full(len(p[0].vertices), classify_material_id(p[1], p[2]), dtype=np.int32) for p in plist])
-        j_low = decimate_mesh_clean(mk.union([p[0] for p in plist]) if len(plist) > 1 else plist[0][0], max(lod0_tris // 3, 280))
+        j_target = max(int(lod0_tris * 0.68), 320)
+        if len(plist) > 1:
+            # Alloue les budgets proportionnellement à sqrt(faces) avec marge de 0.92 pour ne JAMAIS
+            # repasser `j_low` concaténé dans `decimate_mesh_clean` (qui ne garderait que la plus grosse composante
+            # connexe et supprimerait les rayons / moyeux séparés d'une roue !).
+            weights = np.array([math.sqrt(max(len(p[0].faces), 12)) for p in plist], dtype=np.float64)
+            weights = (weights / max(float(weights.sum()), 1e-9)) * 0.92
+            j_parts_low = [
+                decimate_mesh_clean(p[0], max(int(round(j_target * w)), 32))
+                for p, w in zip(plist, weights)
+            ]
+            j_low = trimesh.util.concatenate(j_parts_low)
+        else:
+            j_low = decimate_mesh_clean(plist[0][0], j_target)
         j_res = bake_high_to_low(
             j_hi, j_alb, j_rgh, j_mtl, j_low,
             high_vertex_mat_id=j_mid, ai_views=ai_views,
@@ -1379,16 +1668,20 @@ def export_game_package(
 
     lod0_mesh = baked["mesh_lod0"]
 
-    # `LOD1` (40%, mipmap 512px) et `LOD2` (15%, mipmap 256px) en transfert d'atlas partagé instantané (< 0.06s !)
-    lod1_raw = decimate_mesh_clean(low_base, min(len(low_base.faces) - 2, max(int(lod0_tris * 0.40), 64)))
-    lod2_raw = decimate_mesh_clean(lod1_raw, min(len(lod1_raw.faces) - 2, max(int(lod0_tris * 0.15), 32)))
+    # `LOD1` (40%) et `LOD2` (21% direct depuis le solide soudé : `LOD0 > LOD1 > LOD2 > 50` 100 % garanti !)
+    lod_src = union_solid_body if "union_solid_body" in locals() and union_solid_body is not None else low_base
+    n_lod0 = len(lod0_mesh.faces)
+    t_lod1 = min(max(n_lod0 - 8, 64), max(min(int(lod0_tris * 0.40), int(n_lod0 * 0.68)), 76))
+    t_lod2 = min(max(t_lod1 - 8, 54), max(min(int(lod0_tris * 0.21), int(t_lod1 * 0.65)), 58))
+    lod1_raw = decimate_mesh_clean(lod_src, t_lod1)
+    lod2_raw = decimate_mesh_clean(lod1_raw, t_lod2)
     lod1_mesh = build_shared_atlas_lod(lod0_mesh, baked, lod1_raw, max(tex_size // 2, 256))
     # v5.2 : le LOD2 reçoit SON PROPRE bake 128² (atlas, AO et normales cohérents
     # avec sa surface décimée). Partager l'atlas du LOD0 avec des triangles géants
     # fait interpoler les UV à travers les charts (« vitrage brisé » sur la QA).
     lod2_baked = bake_high_to_low(
         high_body, v_alb, v_rgh, v_mtl, lod2_raw,
-        high_vertex_mat_id=v_mid, ai_views=None, hp_cache=hp_cache,
+        high_vertex_mat_id=v_mid, ai_views=ai_views, hp_cache=hp_cache,
         tex_size=max(tex_size // 4, 128), weathering=use_weather,
         delight_pass=False, decal_strength=decal_strength,
     )
@@ -1410,11 +1703,24 @@ def export_game_package(
             n_copy.visual = trimesh.visual.TextureVisuals(material=nm_mat.to_pbr())
             sc.add_geometry(n_copy, node_name=f"Neon_{safe_lbl}", geom_name=f"Neon_{safe_lbl}")
 
-        for grp, plist in joint_opaque_groups.items():
-            piv = joints.get(grp, {}).get("pivot", [0.0, 0.0, 0.0])
-            T = np.eye(4, dtype=float)
-            T[:3, 3] = piv
-            sc.graph.update(frame_to=grp, frame_from=sc.graph.base_frame, matrix=T)
+        # Hiérarchie d'articulations : tri topologique pour enregistrer les joints parents AVANT les enfants !
+        ordered_joints = sorted(
+            joint_opaque_groups.items(),
+            key=lambda kv: 1 if joints.get(kv[0], {}).get("parent") else 0,
+        )
+        for grp, plist in ordered_joints:
+            j_meta = joints.get(grp, {})
+            piv = np.asarray(j_meta.get("pivot", [0.0, 0.0, 0.0]), dtype=float)
+            parent_grp = j_meta.get("parent")
+            if parent_grp and parent_grp in joint_opaque_groups:
+                parent_piv = np.asarray(joints.get(parent_grp, {}).get("pivot", [0.0, 0.0, 0.0]), dtype=float)
+                T = np.eye(4, dtype=float)
+                T[:3, 3] = piv - parent_piv
+                sc.graph.update(frame_to=grp, frame_from=parent_grp, matrix=T)
+            else:
+                T = np.eye(4, dtype=float)
+                T[:3, 3] = piv
+                sc.graph.update(frame_to=grp, frame_from=sc.graph.base_frame, matrix=T)
             j_mesh = joint_baked_map[grp]["mesh_lod0"].copy()
             j_mesh.apply_translation([-piv[0], -piv[1], -piv[2]])
             sc.add_geometry(j_mesh, node_name=f"{grp}_mesh", geom_name=f"{grp}_mesh", parent_node_name=grp)

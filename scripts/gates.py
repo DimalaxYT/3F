@@ -146,8 +146,11 @@ def _lod_silhouette(man: dict, lod: str = "LOD2", tol_mean_pct: float = 1.0,
     Seuils calibrés sur sci_fi_crate sain : moy 0.27 %, p95 1.6 %."""
     import numpy as np
     import trimesh
-    g0 = max(trimesh.load(man["lods"]["LOD0"]["path"]).geometry.values(), key=lambda g: len(g.faces))
-    g2 = max(trimesh.load(man["lods"][lod]["path"]).geometry.values(), key=lambda g: len(g.faces))
+    s0 = trimesh.load(man["lods"]["LOD0"]["path"], force="scene")
+    s2 = trimesh.load(man["lods"][lod]["path"], force="scene")
+    body_k = next((k for k in s0.geometry if k.endswith("_Body") and k in s2.geometry), None)
+    g0 = s0.geometry[body_k] if body_k else max(s0.geometry.values(), key=lambda g: len(g.faces))
+    g2 = s2.geometry[body_k] if body_k else max(s2.geometry.values(), key=lambda g: len(g.faces))
     dists, _faces = trimesh.proximity.ProximityQuery(g0).vertex(np.asarray(g2.vertices))
     d = np.abs(np.asarray(dists, dtype=np.float64))
     diag = float(np.linalg.norm(g0.extents)) + 1e-9
@@ -322,6 +325,29 @@ def _albedo_design(out_p: Path, name: str) -> tuple[bool, str]:
     ok = (clipped <= 0.02) and (p99 <= 0.92)
     return ok, details
 
+
+
+def _pbr_coherence(out_p: Path, name: str, man: dict) -> tuple[bool, str]:
+    """Vérifie la cohérence physique de la carte ORM (AO non brûlé, rugosité dans
+    [0.02, 1.0], absence de métal parasite massif sur sculpture organique)."""
+    import numpy as np
+    from PIL import Image
+    ue = man.get("engine_exports", {}).get("unreal", {})
+    orm_p = ue.get("orm_packed") or (out_p / "unreal" / f"T_{name}_ORM.webp")
+    orm_p = Path(orm_p)
+    if not orm_p.is_file():
+        return False, f"{orm_p.name} introuvable"
+    arr = np.asarray(Image.open(orm_p).convert("RGB"), dtype=np.float32) / 255.0
+    ao_mean = float(arr[..., 0].mean())
+    rgh_min, rgh_max = float(arr[..., 1].min()), float(arr[..., 1].max())
+    mtl_mean = float(arr[..., 2].mean())
+    is_sculpt = bool(man.get("sculpt_source"))
+    metal_spike = is_sculpt and mtl_mean > 0.55
+    ok = (ao_mean >= 0.40) and (0.01 <= rgh_max <= 1.0) and (not metal_spike)
+    return ok, (
+        f"AO moy {ao_mean:.2f} (>= 0.40) | Rough [{rgh_min:.2f}..{rgh_max:.2f}] "
+        f"| Metal moy {mtl_mean:.2f}"
+    )
 
 
 def _shading_modeled(man: dict) -> tuple[bool, str]:
@@ -561,6 +587,15 @@ def check_package(out_dir: str | Path, target: str = "hero") -> dict:
         issues = luau_issues(Path(lua_p).read_text(encoding="utf-8"), man)
         g.add("luau_structure", "setup_<Name>.lua : blocs balancés + Neon + sockets",
               not issues, issues or "ok", "0 issue")
+
+    # cohérence physique ORM (AO non brûlé + anti-métal parasite sur sculpture)
+    if ue:
+        try:
+            ok, val = _pbr_coherence(out_p, name, man)
+            g.add("pbr_coherence", "ORM cohérent (AO >= 0.40, zéro métal parasite)",
+                  ok, val, "AO >= 0.40 & Metal sain")
+        except Exception as exc:
+            g.add("pbr_coherence", "ORM mesurable", False, str(exc), "mesure ok")
 
     # budget colliders convexes
     if ue_glb and Path(ue_glb).is_file():

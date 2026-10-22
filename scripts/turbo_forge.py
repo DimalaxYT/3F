@@ -102,6 +102,8 @@ def run_turbo(
     front_view: str | None = None,
     side_view: str | None = None,
     back_view: str | None = None,
+    depth_view: str | None = None,
+    hollow_thickness: float = 0.0,
     ai_views: dict[str, str] | None = None,
     emit_guides: bool = False,
     export_stl: bool = True,
@@ -127,19 +129,83 @@ def run_turbo(
     stl_watertight = None
     stl_volume = None
 
-    if front_view and side_view:
+    def _export_watertight_stl(solid_m, stl_dest: Path) -> tuple[bool, float]:
+        """Exporte un `.stl` binaire garanti 100 % étanche APRES rechargement disque `trimesh.load`."""
+        import numpy as _np
+        import trimesh as _tm
+
+        def _strip_crumbs(m_in):
+            comps = m_in.split(only_watertight=False)
+            if len(comps) > 1:
+                kept = [c for c in comps if len(c.faces) >= 12 and c.is_watertight]
+                if kept:
+                    return _tm.util.concatenate(kept) if len(kept) > 1 else kept[0]
+            return m_in
+
+        m_out = _strip_crumbs(solid_m.copy())
+        m_out.export(stl_dest)
+        reloaded = _strip_crumbs(_tm.load(stl_dest, force="mesh"))
+        if reloaded.is_watertight:
+            reloaded.export(stl_dest)
+            chk0 = _tm.load(stl_dest, force="mesh")
+            if chk0.is_watertight:
+                return True, float(chk0.volume)
+
+        # Les intersections booléennes complexes créent parfois des arêtes quasi-nulles (< 1e-5 m)
+        # qui génèrent 1-2 triangles miettes lors de la quantification STL float32 :
+        try:
+            import fast_simplification
+            vo, fo = fast_simplification.simplify(
+                _np.asarray(m_out.vertices, dtype=_np.float32),
+                _np.asarray(m_out.faces, dtype=_np.int32),
+                target_reduction=0.10,
+                agg=4,
+            )
+            cleaned = _strip_crumbs(_tm.Trimesh(vertices=vo, faces=fo, process=True))
+            cleaned.export(stl_dest)
+            chk1 = _tm.load(stl_dest, force="mesh")
+            if chk1.is_watertight and len(chk1.faces) >= 12:
+                return True, float(chk1.volume)
+        except Exception:
+            pass
+        if getattr(mk, "HAS_MANIFOLD", False):
+            import manifold3d
+            for tol in (2e-5, 8e-5, 2e-4):
+                try:
+                    w = solid_m.copy()
+                    q = _np.round(w.vertices / tol) * tol
+                    w.vertices = q
+                    w.merge_vertices()
+                    w.update_faces(w.nondegenerate_faces())
+                    w.remove_unreferenced_vertices()
+                    if not w.is_watertight:
+                        _tm.repair.fill_holes(w)
+                        _tm.repair.fix_winding(w)
+                    v32 = _np.asarray(w.vertices, dtype=_np.float32)
+                    f32 = _np.asarray(w.faces, dtype=_np.uint32)
+                    mm = manifold3d.Manifold(manifold3d.Mesh(vert_properties=v32, tri_verts=f32)).to_mesh()
+                    cand = _tm.Trimesh(vertices=mm.vert_properties[:, :3], faces=mm.tri_verts, process=True)
+                    cand.export(stl_dest)
+                    chk = _tm.load(stl_dest, force="mesh")
+                    if chk.is_watertight and len(chk.faces) >= 4:
+                        return True, float(chk.volume)
+                except Exception:
+                    continue
+        return bool(reloaded.is_watertight), float(reloaded.volume)
+
+    if front_view and (side_view or depth_view):
         asset_name = name or (Path(target).stem if target else "sculpt_asset")
         sculpt_dir = out_p / "sculpt_source"
         sculpt_dir.mkdir(parents=True, exist_ok=True)
         mesh_hi, vpack = gs.sculpt_from_views(
             front_view, side_view, back_view,
             grid_res=int(sculpt_res),
+            depth_path=depth_view,
+            hollow_thickness=float(hollow_thickness),
         )
         stl_main = out_p / f"{asset_name}.stl"
-        mesh_hi.export(stl_main)
+        stl_watertight, stl_volume = _export_watertight_stl(mesh_hi, stl_main)
         stl_out = str(stl_main)
-        stl_watertight = bool(mesh_hi.is_watertight)
-        stl_volume = float(mesh_hi.volume)
         mesh_pbr, _, _, _ = gs.bake_sculpt_pbr(mesh_hi, vpack, resolution=int(tex_size))
         glb_src = sculpt_dir / f"{asset_name}.glb"
         glb_src.write_bytes(mesh_pbr.export(file_type="glb"))
@@ -174,11 +240,10 @@ def run_turbo(
     if export_stl and stl_out is None and isinstance(src_obj, mk.Builder):
         solid = src_obj.union_solid()
         stl_main = out_p / f"{asset_name}.stl"
-        solid.export(stl_main)
+        stl_watertight, stl_volume = _export_watertight_stl(solid, stl_main)
         stl_out = str(stl_main)
-        stl_watertight = bool(solid.is_watertight)
-        stl_volume = float(solid.volume)
 
+    is_sculpt = sculpt_info is not None
     manifest = gr.export_game_package(
         src_obj,
         out_dir=out_p,
@@ -186,6 +251,8 @@ def run_turbo(
         engine=engine,
         lod0_tris=int(lod0_tris),
         tex_size=int(tex_size),
+        weathering=(not is_sculpt),
+        delight_pass=(False if is_sculpt else None),
         ai_views=ai_views,
     )
 
@@ -194,20 +261,6 @@ def run_turbo(
         manifest["stl_watertight"] = stl_watertight
         if split_bed:
             manifest["split_stl_kit"] = split_stl.export_split_kit(stl_out, str(out_p / "print_parts"))
-
-    if export_preview:
-        rbx_glb = manifest.get("engine_exports", {}).get("roblox", {}).get("studio_ready_glb_png")
-        game_glb = manifest["lods"]["LOD0"]["path"]
-        # Le viewer embarque le GLB en base64 : on préfère le pack Roblox PNG s'il reste
-        # léger (<= 3 Mo), sinon le GLB webp (x6 plus petit) pour garder preview.html partageable.
-        if rbx_glb and Path(rbx_glb).is_file() and Path(rbx_glb).stat().st_size <= 3_000_000:
-            preview_glb = rbx_glb
-        else:
-            preview_glb = game_glb
-        prev_html = pv.build_preview(str(out_p), title=asset_name, glb=preview_glb)
-        if prev_html:
-            manifest["preview_html"] = prev_html
-            manifest["preview_glb_source"] = Path(preview_glb).name
 
     if make_gif:
         try:
@@ -268,6 +321,18 @@ def run_turbo(
             manifest["gates"] = {"target": gate_target, "error": str(exc)}
             (out_p / "game_manifest.json").write_text(
                 json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    if export_preview:
+        game_glb = manifest["lods"]["LOD0"]["path"]
+        rbx_glb = manifest.get("engine_exports", {}).get("roblox", {}).get("studio_ready_glb_png")
+        preview_glb = game_glb if Path(game_glb).is_file() else rbx_glb
+        prev_html = pv.build_preview(str(out_p), title=asset_name, report=report, glb=preview_glb)
+        if prev_html:
+            manifest["preview_html"] = prev_html
+            manifest["preview_glb_source"] = Path(preview_glb).name
+            (out_p / "game_manifest.json").write_text(
+                json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8")
+
     return manifest
 
 
@@ -328,6 +393,9 @@ def main(argv=None) -> int:
     ap.add_argument("--front", default=None, help="Vue avant GPU pour sculpture organique")
     ap.add_argument("--side", default=None, help="Vue profil GPU pour sculpture organique")
     ap.add_argument("--back", default=None, help="Vue arrière GPU optionnelle pour sculpture organique")
+    ap.add_argument("--depth", default=None, help="Carte de profondeur alignée à --front (blanc = proche)")
+    ap.add_argument("--hollow-thickness", type=float, default=0.0,
+                    help="Épaisseur de coque creuse en mètres (ex: 0.012 pour masque/casque)")
     ap.add_argument("--ai-front", default=None, help="Peinture orthographique GPU face avant")
     ap.add_argument("--ai-side", default=None, help="Peinture orthographique GPU profil")
     ap.add_argument("--ai-top", default=None, help="Peinture orthographique GPU dessus")
@@ -395,6 +463,8 @@ def main(argv=None) -> int:
         front_view=args.front,
         side_view=args.side,
         back_view=args.back,
+        depth_view=args.depth,
+        hollow_thickness=args.hollow_thickness,
         ai_views=ai_v,
         emit_guides=args.emit_guides,
         export_stl=not args.no_stl,

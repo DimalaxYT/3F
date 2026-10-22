@@ -545,6 +545,81 @@ def render_orthographic_paint_guides(
     return meta
 
 
+def _align_and_clean_ai_ortho(vpath: str, vname: str, S: int) -> tuple[np.ndarray, np.ndarray]:
+    """Aligne au sous-pixel près une vue peinte sur GPU Datacenter (`ai_front.png`, `ai_side.png`)
+    sur la silhouette exacte de son guide géométrique `ortho_<vname>.png` s'il est présent dans le
+    même dossier, supprime 100 % du halo clair de fond par érosion + extension EDT interne, et
+    obscurcit les trous traversants internes (bouche ouverte / pupilles) pour zéro bavure grise."""
+    import delight as dl
+
+    raw_im = Image.open(vpath).convert("RGB").resize((S, S), Image.Resampling.LANCZOS)
+    arr_raw = np.asarray(raw_im, dtype=np.float32) / 255.0
+
+    b = max(4, S // 32)
+    bg = np.median(np.concatenate([
+        arr_raw[:b, :, :].reshape(-1, 3),
+        arr_raw[-b:, :, :].reshape(-1, 3),
+        arr_raw[:, :b, :].reshape(-1, 3),
+        arr_raw[:, -b:, :].reshape(-1, 3),
+    ], axis=0), axis=0)
+    dist_bg = np.linalg.norm(arr_raw - bg[None, None, :], axis=2)
+    sat = arr_raw.max(axis=2) - arr_raw.min(axis=2)
+    fg_raw = (dist_bg > 0.075) | (sat > 0.055)
+    fg_closed = ndimage.binary_closing(fg_raw, iterations=2)
+    fg_outer = ndimage.binary_fill_holes(fg_closed)
+    lbl, n_c = ndimage.label(fg_outer)
+    if n_c > 1:
+        sizes = ndimage.sum(fg_outer, lbl, range(1, n_c + 1))
+        fg_outer = lbl == (int(np.argmax(sizes)) + 1)
+
+    delit_im, _ = dl.delight_image_2d(raw_im, strength=0.48)
+    rgb = np.asarray(delit_im, dtype=np.float32) / 255.0
+    rgb = np.clip(rgb, 0.0, 0.88)
+    rgb[..., 1] = np.where((rgb[..., 0] > 0.58) & (rgb[..., 1] > 0.22 * rgb[..., 0]) & (rgb[..., 2] < 0.16),
+                           rgb[..., 0] * 0.16, rgb[..., 1])
+    inner_holes = fg_outer & (~fg_raw)
+    if inner_holes.any():
+        rgb[inner_holes] = np.array([0.030, 0.022, 0.024], dtype=np.float32)
+
+    # Érode de 4 px puis prolonge par EDT vers l'extérieur -> 0.0 % de frange claire sur les bords !
+    inner_valid = ndimage.binary_erosion(fg_outer, iterations=4)
+    if not inner_valid.any():
+        inner_valid = fg_outer
+    if inner_valid.any():
+        _, nn = ndimage.distance_transform_edt(~inner_valid, return_indices=True)
+        rgb = rgb[nn[0], nn[1]]
+
+    # Recalage affine automatique boîte-à-boîte sur `ortho_<vname>.png` s'il existe à côté !
+    guide_p = os.path.join(os.path.dirname(str(vpath)), f"ortho_{vname}.png")
+    if os.path.isfile(guide_p) and fg_outer.sum() > 200:
+        g_arr = np.asarray(Image.open(guide_p).convert("RGB").resize((S, S), Image.Resampling.BILINEAR),
+                           dtype=np.float32) / 255.0
+        g_bg = np.median(g_arr[:b, :, :].reshape(-1, 3), axis=0)
+        g_fg = ndimage.binary_fill_holes(np.linalg.norm(g_arr - g_bg[None, None, :], axis=2) > 0.055)
+        if g_fg.sum() > 200:
+            ays, axs = np.nonzero(fg_outer)
+            gys, gxs = np.nonzero(g_fg)
+            ay0, ay1, ax0, ax1 = float(ays.min()), float(ays.max()), float(axs.min()), float(axs.max())
+            gy0, gy1, gx0, gx1 = float(gys.min()), float(gys.max()), float(gxs.min()), float(gxs.max())
+            grid_y = (np.arange(S, dtype=np.float32) - gy0) / max(gy1 - gy0, 1.0) * max(ay1 - ay0, 1.0) + ay0
+            grid_x = (np.arange(S, dtype=np.float32) - gx0) / max(gx1 - gx0, 1.0) * max(ax1 - ax0, 1.0) + ax0
+            gx_c = np.clip(grid_x, 0.0, S - 1.001)
+            gy_c = np.clip(grid_y, 0.0, S - 1.001)
+            x0i = gx_c.astype(np.int32)
+            y0i = gy_c.astype(np.int32)
+            tx = (gx_c - x0i)[None, :, None]
+            ty = (gy_c - y0i)[:, None, None]
+            c00 = rgb[np.ix_(y0i, x0i)]
+            c10 = rgb[np.ix_(y0i, np.minimum(x0i + 1, S - 1))]
+            c01 = rgb[np.ix_(np.minimum(y0i + 1, S - 1), x0i)]
+            c11 = rgb[np.ix_(np.minimum(y0i + 1, S - 1), np.minimum(x0i + 1, S - 1))]
+            rgb = (c00 * (1.0 - tx) + c10 * tx) * (1.0 - ty) + (c01 * (1.0 - tx) + c11 * tx) * ty
+
+    lum_a = rgb @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    hp_a = (lum_a - ndimage.gaussian_filter(lum_a, sigma=3.0)).astype(np.float32)
+    return rgb.astype(np.float32), hp_a
+
+
 def sample_orthographic_ai_views_zbuffer(
     high_mesh: trimesh.Trimesh,
     sample_pos: np.ndarray,
@@ -554,22 +629,21 @@ def sample_orthographic_ai_views_zbuffer(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Projette des vues orthographiques peintes par le GPU Datacenter (`front`, `side`, `top`)
     sur les points 3D `sample_pos` de `high_mesh` AVEC **vrai test d'occultation Z-buffer** :
-      - Zéro bavure sur les faces cachées ou derrière les poignées / loquets !
-      - Pondération angulaire `cos^5` + symétrisation gauche/droite & avant/arrière propre !
+      - Zéro bavure sur les faces cachées ou à l'arrière creux des masques !
+      - Recalage automatique de silhouette + anti-halo EDT sur `1024×1024` !
+      - Enrichissement triplanaire haute fréquence par tuiles GPU (`tile_*.png`) si présentes !
       - Retourne `(ai_rgb, ai_detail_height, coverage_weight)` alignés sur `sample_pos`.
     """
-    import delight as dl
-
     bmin, bmax = high_mesh.bounds
     center = 0.5 * (bmin + bmax)
     span = float(np.max(bmax - bmin)) * (1.0 + 2.0 * float(pad))
     half = max(span * 0.5, 1e-5)
 
-    # Si un fichier `ortho_meta.json` accompagne les vues, on utilise le `center` et `half_extent`
-    # EXACTS du rendu guide global (garantit 0.00 px de décalage même sur les pièces articulées `lid` !)
+    ai_dir = None
     for vp in ai_views.values():
         if vp and os.path.exists(vp):
-            meta_p = os.path.join(os.path.dirname(str(vp)), "ortho_meta.json")
+            ai_dir = os.path.dirname(str(vp))
+            meta_p = os.path.join(ai_dir, "ortho_meta.json")
             if os.path.exists(meta_p):
                 with open(meta_p, encoding="utf-8") as fh:
                     om = json.load(fh)
@@ -577,41 +651,37 @@ def sample_orthographic_ai_views_zbuffer(
                 half = float(om["half_extent"])
                 break
 
-    S = 512
+    S = 1024
     faces = np.asarray(high_mesh.faces, dtype=np.int64)
     verts = np.asarray(high_mesh.vertices, dtype=np.float32) - center[None, :]
     pts = np.asarray(sample_pos, dtype=np.float32) - center[None, :]
     nrm = np.asarray(sample_nrm, dtype=np.float32)
 
-    # Construire les 6 directions cardinales en miroir si `back`/`left` ne sont pas fournies
+    # Ne projette JAMAIS `front` sur le dos `+Y` si `back` n'est pas fourni (évite un visage fantôme au dos !)
     cardinal = []
     if "front" in ai_views and os.path.exists(ai_views["front"]):
-        cardinal.append((ai_views["front"], [1, 0, 0], [0, 0, 1], [0, -1, 0], False))
-        cardinal.append((ai_views.get("back", ai_views["front"]), [-1, 0, 0], [0, 0, 1], [0, 1, 0], "back" not in ai_views))
+        cardinal.append((ai_views["front"], "front", [1, 0, 0], [0, 0, 1], [0, -1, 0], False))
+    if "back" in ai_views and os.path.exists(ai_views["back"]):
+        cardinal.append((ai_views["back"], "back", [-1, 0, 0], [0, 0, 1], [0, 1, 0], False))
     if "side" in ai_views and os.path.exists(ai_views["side"]):
-        cardinal.append((ai_views["side"], [0, 1, 0], [0, 0, 1], [1, 0, 0], False))
-        cardinal.append((ai_views.get("left", ai_views["side"]), [0, -1, 0], [0, 0, 1], [-1, 0, 0], "left" not in ai_views))
+        cardinal.append((ai_views["side"], "side", [0, 1, 0], [0, 0, 1], [1, 0, 0], False))
+        cardinal.append((ai_views.get("left", ai_views["side"]), "side", [0, -1, 0], [0, 0, 1], [-1, 0, 0], "left" not in ai_views))
     if "top" in ai_views and os.path.exists(ai_views["top"]):
-        cardinal.append((ai_views["top"], [1, 0, 0], [0, 1, 0], [0, 0, 1], False))
+        cardinal.append((ai_views["top"], "top", [1, 0, 0], [0, 1, 0], [0, 0, 1], False))
 
     acc_rgb = np.zeros((len(pts), 3), dtype=np.float32)
-    acc_hgt = np.zeros(len(pts), dtype=np.float32)
-    acc_w = np.zeros(len(pts), dtype=np.float32)
+    acc_hgt = np.zeros((len(pts),), dtype=np.float32)
+    acc_w = np.zeros((len(pts),), dtype=np.float32)
 
     if not hasattr(sample_orthographic_ai_views_zbuffer, "_img_cache"):
         sample_orthographic_ai_views_zbuffer._img_cache = {}
     tex_cache = sample_orthographic_ai_views_zbuffer._img_cache
 
     fn = np.cross(verts[faces[:, 1]] - verts[faces[:, 0]], verts[faces[:, 2]] - verts[faces[:, 0]])
-    for vpath, rx, uy, dz, mirrored in cardinal:
-        mtime_key = (vpath, os.path.getmtime(vpath), S)
+    for vpath, vname, rx, uy, dz, mirrored in cardinal:
+        mtime_key = (vpath, vname, os.path.getmtime(vpath), S)
         if mtime_key not in tex_cache:
-            raw_im = Image.open(vpath).convert("RGB").resize((S, S), Image.Resampling.BILINEAR)
-            delit_im, _ = dl.delight_image_2d(raw_im, strength=0.65)
-            rgb_a = np.asarray(delit_im, dtype=np.float32) / 255.0
-            lum_a = rgb_a @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
-            hp_a = lum_a - ndimage.gaussian_filter(lum_a, sigma=3.2)
-            tex_cache[mtime_key] = (rgb_a, hp_a)
+            tex_cache[mtime_key] = _align_and_clean_ai_ortho(vpath, vname, S)
         rgb_a, hp_a = tex_cache[mtime_key]
         if mirrored:
             rgb_a = rgb_a[:, ::-1, :]
