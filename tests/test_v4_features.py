@@ -131,3 +131,44 @@ def test_pillar5_articulated_joints_and_3d_printer_bed_splitter(tmp_path):
     assert manifest["all_fit_bed"] is True
     assert manifest["n_parts"] >= 4
     assert manifest["alignment_pins"] >= 4
+
+
+def test_photo_to_3d_v2_pbr_projection_preserves_gates(tmp_path):
+    """Vérifie `inspect_photo` (`zoom_details.png` + `slice_spans`), `project_photo_pbr` in-place
+    sans perte des colliders `UCX_SM_*`, et `verify_photo_match` avec planche microscope `photo_details_zoom.png`."""
+    import game_ready as gr
+    import gates
+    import organic as org
+    import packager
+    import photo_to_3d as p2d
+    import renderer as rn
+
+    b = mk.Builder("mini_wyvern", {})
+    b.add(org.ellipsoid(0.08, 0.14, 0.09, subdivisions=4), mk.mat.clay("#7a2d18", 0.55), name="scaled_body")
+
+    pkg_dir = tmp_path / "pkg"
+    gr.export_game_package(b, out_dir=pkg_dir, name="mini_wyvern", engine="roblox_unreal", lod0_tris=3600, tex_size=512)
+
+    ref_im = rn.render_view(trimesh.load(pkg_dir / "mini_wyvern_game.glb", force="scene"), 86.0, 4.0, size=512, fov=38.0)
+    ref_png = tmp_path / "ref_photo.png"
+    ref_im.save(ref_png)
+
+    ins = p2d.inspect_photo(ref_png, tmp_path / "ref_info", target_height=0.20)
+    assert Path(ins["zoom_details_png"]).is_file()
+    assert len(ins["slice_spans"]) == 26
+
+    prj = p2d.project_photo_pbr(pkg_dir, "mini_wyvern", ref_png, azimuth_deg=86.0, elevation_deg=4.0, fov=38.0)
+    assert prj["updated_geometries"] >= 1
+
+    ver = p2d.verify_photo_match(
+        ref_png, pkg_dir / "mini_wyvern_game.glb",
+        tmp_path / "match.png", out_zoom_png=tmp_path / "zoom.png",
+        azimuth_deg=86.0, elevation_deg=4.0, fov=38.0,
+    )
+    assert Path(ver["out_png"]).is_file()
+    assert Path(ver["out_zoom_png"]).is_file()
+    assert ver["bbox_iou"] >= 0.70
+
+    packager.build_asset_zip(pkg_dir, name="mini_wyvern")
+    assert gates.main([str(pkg_dir), "--target", "hero"]) == 0
+

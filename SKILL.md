@@ -17,19 +17,21 @@ description: >-
 
 > ## 🚨 RÈGLE N°0 ABSOLUE : QUAND L'UTILISATEUR ENVOIE UNE PHOTO (« génère-moi ça ») !
 > - **INTERDICTION TOTALE** de prendre une recette générique du catalogue (`dragon_creature`, `car`, `hero_bust`, etc.) ou d'improviser des formes « patate / ballon » quand une photo de référence est fournie !
-> - **PROTOCOLE OBLIGATOIRE PHOTO → 3D EN 3 COMMANDES (`scripts/photo_to_3d.py`)** :
->   1. **Mesurer la photo (`< 0.5 s`)** :
->      `python3 scripts/photo_to_3d.py inspect <photo.png> -o exports/ref --height 0.40`
->      Lis `exports/ref/blueprint_grid.png` avec `read_file` : tu obtiens la silhouette détourée sans ombre au sol, le **ratio exact `L/H`**, la grille métrique graduée `(y, z)` en mètres et la **vraie palette `#RRGGBB` mesurée sur les pixels internes** (zéro couleur criarde inventée !).
->   2. **Sculpter / modéliser `custom_<nom>.py` sur les vraies coordonnées `(y, z)` du blueprint** :
->      - **Créatures / dragons / monstres / animaux** : combine `org.Sculpt(res=80)` (corps élancé, cou en S, mâchoire ouverte, muscles) + **`org.displace_scales(mesh, scale_size=0.013, depth=0.0022)`** (vraies écailles 3D gravées, jamais un boudin rouge lisse !) + **`org.armored_scutes(neck_belly_pts, widths)`** (plaques pectorales imbriquées tangentes au cou, jamais de tranches flottantes !) + **`org.bat_wing(shoulder, elbow, wrist, finger_tips, membrane_thickness=0.011)`** (membranes solides épaisses qui ne se déchirent jamais en décimation !) + **`org.ridge_spines`** + `org.tapered_curve` (cornes, griffes, crocs, queue enroulée).
->      - **Objets mécaniques / véhicules / armes / meubles** : `scripts/meshkit.py` + `scripts/greebles.py` aux cotes exactes lues sur `blueprint_grid.png`.
->   3. **Forger, comparer côte-à-côte à la photo, et livrer `<nom>.zip`** :
+> - **PROTOCOLE OBLIGATOIRE PHOTO → 3D EN 4 ÉTAPES (`scripts/photo_to_3d.py v2`, ZÉRO DÉTAIL OUBLIÉ)** :
+>   1. **Mesurer la photo + Loupes 300 % (`< 0.5 s`)** :
+>      `python3 scripts/photo_to_3d.py inspect <photo.png> -o exports/ref --height 0.44`
+>      Lis **obligatoirement** `exports/ref/blueprint_grid.png` **ET** `exports/ref/zoom_details.png` avec `read_file` ainsi que `slice_spans` dans `exports/ref/photo_blueprint.json` pour relever chaque détail (yeux, pupilles, crocs, narines, cornes, écailles, griffes, nervures).
+>   2. **Sculpter `custom_<nom>.py` en multi-groupes aux coordonnées `UZ(x, u, z)` exactes** *(référence : `examples/crimson_dragon/build_crimson_dragon.py`)* :
+>      - Utilise `b.def_joint("head", ...)` / `b.def_joint("wings", ...)` + `joint_tex_size=1024` pour offrir un atlas `1024²` et un budget de triangles dédié à la tête (orbites creusées, globes oculaires + pupilles fendues, 32 crocs d'ivoire `#f4eee4`, narines, cornes) et aux ailes (`org.bat_wing(..., membrane_thickness=0.015)` sans déchirure QEM), + `org.displace_scales`, `org.armored_scutes`, `org.ridge_spines`.
+>   3. **Projeter la vraie texture PBR + micro-normales de la photo (`360°`, `0 %` halo blanc)** :
+>      `python3 scripts/photo_to_3d.py project <photo.png> exports/<nom> -n <nom> --azimuth 86 --elevation 3.5 --fov 38`
+>   4. **Vérifier au Microscope 300 % (`photo_match.png` + `photo_details_zoom.png`), valider `gates.py` (`25/25`) et livrer `<nom>.zip`** :
 >      ```bash
->      python3 scripts/turbo_forge.py custom_<nom>.py --lod0-tris 9200 -o exports/<nom>
->      python3 scripts/photo_to_3d.py verify <photo.png> exports/<nom>/<nom>_game.glb -o exports/<nom>/photo_match.png
+>      python3 scripts/photo_to_3d.py verify <photo.png> exports/<nom>/<nom>_game.glb -o exports/<nom>/photo_match.png --zoom exports/<nom>/photo_details_zoom.png --azimuth 86 --elevation 3.5 --fov 38
+>      python3 scripts/gates.py exports/<nom>
+>      python3 scripts/packager.py exports/<nom> -n <nom>
 >      ```
->      Inspecte **obligatoirement** `exports/<nom>/photo_match.png` (`[Photo demandée | Modèle 3D généré]`) avec `read_file`. Corrige toute divergence de posture/proportion, remets à jour l'archive via `packager.build_asset_zip("exports/<nom>", "<nom>")`, puis **présente / livre `exports/<nom>/<nom>.zip`** (aucun `preview.html` n'est généré !).
+>      Inspecte **obligatoirement** `photo_match.png` **ET** `photo_details_zoom.png` avec `read_file`, puis **présente / livre `exports/<nom>/<nom>.zip`** (aucun `preview.html` n'est généré !).
 
 > ## 🚨 RÈGLE D'OR ABSOLUE (CLAUDE.AI / CLI / ARENA) — ZÉRO DESSIN 2D `PIL` !
 > - **INTERDICTION FORMELLE** de dessiner des images 2D synthétiques (`PIL.ImageDraw`, `matplotlib`, bruit RGB) pour les passer à `--front` / `--side` (`gpu_sculpt.py`) ! Une ellipse 2D extrudée donne une patate fondue aux couleurs sales.
