@@ -770,6 +770,32 @@ def project_photo_pbr(
     return {"updated_geometries": len(mat_tex_list), "game_glb": str(game_glb)}
 
 
+def load_scene_light(path: str | Path, max_tex: int = 1024) -> trimesh.Scene:
+    """Charge un `.glb` en réduisant les textures à `max_tex`.
+
+    Les rendus de contrôle font 1000-1600 px : garder des atlas 4096² en mémoire
+    ne change rien à l'image et fait exploser la RAM (3 atlas 4K décompressés =
+    ~150 Mo rien qu'en pixels, plus les copies de `trimesh`). Sur une machine
+    3 Go, c'est la différence entre succès et OOM-kill.
+    """
+    sc = trimesh.load(path, force="scene")
+    for gm in sc.geometry.values():
+        mv = getattr(getattr(gm, "visual", None), "material", None)
+        if mv is None:
+            continue
+        for attr in ("baseColorTexture", "normalTexture", "metallicRoughnessTexture"):
+            im = getattr(mv, attr, None)
+            if im is None:
+                continue
+            try:
+                w, h = im.size
+            except Exception:
+                continue
+            if max(w, h) > max_tex:
+                setattr(mv, attr, im.resize((max_tex, max_tex), Image.Resampling.LANCZOS))
+    return sc
+
+
 def verify_photo_match(
     photo_path: str | Path,
     asset_path: str | Path,
@@ -778,16 +804,18 @@ def verify_photo_match(
     elevation_deg: float = 4.0,
     fov: float = 24.0,
     out_zoom_png: str | Path | None = None,
+    render_size: int = 900,
+    ssaa: float = 1.5,
 ) -> dict:
     """Rend l'asset 3D sous l'angle exact de la photo, calcule l'IoU exact sur masque matériel,
     et génère `photo_match.png` + optionnellement la planche microscope 300 % `photo_details_zoom.png` !"""
     import renderer as _rn
 
     ref = extract_clean_foreground(photo_path)
-    sc = trimesh.load(asset_path, force="scene")
+    sc = load_scene_light(asset_path, max_tex=1024)
     ren_im, ren_mask_pil = _rn.render_view(
         sc, azimuth_deg=azimuth_deg, elevation_deg=elevation_deg,
-        size=900, fov=fov, ssaa=1.5, return_mask=True,
+        size=int(render_size), fov=fov, ssaa=float(ssaa), return_mask=True,
     )
     ren_rgb = np.asarray(ren_im.convert("RGB"))
     ren_mask = np.asarray(ren_mask_pil) > 127
@@ -930,6 +958,8 @@ def main(argv: list[str] | None = None) -> int:
     p_ver.add_argument("--azimuth", type=float, default=82.0)
     p_ver.add_argument("--elevation", type=float, default=4.0)
     p_ver.add_argument("--fov", type=float, default=24.0)
+    p_ver.add_argument("--render-size", type=int, default=900)
+    p_ver.add_argument("--ssaa", type=float, default=1.5)
 
     args = ap.parse_args(argv)
     if args.cmd == "inspect":
@@ -943,7 +973,7 @@ def main(argv: list[str] | None = None) -> int:
         res = verify_photo_match(
             args.photo, args.asset, args.out,
             azimuth_deg=args.azimuth, elevation_deg=args.elevation, fov=args.fov,
-            out_zoom_png=args.zoom,
+            out_zoom_png=args.zoom, render_size=args.render_size, ssaa=args.ssaa,
         )
     print(json.dumps(res, indent=2, ensure_ascii=False))
     return 0
