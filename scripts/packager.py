@@ -11,10 +11,17 @@ autonome et léger contenant :
 """
 from __future__ import annotations
 
+import hashlib
 import zipfile
 from pathlib import Path
 
 _SKIP_SUFFIXES = {".zip", ".pyc", ".html"}
+
+# Cartes DÉRIVÉES du bake 4K : elles restent sur disque (pratiques en local) mais
+# n'ont pas leur place dans l'archive — `N_gl` est exactement `255 - N` et `AO`
+# est exactement le canal R de l'ORM. Les embarquer doublerait le poids du ZIP
+# sans apporter un octet d'information.
+_DERIVED_SUFFIXES = ("_N_gl.png", "_AO.png")
 _SKIP_DIRS = {"__pycache__", "ai_gpu", "refs_tmp"}
 
 
@@ -37,7 +44,24 @@ def build_asset_zip(out_dir: str | Path, name: str | None = None, zip_name: str 
             continue
         if p.suffix.lower() in _SKIP_SUFFIXES:
             continue
+        if p.name.endswith(_DERIVED_SUFFIXES):
+            continue
         files_to_pack.append(p)
+
+    # Déduplication par contenu : `unreal/T_*.png` sont des copies OCTET POUR OCTET
+    # des atlas de `render_4k/` (35 Mo pour rien dans l'archive).
+    seen: dict[str, str] = {}
+    unique: list[Path] = []
+    for p in files_to_pack:
+        if p.stat().st_size < 1 << 20:          # la dédup ne vaut que pour les gros fichiers
+            unique.append(p)
+            continue
+        h = hashlib.md5(p.read_bytes()).hexdigest()
+        if h in seen:
+            continue
+        seen[h] = p.relative_to(root).as_posix()
+        unique.append(p)
+    files_to_pack = unique
 
     with zipfile.ZipFile(tmp_zip, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         for p in files_to_pack:

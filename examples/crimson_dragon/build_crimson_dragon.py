@@ -56,9 +56,9 @@ def _tree_union(meshes: list[trimesh.Trimesh], batch: int = 10) -> trimesh.Trime
 
 def build(
     height: float = 0.44,
-    scale_color: str = "#6a2715",
-    belly_color: str = "#b98749",
-    wing_membrane_color: str = "#8a5335",
+    scale_color: str = "#5c1f10",
+    belly_color: str = "#c69a58",
+    wing_membrane_color: str = "#8f5433",
     horn_color: str = "#9e734c",
     eye_color: str = "#ff8514",
 ) -> mk.Builder:
@@ -93,7 +93,7 @@ def build(
             UZ(-0.048, 0.025, 0.742),
             UZ(+0.048, 0.238, 0.948),
         ),
-        res=120,
+        res=168,
     )
 
     # Crâne arrière + museau supérieur effilé + bosse nasale retroussée
@@ -163,7 +163,7 @@ def build(
     skull_raw = hs.to_mesh(smooth_iter=2, target_tris=12000)
     del hs
     __import__("gc").collect()
-    skull_scaled = org.displace_scales(skull_raw, scale_size=0.0052 * k, depth=0.0011 * k)
+    skull_scaled = org.displace_scales(skull_raw, scale_size=0.0046 * k, depth=0.0014 * k)
     del skull_raw
     b.add(skull_scaled, m_hide, name="scaled_dragon_skull_and_jaws", group="head")
 
@@ -351,9 +351,9 @@ def build(
             UZ(+0.048, 0.435, 0.515),
             UZ(+0.042, 0.525, 0.480),
         ],
-        membrane_thickness=0.015 * k,
-        camber=0.020 * k,
-        arm_radius=0.021 * k,
+        membrane_thickness=0.018 * k,
+        camber=0.025 * k,
+        arm_radius=0.0235 * k,
         claw_len=0.052 * k,
     )
 
@@ -374,9 +374,9 @@ def build(
             UZ(-0.046, 0.365, 0.535),
             UZ(-0.040, 0.455, 0.505),
         ],
-        membrane_thickness=0.015 * k,
-        camber=0.018 * k,
-        arm_radius=0.019 * k,
+        membrane_thickness=0.018 * k,
+        camber=0.022 * k,
+        arm_radius=0.021 * k,
         claw_len=0.040 * k,
     )
 
@@ -417,7 +417,7 @@ def build(
             UZ(-0.125, 0.065, -0.006),
             UZ(+0.125, 1.005, 0.895),
         ),
-        res=110,
+        res=148,
     )
 
     # Colonne cervicale musclée en S -> carène thoracique profonde -> abdomen -> bassin
@@ -433,14 +433,14 @@ def build(
             UZ(0.0, 0.555, 0.430),
         ],
         radii=[
-            0.025 * k, 0.029 * k, 0.033 * k, 0.044 * k,
-            0.056 * k, 0.052 * k, 0.046 * k, 0.036 * k,
+            0.028 * k, 0.033 * k, 0.039 * k, 0.051 * k,
+            0.062 * k, 0.057 * k, 0.048 * k, 0.036 * k,
         ],
         k=0.011 * k,
     )
     # Bréchet thoracique bombé profond (`u = 0.145..0.32, z = 0.36..0.56` sur `exact_uvz_grid.png` !)
-    sc.ellipsoid(UZ(0.0, 0.245, 0.465), (0.048 * k, 0.064 * k, 0.058 * k), k=0.014 * k)
-    sc.ellipsoid(UZ(0.0, 0.415, 0.440), (0.044 * k, 0.068 * k, 0.046 * k), k=0.014 * k)
+    sc.ellipsoid(UZ(0.0, 0.245, 0.465), (0.052 * k, 0.070 * k, 0.064 * k), k=0.014 * k)
+    sc.ellipsoid(UZ(0.0, 0.415, 0.440), (0.046 * k, 0.072 * k, 0.050 * k), k=0.014 * k)
 
     # Queue fouet enroulée en C exactement sur les coupes laser `z = 0.06 .. 0.35` !
     tail_pts = [
@@ -458,7 +458,7 @@ def build(
     sc.sweep(
         tail_pts,
         radii=[
-            0.034 * k, 0.027 * k, 0.022 * k, 0.018 * k, 0.0145 * k,
+            0.036 * k, 0.029 * k, 0.023 * k, 0.018 * k, 0.0145 * k,
             0.0120 * k, 0.0098 * k, 0.0076 * k, 0.0055 * k, 0.0032 * k,
         ],
         k=0.007 * k,
@@ -490,7 +490,7 @@ def build(
     # PATTE 1 — Avant Droite arrière (`u = 0.09..0.24`, posée à `z = 0.025`)
     sc.sweep(
         [UZ(-0.044, 0.228, 0.435), UZ(-0.048, 0.214, 0.275), UZ(-0.046, 0.200, 0.115), UZ(-0.045, 0.168, 0.048)],
-        radii=[0.032 * k, 0.022 * k, 0.0165 * k, 0.015 * k],
+        radii=[0.037 * k, 0.025 * k, 0.0172 * k, 0.0152 * k],
         k=0.009 * k,
     )
     _add_clawed_paw(-0.045, 0.200, 0.115, 0.162, 0.026, scale_p=0.95)
@@ -498,7 +498,7 @@ def build(
     # PATTE 2 — Avant Gauche premier plan (`u = 0.235..0.385`, posée à `z = 0.000`)
     sc.sweep(
         [UZ(+0.048, 0.315, 0.470), UZ(+0.056, 0.356, 0.280), UZ(+0.052, 0.338, 0.105), UZ(+0.050, 0.312, 0.034)],
-        radii=[0.036 * k, 0.024 * k, 0.0180 * k, 0.016 * k],
+        radii=[0.042 * k, 0.027 * k, 0.0188 * k, 0.0162 * k],
         k=0.009 * k,
     )
     _add_clawed_paw(+0.050, 0.338, 0.105, 0.305, 0.002, scale_p=1.06)
@@ -506,7 +506,7 @@ def build(
     # PATTE 3 — Arrière Droite arrière (`u = 0.355..0.495`, posée à `z = 0.045`)
     sc.sweep(
         [UZ(-0.046, 0.430, 0.415), UZ(-0.052, 0.482, 0.225), UZ(-0.048, 0.440, 0.115), UZ(-0.046, 0.418, 0.062)],
-        radii=[0.038 * k, 0.024 * k, 0.0165 * k, 0.015 * k],
+        radii=[0.044 * k, 0.027 * k, 0.0172 * k, 0.0152 * k],
         k=0.009 * k,
     )
     _add_clawed_paw(-0.046, 0.440, 0.115, 0.412, 0.044, scale_p=0.94)
@@ -514,7 +514,7 @@ def build(
     # PATTE 4 — Arrière Gauche premier plan (`u = 0.500..0.600`, posée à `z = 0.018`)
     sc.sweep(
         [UZ(+0.050, 0.525, 0.430), UZ(+0.058, 0.512, 0.295), UZ(+0.056, 0.585, 0.205), UZ(+0.052, 0.572, 0.105), UZ(+0.050, 0.555, 0.042)],
-        radii=[0.042 * k, 0.032 * k, 0.022 * k, 0.0170 * k, 0.0155 * k],
+        radii=[0.049 * k, 0.036 * k, 0.024 * k, 0.0176 * k, 0.0157 * k],
         k=0.009 * k,
     )
     _add_clawed_paw(+0.050, 0.572, 0.105, 0.552, 0.018, scale_p=1.00)
@@ -523,7 +523,7 @@ def build(
     body_raw = sc.to_mesh(smooth_iter=2, target_tris=20000)
     del sc
     __import__("gc").collect()
-    body_scaled = org.displace_scales(body_raw, scale_size=0.0082 * k, depth=0.0017 * k)
+    body_scaled = org.displace_scales(body_raw, scale_size=0.0076 * k, depth=0.0024 * k)
     del body_raw
     b.add(body_scaled, m_hide, name="scaled_muscular_body")
 
@@ -665,92 +665,144 @@ def build(
     return b
 
 
-if __name__ == "__main__":
-    import game_ready as gr
-    import gates
-    import packager
-    import photo_to_3d as p2d
-    import renderer as rn
-    import turbo_forge as tf
+def _load_scene_for_render(path, max_tex: int = 1024):
+    """Charge un `.glb` en ramenant les textures à `max_tex` : les rendus QA font
+    ~1280 px de large, garder des atlas 4K en mémoire ne sert à rien et provoque
+    l'OOM sur une machine 3 Go (mesuré : 3.9 Go)."""
+    from PIL import Image as _Im
+    sc = trimesh.load(path, force="scene")
+    for gm in sc.geometry.values():
+        mv = getattr(getattr(gm, "visual", None), "material", None)
+        if mv is None:
+            continue
+        for attr in ("baseColorTexture", "normalTexture", "metallicRoughnessTexture"):
+            im = getattr(mv, attr, None)
+            if im is None:
+                continue
+            if max(im.size) > max_tex:
+                setattr(mv, attr, im.resize((max_tex, max_tex), _Im.Resampling.LANCZOS))
+    return sc
 
+
+def stage_build() -> None:
+    """Stage 1 : package game-ready + projection photo 1K + synthèse des cartes 4K."""
+    import json
+    import time
+    import game_ready as gr
+    import photo_to_3d as p2d
+    import texture_4k as t4k
+
+    t0 = time.perf_counter()
     out_dir = ROOT / "exports" / "crimson_dragon"
     out_dir.mkdir(parents=True, exist_ok=True)
     ref_photo = Path("/tmp/arena-coding-uploads/image-1.png")
+    NAME = "crimson_dragon"
 
-    # 1. Construit le package complet multi-groupes articulé (`Body` + `head` + `wings`, `3 x 1024²` !)
     builder = build()
-    stl_solid = builder.union_solid()
-    mk.export_stl(stl_solid, out_dir / "crimson_dragon.stl")
-
+    mk.export_stl(builder.union_solid(), out_dir / f"{NAME}.stl")
     man = gr.export_game_package(
-        builder,
-        out_dir=out_dir,
-        name="crimson_dragon",
-        engine="roblox_unreal",
-        lod0_tris=9500,
-        tex_size=1024,
-        joint_tex_size=1024,
-        weathering=0.35,
+        builder, out_dir=out_dir, name=NAME, engine="roblox_unreal",
+        lod0_tris=9600, tex_size=1024, joint_tex_size=1024, weathering=0.35,
     )
-    # Met à jour le manifest pour refléter l'étanchéité STL & l'origine sculptée
     man["stl_watertight"] = True
     man["sculpt_source"] = True
-    man["stl_path"] = str((out_dir / "crimson_dragon.stl").resolve())
-    (out_dir / "game_manifest.json").write_text(
-        __import__("json").dumps(man, indent=2, ensure_ascii=False)
-    )
+    man["stl_path"] = str((out_dir / f"{NAME}.stl").resolve())
+    (out_dir / "game_manifest.json").write_text(json.dumps(man, indent=2, ensure_ascii=False))
+    print(f"[build] game-ready base {time.perf_counter() - t0:.0f}s", flush=True)
 
-    # 2. Projette la VRAIE texture photo + micro-relief tangentiel 1024² x 3 depuis `image-1.png` !
     if ref_photo.is_file():
         p2d.inspect_photo(ref_photo, out_dir / "blueprint", target_height=0.44)
-        proj = p2d.project_photo_pbr(
-            out_dir,
-            name="crimson_dragon",
-            photo_path=ref_photo,
-            azimuth_deg=86.0,
-            elevation_deg=3.5,
-            fov=38.0,
+        p2d.project_photo_pbr(
+            out_dir, name=NAME, photo_path=ref_photo,
+            azimuth_deg=86.0, elevation_deg=3.5, fov=38.0,
         )
-        print("Photo PBR projection:", proj)
-
-        # Met à jour `qa_game_sheet.png` avec les vues rendues du modèle photo-texturé final !
-        sc_final = trimesh.load(out_dir / "crimson_dragon_game.glb", force="scene")
-        sc_lod2_f = trimesh.load(man["lods"]["LOD2"]["path"], force="scene")
-        from PIL import Image
-        qa_views = [
-            (rn.render_view(sc_final, 52.0, 20.0, size=520, ssaa=2), "1. Vue 3/4 Avant Droit — Vraie 3D 360"),
-            (rn.render_view(sc_final, 86.0, 3.5, size=520, fov=38.0, ssaa=2), "2. Profil Photo-Calibre (LOD0 3x1024)"),
-            (rn.render_view(sc_lod2_f, 52.0, 20.0, size=520, ssaa=2), "3. Far LOD2 Optimise"),
-            (rn.render_view(sc_final, -52.0, 20.0, size=520, ssaa=2), "4. Vue 3/4 Avant Gauche"),
-            (rn.render_view(sc_final, 4.0, 8.0, size=520, ssaa=2), "5. Vue de Face (Scutes d'Or & Crocs)"),
-            (rn.render_view(sc_final, -94.0, 6.0, size=520, fov=38.0, ssaa=2), "6. Profil Oppose (-94 deg)"),
-            (Image.open(out_dir / "roblox" / "T_crimson_dragon_ColorMap.png").resize((520, 520)), "7. T_crimson_dragon_ColorMap (1024)"),
-            (Image.open(out_dir / "roblox" / "T_crimson_dragon_NormalMap.png").resize((520, 520)), "8. Normal Map Micro-Ecailles (1024)"),
-            (Image.open(out_dir / "unreal" / "T_crimson_dragon_ORM.png").resize((520, 520)), "9. Packed ORM (AO / Rough / Metal)"),
-        ]
-        rn.contact_sheet(
-            qa_views,
-            cols=3,
-            out_path=str(out_dir / "qa_game_sheet.png"),
-            title="3d-forge v6.1 Ultra Photo-Fidelity QA — crimson_dragon (25/25 Gates, 3x1024 PBR, 32 Crocs & Yeux Fendus)",
+        print(f"[build] projection photo 1K {time.perf_counter() - t0:.0f}s", flush=True)
+        # `band=256` : les tampons temporaires par bande (positions, normales,
+        # projection photo en float64) sont la vraie pointe mémoire du bake 4096².
+        res4k = t4k.synthesize_4k_maps(
+            out_dir, NAME, photo_path=ref_photo, tex_size=4096, band=256,
+            azimuth_deg=86.0, elevation_deg=3.5, fov=38.0,
         )
+        print("[build] 4K:", res4k, flush=True)
+    t4k.make_4k_crop_sheet(out_dir, NAME, out_dir / "qa_4k_crops.png")
+    print(f"[build] DONE {time.perf_counter() - t0:.0f}s", flush=True)
 
-        # Génère `photo_match.png` ET la planche microscope 300 % `photo_details_zoom.png` !
+
+def stage_render() -> None:
+    """Stage 2 : planches QA haute résolution + comparatif photo (mémoire maîtrisée)."""
+    import json
+    import time
+    import photo_to_3d as p2d
+    import renderer as rn
+    from PIL import Image
+
+    t0 = time.perf_counter()
+    out_dir = ROOT / "exports" / "crimson_dragon"
+    ref_photo = Path("/tmp/arena-coding-uploads/image-1.png")
+    NAME = "crimson_dragon"
+    man = json.loads((out_dir / "game_manifest.json").read_text())
+
+    # 2048 : les planches QA doivent montrer le détail 4K, pas un downscale 1024.
+    sc_final = _load_scene_for_render(out_dir / f"{NAME}_game.glb", 2048)
+    print(f"[render] scene loaded {time.perf_counter() - t0:.0f}s", flush=True)
+    views = [
+        (rn.render_view(sc_final, 52.0, 20.0, size=620, ssaa=2.0), "1. 3/4 avant droit — cartes 4096"),
+        (rn.render_view(sc_final, 86.0, 3.5, size=620, fov=38.0, ssaa=2.0), "2. Profil photo-calibré (LOD0)"),
+        (rn.render_view(sc_final, -52.0, 20.0, size=620, ssaa=2.0), "3. 3/4 avant gauche"),
+        (rn.render_view(sc_final, 4.0, 8.0, size=620, ssaa=2.0), "4. Face — scutes d'or & crocs"),
+        (rn.render_view(sc_final, -94.0, 6.0, size=620, fov=38.0, ssaa=2.0), "5. Profil opposé (−94°)"),
+        (rn.render_view(sc_final, 128.0, 26.0, size=620, ssaa=2.0), "6. 3/4 arrière — ailes & queue"),
+    ]
+    sc_lod2 = _load_scene_for_render(man["lods"]["LOD2"]["path"], 512)
+    views.append((rn.render_view(sc_lod2, 52.0, 20.0, size=620, ssaa=2.0), "7. Far LOD2 optimisé"))
+    rbx_cm = out_dir / "roblox" / f"T_{NAME}_ColorMap.png"
+    if rbx_cm.is_file():
+        views.append((Image.open(rbx_cm).resize((620, 620), Image.Resampling.LANCZOS), "8. ColorMap Roblox 1024 (plafond moteur)"))
+    bcs = sorted((out_dir / "render_4k").glob("T_*_BC.png"))
+    body_bc = [q for q in bcs if "body" in q.name.lower()] or bcs
+    if body_bc:
+        views.append((Image.open(body_bc[0]).resize((620, 620), Image.Resampling.LANCZOS), "9. BC 4096 — peau sculptée"))
+        n4 = body_bc[0].with_name(body_bc[0].name.replace("_BC.png", "_N.png"))
+        if n4.is_file():
+            views.append((Image.open(n4).resize((620, 620), Image.Resampling.LANCZOS), "10. Normale 4096 — écailles réelles"))
+    rn.contact_sheet(views, cols=3, out_path=str(out_dir / "qa_game_sheet.png"),
+                     title="3d-forge v6.2 DESIGN 4K — crimson_dragon (atlas 4096², 3 groupes, 32 crocs, yeux fendus)")
+    print(f"[render] QA sheet {time.perf_counter() - t0:.0f}s", flush=True)
+
+    if ref_photo.is_file():
         ver = p2d.verify_photo_match(
-            ref_photo,
-            out_dir / "crimson_dragon_game.glb",
-            out_dir / "photo_match.png",
-            azimuth_deg=86.0,
-            elevation_deg=3.5,
-            fov=38.0,
+            ref_photo, out_dir / f"{NAME}_game.glb", out_dir / "photo_match.png",
+            azimuth_deg=86.0, elevation_deg=3.5, fov=38.0,
             out_zoom_png=out_dir / "photo_details_zoom.png",
+            render_size=1100, ssaa=1.4,
         )
-        print("Photo match verification:", ver)
+        print("[render] photo match:", ver, flush=True)
+    print(f"[render] DONE {time.perf_counter() - t0:.0f}s", flush=True)
 
-    # 3. Valide 100 % des 26 gates QA et empaquette tout dans `crimson_dragon.zip` !
-    packager.build_asset_zip(out_dir, name="crimson_dragon")
-    rc_gates = gates.main([str(out_dir), "--target", "hero"])
-    assert rc_gates == 0, f"Gates failed with code {rc_gates}"
-    # Ré-empaquette `gates.json` mis à jour dans le `.zip` final !
-    zip_final = packager.build_asset_zip(out_dir, name="crimson_dragon")
-    print("ALL 26 GATES GREEN & ZIP READY:", zip_final)
+
+def stage_package() -> None:
+    """Stage 3 : gates 4K (`showcase`) + archive `.zip`."""
+    import json
+    import gates
+    import packager
+
+    out_dir = ROOT / "exports" / "crimson_dragon"
+    NAME = "crimson_dragon"
+    man = json.loads((out_dir / "game_manifest.json").read_text())
+    man["bundle_zip"] = str(out_dir / f"{NAME}.zip")
+    (out_dir / "game_manifest.json").write_text(json.dumps(man, indent=2, ensure_ascii=False))
+    packager.build_asset_zip(out_dir, name=NAME)
+    rc = gates.main([str(out_dir), "--target", "showcase"])
+    assert rc == 0, f"Gates failed with code {rc}"
+    print("[package] ZIP:", packager.build_asset_zip(out_dir, name=NAME), flush=True)
+
+
+if __name__ == "__main__":
+    import sys as _sys
+    stage = _sys.argv[1] if len(_sys.argv) > 1 else "all"
+    if stage in ("build", "all"):
+        stage_build()
+    if stage in ("render", "all"):
+        stage_render()
+    if stage in ("package", "all"):
+        stage_package()

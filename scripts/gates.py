@@ -37,7 +37,12 @@ TARGETS = {
     "hero": {"max_part_tris": 9_800, "max_tex": ROBLOX_MAX_TEX_SIZE, "require_stl": False},
     "ugc": {"max_part_tris": ROBLOX_UGC_RIGID_CAP, "max_tex": ROBLOX_MAX_TEX_SIZE, "require_stl": False},
     "print": {"max_part_tris": ROBLOX_ENGINE_MESH_CAP, "max_tex": ROBLOX_MAX_TEX_SIZE, "require_stl": True},
+    # `showcase` = livraison 4K : les cartes `render_4k/` montent à 4096², mais le pack
+    # Roblox reste TOUJOURS plafonné au moteur (1024²) — voir la gate `roblox_tex`.
+    "showcase": {"max_part_tris": 9_800, "max_tex": 4096, "require_stl": False},
 }
+
+SHOWCASE_TEX = 4096
 
 
 def _glb_json(path: Path) -> dict | None:
@@ -124,17 +129,40 @@ def luau_issues(lua: str, man: dict) -> list[str]:
 
 
 def _normals_cross_ok(rbx_n: Path, ue_n: Path) -> tuple[bool, str]:
-    """Cohérence DirectX `-Y` : `G_unreal == 255 - G_roblox` (map Roblox = OpenGL `+Y`)."""
+    """DirectX `-Y` exact, vérifié là où c'est encore vérifiable.
+
+    Jusqu'en v6.1 Roblox et Unreal partageaient le MÊME atlas 1024 : on pouvait
+    exiger `G_unreal == 255 - G_roblox` pixel à pixel. Depuis la v6.2 les atlas
+    divergent (Roblox = 1 atlas 1024, plafond moteur ; Unreal = 3 atlas 4096,
+    UV différents) : la comparaison pixel à pixel ne mesure plus rien (corrélation
+    nulle par construction). L'invariant réel devient interne au bake 4K :
+    `N` (DirectX) doit être exactement `255 - N_gl` (OpenGL) de la même cuisson.
+    On vérifie en plus que la carte Roblox est bien une normale tangentielle.
+    """
     try:
         import numpy as np
         from PIL import Image
-        a = np.asarray(Image.open(rbx_n).convert("RGB"), dtype=np.int16)
-        im_b = Image.open(ue_n).convert("RGB")
-        if im_b.size != (a.shape[1], a.shape[0]):
-            im_b = im_b.resize((a.shape[1], a.shape[0]))
-        b = np.asarray(im_b, dtype=np.int16)
+        n_gl = ue_n.with_name(ue_n.name.replace("_N.png", "_N_gl.png"))
+        if not n_gl.is_file():
+            # Package « 1024 historique » : Roblox et Unreal partagent le même
+            # atlas, la comparaison pixel à pixel redevient légitime.
+            a = np.asarray(Image.open(rbx_n).convert("RGB"), dtype=np.int16)
+            im_b = Image.open(ue_n).convert("RGB")
+            if im_b.size != (a.shape[1], a.shape[0]):
+                im_b = im_b.resize((a.shape[1], a.shape[0]), Image.Resampling.BOX)
+            b = np.asarray(im_b, dtype=np.int16)
+            bad = int((np.abs(a[..., 1] + b[..., 1] - 255) > 1).sum())
+            return bad == 0, f"atlas partagé 1024 : {bad} pixel(s) G incohérent(s)"
+        a = np.asarray(Image.open(ue_n).convert("RGB"), dtype=np.int16)
+        b = np.asarray(Image.open(n_gl).convert("RGB"), dtype=np.int16)
+        if a.shape != b.shape:
+            return False, f"tailles divergentes {a.shape} / {b.shape}"
         bad = int((np.abs(a[..., 1] + b[..., 1] - 255) > 1).sum())
-        return bad == 0, f"{bad} pixel(s) G incohérent(s)"
+        r = np.asarray(Image.open(rbx_n).convert("RGB"), dtype=np.float32)
+        rbx_blue = float(r[..., 2].mean())
+        ok = bad == 0 and rbx_blue > 150.0
+        return ok, (f"4K N(DirectX)/N_gl : {bad} px incohérents | "
+                    f"Roblox B moy {rbx_blue:.0f} (> 150)")
     except Exception as exc:
         return False, f"erreur : {exc}"
 
@@ -146,8 +174,8 @@ def _lod_silhouette(man: dict, lod: str = "LOD2", tol_mean_pct: float = 1.0,
     Seuils calibrés sur sci_fi_crate sain : moy 0.27 %, p95 1.6 %."""
     import numpy as np
     import trimesh
-    s0 = trimesh.load(man["lods"]["LOD0"]["path"], force="scene")
-    s2 = trimesh.load(man["lods"][lod]["path"], force="scene")
+    s0 = _load_light(man["lods"]["LOD0"]["path"])
+    s2 = _load_light(man["lods"][lod]["path"], max_tex=512)
     body_k = next((k for k in s0.geometry if k.endswith("_Body") and k in s2.geometry), None)
     g0 = s0.geometry[body_k] if body_k else max(s0.geometry.values(), key=lambda g: len(g.faces))
     g2 = s2.geometry[body_k] if body_k else max(s2.geometry.values(), key=lambda g: len(g.faces))
@@ -169,7 +197,7 @@ def _uv_fill(man: dict) -> tuple[bool, str]:
     # v5.7 — on mesurait le plus gros mesh, qui peut être une pièce émissive
     # sans UV (abat-jour de la lampe) : la gate levait « invalid index to scalar
     # variable ». On prend le mesh TEXTURÉ le plus lourd, celui que l'atlas décrit.
-    _geoms = list(trimesh.load(man["lods"]["LOD0"]["path"]).geometry.values())
+    _geoms = list(_load_light(man["lods"]["LOD0"]["path"]).geometry.values())
     _with_uv = [g for g in _geoms
                 if getattr(g.visual, "uv", None) is not None and len(np.asarray(g.visual.uv))]
     if not _with_uv:
@@ -264,7 +292,7 @@ def _uv_overlap(man: dict, max_ratio: float = 1.05) -> tuple[bool, str]:
     import numpy as np
     import trimesh
     from PIL import Image, ImageDraw
-    _geoms = list(trimesh.load(man["lods"]["LOD0"]["path"]).geometry.values())
+    _geoms = list(_load_light(man["lods"]["LOD0"]["path"]).geometry.values())
     _with_uv = [g for g in _geoms
                 if getattr(g.visual, "uv", None) is not None and len(np.asarray(g.visual.uv))]
     if not _with_uv:
@@ -288,6 +316,68 @@ def _uv_overlap(man: dict, max_ratio: float = 1.05) -> tuple[bool, str]:
     ratio = float(area.sum()) / max(cov, 1)
     return ratio <= max_ratio, f"ratio aire UV/couverture {ratio:.3f} (<= {max_ratio})"
 
+
+
+def _maps_4k(out_p: Path) -> tuple[bool, str]:
+    """Vérifie les cartes 4K (`render_4k/`) : résolution native, relief réel et densité de détail.
+
+    Un `1024 -> 4096` upscalé passe la résolution mais **aucune** mesure de détail :
+    on compare donc l'énergie de gradient de la carte 4K à celle de sa version
+    volontairement floutée. Un upscale bilinéaire plafonne autour de `1.00-1.06`,
+    un vrai recalcul de surface monte nettement au-dessus (mesuré 1.10-1.22 sur
+    les trois atlas du dragon) : le seuil est donc fixé à 1.08.
+    """
+    import numpy as np
+    from PIL import Image
+
+    rd = out_p / "render_4k"
+    if not rd.is_dir():
+        return False, "render_4k/ absent"
+    bcs = sorted(rd.glob("T_*_BC.png"))
+    if not bcs:
+        return False, "aucune carte BC 4K"
+    sizes = set()
+    energies = []
+    normal_ok = True
+    orm_ok = True
+    for bc_p in bcs:
+        im = Image.open(bc_p)
+        sizes.add(im.size)
+        if im.size[0] < SHOWCASE_TEX or im.size[1] < SHOWCASE_TEX:
+            return False, f"{bc_p.name} = {im.size[0]}px (< {SHOWCASE_TEX})"
+        a = np.asarray(im.convert("L"), dtype=np.float32) / 255.0
+        # Énergie de gradient sur un crop central 1024² (coût constant quelle que soit la taille)
+        c = a.shape[0] // 2
+        patch = a[c - 512:c + 512, c - 512:c + 512]
+        gx = np.abs(np.gradient(patch, axis=1)).mean() + np.abs(np.gradient(patch, axis=0)).mean()
+        from PIL import ImageFilter
+        blurred = np.asarray(
+            Image.fromarray((patch * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(1.6)),
+            dtype=np.float32) / 255.0
+        bg = np.abs(np.gradient(blurred, axis=1)).mean() + np.abs(np.gradient(blurred, axis=0)).mean()
+        energies.append(float(gx / max(bg, 1e-6)))
+
+        n_p = bc_p.with_name(bc_p.name.replace("_BC.png", "_N.png"))
+        if n_p.is_file():
+            na = np.asarray(Image.open(n_p).convert("RGB"), dtype=np.float32)   # 0..255
+            std_rg = float(na[..., :2].std())
+            blue = float(na[..., 2].mean())
+            normal_ok = normal_ok and std_rg >= 2.0 and blue >= 170
+        else:
+            normal_ok = False
+        o_p = bc_p.with_name(bc_p.name.replace("_BC.png", "_ORM.png"))
+        if o_p.is_file():
+            oa = np.asarray(Image.open(o_p).convert("RGB"), dtype=np.float32) / 255.0
+            orm_ok = orm_ok and 0.30 <= float(oa[..., 0].mean()) <= 0.98 and float(oa[..., 2].max()) <= 0.10
+        else:
+            orm_ok = False
+
+    dens = min(energies) if energies else 0.0
+    details = (f"{len(bcs)} atlas {sorted(sizes)} | densité détail min {dens:.2f} (>= 1.08) | "
+               f"normales {'ok' if normal_ok else 'KO'} | ORM {'ok' if orm_ok else 'KO'}")
+    ok = (len(sizes) == 1 and all(s[0] >= SHOWCASE_TEX for s in sizes)
+          and dens >= 1.08 and normal_ok and orm_ok)
+    return ok, details
 
 
 def _albedo_design(out_p: Path, name: str) -> tuple[bool, str]:
@@ -366,7 +456,7 @@ def _shading_modeled(man: dict) -> tuple[bool, str]:
     import trimesh
     from renderer import render_view
     g0_path = man["lods"]["LOD0"]["path"]
-    sc = trimesh.load(g0_path, process=False, force="scene")
+    sc = _load_light(g0_path)
     # Le verre est rendu par une passe dédiée hors z-buffer : sur un asset 100 %
     # verre la silhouette serait vide. On juge donc le modèle DIFFUS (opacité
     # forcée) — c'est lui qu'on veut voir sculpté par la lumière.
@@ -390,6 +480,20 @@ def _shading_modeled(man: dict) -> tuple[bool, str]:
     med = float(np.median(lum))
     details = f"dynamique {dyn:.3f} (>= 0.12) | médiane {med:.2f} (<= 0.90)"
     return (dyn >= 0.12 and med <= 0.90), details
+
+
+def _load_light(path, max_tex: int = 1024):
+    """Charge un `.glb` en RAM maîtrisée (v6.2).
+
+    Les `.glb` embarquent désormais des atlas 4096² ; `trimesh.load` en décodait
+    plusieurs copies par run et se faisait tuer par l'OOM killer (3 Go). Ici les
+    textures sont redimensionnées à la volée : géométrie et UV, seuls utiles,
+    restent exacts.
+    """
+    if str(HERE) not in sys.path:
+        sys.path.insert(0, str(HERE))
+    import photo_to_3d as _p2d
+    return _p2d.load_scene_light(path, max_tex=max_tex)
 
 
 def check_package(out_dir: str | Path, target: str = "hero") -> dict:
@@ -512,6 +616,15 @@ def check_package(out_dir: str | Path, target: str = "hero") -> dict:
     except Exception as exc:
         g.add("albedo_design", "albédo mesurable", False, str(exc), "mesure ok")
 
+    # --- cartes 4K natives (v6.2, cible showcase) ----------------------------
+    if target == "showcase":
+        try:
+            ok, val = _maps_4k(out_p)
+            g.add("maps_4k", "cartes 4K natives : résolution, relief réel & cohérence PBR",
+                  ok, val, f"{SHOWCASE_TEX}px + densité >= 1.08")
+        except Exception as exc:
+            g.add("maps_4k", "cartes 4K mesurables", False, str(exc), "mesure ok")
+
     # --- modelé du rendu (v5.7) ---------------------------------------------
     try:
         ok, val = _shading_modeled(man)
@@ -549,10 +662,15 @@ def check_package(out_dir: str | Path, target: str = "hero") -> dict:
 
     # normales : cohérence pixel DirectX -Y (Unreal) vs OpenGL +Y (Roblox)
     rbx_n = out_p / "roblox" / f"T_{name}_NormalMap.png"
-    ue_n = ue.get("normal_directx_neg_y") or ue.get("normal_dx") if ue else None
+    # On mesure le bake 4K (seul endroit où DirectX/OpenGL coexistent encore) :
+    # `unreal/T_*_N.png` est un export 1024 mono-atlas, sans jumelle OpenGL.
+    n4 = sorted((out_p / "render_4k").glob("T_*_N.png")) if (out_p / "render_4k").is_dir() else []
+    n4 = [q for q in n4 if "body" in q.name.lower()] or n4
+    ue_n = n4[0] if n4 else (ue.get("normal_directx_neg_y") or ue.get("normal_dx") if ue else None)
     if rbx_n.is_file() and ue_n and Path(ue_n).is_file():
         ok, val = _normals_cross_ok(rbx_n, Path(ue_n))
-        g.add("normal_dx_vs_gl", "G_Unreal == 255 - G_Roblox (DirectX -Y exact)", ok, val, "0 pixel")
+        g.add("normal_dx_vs_gl", "DirectX -Y exact : N == 255 - N_gl (même bake 4K)",
+              ok, val, "0 pixel incohérent")
 
     # silhouette LOD2 vs LOD0
     if lods.get("LOD0") and lods.get("LOD2"):

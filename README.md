@@ -1,6 +1,6 @@
-# 3d-forge v6.0 🎮🟥⚔️🐉📦
+# 3d-forge v6.2 🎮🟥⚔️🐉📦
 
-**Moteur Ultra Design, Sculpture Organique SDF `C¹` (`organic.py`), Fidélité Photo → 3D (`photo_to_3d.py`) & Texture PBR photoréaliste pensé en priorité pour Roblox Studio (`SurfaceAppearance` Dual-`1024²` + `Studs` + `< 10k tris` + `Neon` + `Luau`), Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`), l'impression 3D `100 % watertight` et l'empaquetage automatique `.zip` (`packager.py`, zéro `preview.html`) — `12 à 25 s` CPU tout compris, zéro GPU requis côté utilisateur et zéro boucle infinie !**
+**Moteur Ultra Design, Sculpture Organique SDF `C¹` (`organic.py`), Fidélité Photo → 3D (`photo_to_3d.py`) & Texture PBR photoréaliste pensé en priorité pour Roblox Studio (`SurfaceAppearance` Dual-`1024²` + `Studs` + `< 10k tris` + `Neon` + `Luau`), Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`), l'impression 3D `100 % watertight` l'empaquetage automatique `.zip` (`packager.py`, zéro `preview.html`) et les **textures `4096²` reconstruites** (`render_4k/`, 3 atlas × 7 cartes) — `12 à 25 s` CPU tout compris, zéro GPU requis côté utilisateur et zéro boucle infinie !**
 
 ![Vitrine Technique 3d-forge v5.1 — Ultra Design & Texture Engine](docs/img/v5_1_ultra_showcase.png)
 
@@ -22,6 +22,16 @@ Utilise le skill 3D de ce dépôt GitHub : https://github.com/DimalaxYT/3F
 
 Objet demandé : [ÉCRIS TON IDÉE OU JOINS TA PHOTO ICI — ex: génère ce dragon en 3D fidèle à la photo jointe, livré en archive .zip]
 ```
+
+
+> ### Nouveautés `v6.0 → v6.2 — Design 4K : textures `4096²` reconstruites, pas upscalées`
+> - **`render_4k/` — 3 atlas × 7 cartes `4096²`** (`scripts/texture_4k.py`) : `BC`, `N` DirectX, `N_gl` OpenGL, `ORM`, `AO`, `Cavity`, `MatID`. Le détail n'est **jamais** un agrandissement du `1024²` : positions et normales monde sont rastérisées texel par texel sur l'atlas, puis les écailles, plis de membrane et anneaux de kératine sont **recalculés analytiquement** en espace monde (donc sans étirement d'UV), la photo de référence étant reprojetée à `4096²` avec test d'occultation.
+> - **Bug de rastérisation UV corrigé** : `np.nonzero(hit)` renvoie des indices *locaux* à la fenêtre du triangle — la ligne était ré-ancrée sur `ya`, la **colonne jamais sur `xa`**. Tous les triangles peignaient donc dans les ~30 premières colonnes : **couverture `4 %` → `73 %`** (référence `pbr.rasterize_uv_triangles` : `67,5 %`). C'est ce qui produisait les « triangles peints » et les coins pâles.
+> - **Palette procédurale** (`palette_color`) : la couleur vient de l'**orientation monde** (dos `#5c1f10`, flanc `#782814`, ventre `#bd8d4f`, membrane `#8f5433`, kératine) et non plus d'un atlas `1024²` qui n'est qu'un dégradé basse fréquence — fini les aplats « plastique ». Les **scutes ventrales** (`scute_field`) remplacent les écailles sur le dessous, comme sur la photo.
+> - **Pipeline en 3 étapes** (`build` / `render` / `package`) : le bake `4096²` sur 3 atlas tenait `3,9 Go` en un seul passage et se faisait tuer par l'OOM killer. `photo_to_3d.load_scene_light(max_tex=…)` charge désormais les `.glb` sans décoder les atlas pleins (rendu QA `856 Mo`, gates comprises).
+> - **Gates `showcase`** (`gates.py --target showcase`) : `26/26` — dont `maps_4k` (résolution native `4096²`, énergie de gradient `>= 1.08` face à sa version floutée, donc **upscale bilinéaire exclu**, normales et ORM non plats).
+> - **Archive `.zip` dédupliquée** (`packager.py`) : les cartes *dérivées* (`N_gl` = `255 - N`, `AO` = canal R de l'`ORM`) et les PNG identiques octet pour octet ne sont plus embarqués — bundle `177 Mo` au lieu de `249 Mo`, sans perte d'information.
+> - **Roblox reste à `1024²`** (plafond moteur `SurfaceAppearance`) : le 4K vit dans `render_4k/` et `unreal/`, jamais dans `roblox/`.
 
 > ### Nouveautés `v5.2 → v6.0 — Fidélité Photo → 3D, Archive `.zip` Automatique, QA 26 Gates`
 > - **26 gates mesurables** (`scripts/gates.py`) dont `bundle_zip` : budget de tris par cible (`hero`/`ugc`/`print`), cohérence des cartes PBR, anims, normales `DirectX -Y`, silhouette LOD0↔LOD2, UV, structure Luau, budget UCX, néon émissif et intégrité de l'archive `<name>.zip` (**zéro `preview.html`**).

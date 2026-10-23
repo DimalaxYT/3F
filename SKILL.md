@@ -25,10 +25,12 @@ description: >-
 >      - Utilise `b.def_joint("head", ...)` / `b.def_joint("wings", ...)` + `joint_tex_size=1024` pour offrir un atlas `1024²` et un budget de triangles dédié à la tête (orbites creusées, globes oculaires + pupilles fendues, 32 crocs d'ivoire `#f4eee4`, narines, cornes) et aux ailes (`org.bat_wing(..., membrane_thickness=0.015)` sans déchirure QEM), + `org.displace_scales`, `org.armored_scutes`, `org.ridge_spines`.
 >   3. **Projeter la vraie texture PBR + micro-normales de la photo (`360°`, `0 %` halo blanc)** :
 >      `python3 scripts/photo_to_3d.py project <photo.png> exports/<nom> -n <nom> --azimuth 86 --elevation 3.5 --fov 38`
->   4. **Vérifier au Microscope 300 % (`photo_match.png` + `photo_details_zoom.png`), valider `gates.py` (`25/25`) et livrer `<nom>.zip`** :
+>   4. **Cuire le 4K (`render_4k/`), vérifier au Microscope 300 % (`photo_match.png` + `photo_details_zoom.png`), valider `gates.py --target showcase` (`26/26`) et livrer `<nom>.zip`** :
 >      ```bash
 >      python3 scripts/photo_to_3d.py verify <photo.png> exports/<nom>/<nom>_game.glb -o exports/<nom>/photo_match.png --zoom exports/<nom>/photo_details_zoom.png --azimuth 86 --elevation 3.5 --fov 38
->      python3 scripts/gates.py exports/<nom>
+>      # 4K : 3 atlas x 7 cartes 4096² reconstruites (jamais un upscale du 1024²)
+>      python3 -c "import sys;sys.path.insert(0,'scripts');import texture_4k as t;t.synthesize_4k_maps('exports/<nom>','<nom>',photo_path='<photo.png>')"
+>      python3 scripts/gates.py exports/<nom> --target showcase
 >      python3 scripts/packager.py exports/<nom> -n <nom>
 >      ```
 >      Inspecte **obligatoirement** `photo_match.png` **ET** `photo_details_zoom.png` avec `read_file`, puis **présente / livre `exports/<nom>/<nom>.zip`** (aucun `preview.html` n'est généré !).
