@@ -766,6 +766,10 @@ def project_photo_pbr(
             n_dx_im = Image.fromarray(n_dx)
             n_dx_im.save(ue_dir / f"T_{name}_N.png")
             n_dx_im.save(ue_dir / f"T_{name}_N.webp", format="WEBP", quality=94)
+            # Jumelle OpenGL de la MÊME projection : sans elle, la carte `_N_gl`
+            # laissée par l'export initial ne correspondait plus et la gate de
+            # polarité `-Y` échouait (215 k pixels « incohérents »).
+            body_nrm_img.save(ue_dir / f"T_{name}_N_gl.png")
 
     return {"updated_geometries": len(mat_tex_list), "game_glb": str(game_glb)}
 

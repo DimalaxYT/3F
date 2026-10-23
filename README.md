@@ -1,6 +1,6 @@
 # 3d-forge v6.2 🎮🟥⚔️🐉📦
 
-**Moteur Ultra Design, Sculpture Organique SDF `C¹` (`organic.py`), Fidélité Photo → 3D (`photo_to_3d.py`) & Texture PBR photoréaliste pensé en priorité pour Roblox Studio (`SurfaceAppearance` Dual-`1024²` + `Studs` + `< 10k tris` + `Neon` + `Luau`), Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`), l'impression 3D `100 % watertight` l'empaquetage automatique `.zip` (`packager.py`, zéro `preview.html`) et les **textures `4096²` reconstruites** (`render_4k/`, 3 atlas × 7 cartes) — `12 à 25 s` CPU tout compris, zéro GPU requis côté utilisateur et zéro boucle infinie !**
+**Moteur Ultra Design, Sculpture Organique SDF `C¹` (`organic.py`), Fidélité Photo → 3D (`photo_to_3d.py`) & Texture PBR photoréaliste pensé en priorité pour Roblox Studio (`SurfaceAppearance` Dual-`1024²` + `Studs` + `< 10k tris` + `Neon` + `Luau`), Unreal Engine 5 (`Lumen` + `ORM` + `DirectX -Y` + `UCX_*`), l'impression 3D `100 % watertight`, l'empaquetage automatique `.zip` (`packager.py`, zéro `preview.html`) et les **textures `4096²` reconstruites** (`render_4k/`, 3 atlas × 7 cartes) — `12 à 25 s` CPU tout compris, zéro GPU requis côté utilisateur et zéro boucle infinie !**
 
 ![Vitrine Technique 3d-forge v5.1 — Ultra Design & Texture Engine](docs/img/v5_1_ultra_showcase.png)
 
@@ -23,6 +23,14 @@ Utilise le skill 3D de ce dépôt GitHub : https://github.com/DimalaxYT/3F
 Objet demandé : [ÉCRIS TON IDÉE OU JOINS TA PHOTO ICI — ex: génère ce dragon en 3D fidèle à la photo jointe, livré en archive .zip]
 ```
 
+
+
+> ### Nouveautés `v6.2` — G36 game-ready (`examples/g36_rifle/`) & recette catalogue `g36`
+> - **Fusil d'assaut Heckler & Koch G36** reproduit aux cotes réelles (998 mm), **30 840 tris** de détail sculpté, **LOD0 9 102 tris**, `47 → 3` draw calls, **10 sockets** gameplay (`muzzle`, `grip`, `optic`, `eject`, `mag`, rails…).
+> - Détails d'identité : **pontet-rail surélevé avec fenêtre triangulaire**, optique point rouge à **réticule émissif** (1 Neon Roblox), crosse pleine à plaque caoutchouc, chargeur courbe 13 sections, **garde-main à évents traversants** + rails bas et latéral, canon + bloc de gaz + hausse à ailes + **flash-hider à dents**, poignée d'armement, défenseur de douilles.
+> - **Recette réutilisable** `scripts/recipes/weapons.py` → `turbo_forge.py g36` : `26/26` gates, `.stl` watertight, `g36.zip`.
+> - Pièges corrigés et documentés : normalisation en place d'un axe partagé (`np.asarray`), `unmerge_vertices()` qui casse l'étanchéité CSG, normales lissées autour des découpes (`crisp()` + loft dense), OOM à `tex_size=4096`.
+> - **`unreal/T_*_N_gl.png`** est désormais exporté à côté de `T_*_N.png` : la polarité `DirectX -Y` redevient vérifiable pixel à pixel (`photo_to_3d.project_photo_pbr` resynchronise la jumelle OpenGL).
 
 > ### Nouveautés `v6.0 → v6.2 — Design 4K : textures `4096²` reconstruites, pas upscalées`
 > - **`render_4k/` — 3 atlas × 7 cartes `4096²`** (`scripts/texture_4k.py`) : `BC`, `N` DirectX, `N_gl` OpenGL, `ORM`, `AO`, `Cavity`, `MatID`. Le détail n'est **jamais** un agrandissement du `1024²` : positions et normales monde sont rastérisées texel par texel sur l'atlas, puis les écailles, plis de membrane et anneaux de kératine sont **recalculés analytiquement** en espace monde (donc sans étirement d'UV), la photo de référence étant reprojetée à `4096²` avec test d'occultation.

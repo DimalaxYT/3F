@@ -2059,6 +2059,10 @@ def export_game_package(
         baked["albedo"].save(ue_dir / f"T_{clean_name}_BC.png", compress_level=2)
         baked["orm"].save(ue_dir / f"T_{clean_name}_ORM.png", compress_level=2)
         baked["normal_dx"].save(ue_dir / f"T_{clean_name}_N.png", compress_level=2)  # DirectX -Y !
+        # Jumelle OpenGL de la MÊME cuisson : c'est elle qui rend la polarité
+        # `-Y` vérifiable pixel à pixel (gates `normal_dx_vs_gl`). Sans elle, la
+        # gate ne pouvait comparer que des atlas de résolutions/UV différents.
+        baked["normal_gl"].save(ue_dir / f"T_{clean_name}_N_gl.png", compress_level=2)
         sc_ue = _assemble_lod_scene(lod0_mesh, include_colliders="unreal")
         ue_glb = ue_dir / f"SM_{clean_name}.glb"
         mk.export_glb_pbr(sc_ue, str(ue_glb), webp=False)
@@ -2067,6 +2071,7 @@ def export_game_package(
             "base_color": str(ue_dir / f"T_{clean_name}_BC.png"),
             "orm_packed": str(ue_dir / f"T_{clean_name}_ORM.png"),
             "normal_directx_neg_y": str(ue_dir / f"T_{clean_name}_N.png"),
+            "normal_opengl_pos_y": str(ue_dir / f"T_{clean_name}_N_gl.png"),
         }
 
     if "unity" in engines:
