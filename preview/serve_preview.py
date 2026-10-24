@@ -54,11 +54,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         super().end_headers()
 
-    def do_GET(self):  # noqa: D102
+    def _map_root(self):
+        """`/` -> index.html. Pas de redirection : certains proxys ne
+        réécrivent pas les chemins. Appliqué à GET **et** HEAD, sinon un
+        contrôle de santé en HEAD reçoit le listing du dossier."""
         if self.path in ("/", "/preview", "/preview/"):
-            # pas de redirection : certains proxys ne réécrivent pas les chemins
             self.path = "/preview/index.html"
+
+    def do_GET(self):  # noqa: D102
+        self._map_root()
         super().do_GET()
+
+    def do_HEAD(self):  # noqa: D102
+        self._map_root()
+        super().do_HEAD()
 
     def log_message(self, fmt, *args):  # noqa: D102
         sys.stderr.write("  %s\n" % (fmt % args))

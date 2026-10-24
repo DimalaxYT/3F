@@ -1,8 +1,8 @@
 // G36E — preview temps réel (three.js vendorisé, aucune dépendance réseau)
-import * as THREE from 'three';
-import { OrbitControls } from './vendor/OrbitControls.js';
-import { GLTFLoader } from './vendor/GLTFLoader.js';
-import { RoomEnvironment } from './vendor/RoomEnvironment.js';
+import * as THREE from '/preview/vendor/three.module.min.js';
+import { OrbitControls } from '/preview/vendor/OrbitControls.js';
+import { GLTFLoader } from '/preview/vendor/GLTFLoader.js';
+import { RoomEnvironment } from '/preview/vendor/RoomEnvironment.js';
 
 const BASE = '/exports/g36_rifle/';
 const GLB = {
@@ -12,6 +12,8 @@ const GLB = {
 };
 const COLLIDERS = BASE + 'g36_rifle_colliders.glb';
 const MANIFEST = BASE + 'game_manifest.json';
+
+window.__g36ModuleLoaded = true;
 
 const $ = (id) => document.getElementById(id);
 const canvas = $('view');

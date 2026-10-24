@@ -3,8 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<base href="/preview/">
 <title>G36E — preview hard-surface</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="/preview/style.css">
 </head>
 <body>
 
@@ -13,7 +14,7 @@
 
   <!-- Comparaison avec la photo de calage -->
   <div id="compareLayer" class="hidden">
-    <img id="refPhoto" src="assets/reference_cropped.jpg" alt="Photo de référence">
+    <img id="refPhoto" src="/preview/assets/reference_cropped.jpg" alt="Photo de référence">
     <div id="splitHandle"><span></span></div>
     <div id="compareTagRef">PHOTO</div>
     <div id="compareTag3d">3D</div>
@@ -71,9 +72,43 @@
   </section>
 </aside>
 
-<script type="importmap">
-{ "imports": { "three": "./vendor/three.module.min.js" } }
+<script type="module" src="/preview/app.js"></script>
+
+<script>
+/* Diagnostic embarqué (script classique, indépendant des modules).
+   Si la feuille de style ou le module JS ne se charge pas, on l'affiche au lieu
+   de laisser une page blanche ou un document sans mise en forme. */
+(function () {
+  function banner(title, detail, hint) {
+    if (document.getElementById('bootFail')) return;
+    var d = document.createElement('div');
+    d.id = 'bootFail';
+    d.style.cssText = 'position:fixed;left:16px;top:16px;right:16px;z-index:9999;max-width:760px;'
+      + 'margin:0 auto;padding:14px 16px;border-radius:10px;background:#3a1212;color:#ffd9d2;'
+      + 'border:1px solid #7a2a22;font:13px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;'
+      + 'white-space:pre-wrap;box-shadow:0 10px 40px #000a';
+    d.textContent = title + '\n\n' + detail + (hint ? '\n\n' + hint : '');
+    document.body.appendChild(d);
+  }
+  window.addEventListener('load', function () {
+    setTimeout(function () {
+      var issues = [];
+      if (getComputedStyle(document.body).overflow !== 'hidden') {
+        issues.push('style.css non chargé (/preview/style.css)');
+      }
+      if (!window.__g36ModuleLoaded) {
+        issues.push('app.js non démarré (/preview/app.js)');
+      }
+      if (!issues.length) return;
+      banner('Preview incomplète',
+             issues.join('\n'),
+             'Vérifie que ces URL répondent 200 :\n'
+             + '  /preview/style.css\n  /preview/app.js\n'
+             + '  /preview/vendor/three.module.min.js\n'
+             + '  /exports/g36_rifle/g36_rifle_game.glb');
+    }, 4000);
+  });
+})();
 </script>
-<script type="module" src="app.js"></script>
 </body>
 </html>

@@ -17,6 +17,16 @@ Le serveur sert la **racine du dépôt** (le GLB vit dans `exports/`, ignoré pa
 git) et répond directement sur `/` — pas de redirection, pour rester compatible
 avec les proxys qui ne réécrivent pas les chemins.
 
+> **Toutes les références de la page sont des chemins absolus** (`/preview/…`,
+> `/exports/…`). C'est obligatoire : la page est servie sur `/`, donc une
+> référence relative comme `href="style.css"` serait demandée à `/style.css` et
+> renverrait 404 — page blanche sans style ni script. Une balise
+> `<base href="/preview/">` double la sécurité.
+>
+> Un diagnostic embarqué (script classique, indépendant des modules) affiche un
+> bandeau rouge au bout de 4 s si la feuille de style ou le module n'ont pas
+> démarré, avec la liste des URL à contrôler.
+
 ## Ce que fait la page
 
 | Fonction | Détail |
