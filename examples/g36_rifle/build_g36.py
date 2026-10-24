@@ -51,6 +51,7 @@ MAT_RUBBER = mk.Material("g36_rubber", "#08090a", metallic=0.0, roughness=0.95)
 MAT_MAG = mk.Material("g36_mag", "#15181b", metallic=0.0, roughness=0.35)
 MAT_GLASS = mk.mat.glass("#c8d8dc", opacity=0.20, roughness=0.03)
 MAT_RED = mk.mat.emissive("#ff2010", 2.6)
+MAT_MAG_R = mk.Material("g36_mag_smoke", "#3a4448", metallic=0.0, roughness=0.22)
 # --------------------------------------------------------------------------- #
 # Primitives hard-surface
 # --------------------------------------------------------------------------- #
@@ -135,261 +136,276 @@ def ring_ch(center, axis, hw, hh, ch, n_ring: int = 8) -> np.ndarray:
 
 
 # --------------------------------------------------------------------------- #
-# Cotes maîtresses (m) — relevées au pixel sur la vue de profil
+# Cotes maîtresses (m) — dépouillées au pixel sur la vue de profil
+# L = 998 mm, H = 279 mm (L/H 3,574), axe du canon à 29 % de la hauteur.
 # --------------------------------------------------------------------------- #
 Y_MUZZLE = 0.499
-Y_FH_R = 0.448          # base du cache-flammes
-Y_HG_F = 0.318          # garde-main avant
-Y_HG_R = 0.146          # garde-main arrière
-Y_RECV_R = -0.238       # boîtier arrière / charnière de crosse
+Y_BRAKE_R = 0.446       # base du frein de bouche
+Y_BARREL_R = 0.322      # entrée du canon dans le garde-main
+Y_HG_F = 0.318          # pointe avant du garde-main
+Y_HG_R = 0.143          # garde-main / boîtier
+Y_RECV_R = -0.260       # boîtier arrière / charnière de crosse
 Y_BUTT = -0.499
 
-Z_HG_T = 0.039          # dessus du garde-main
-Z_RC_T = 0.034          # dessus du boîtier (sous l'arche)
-Z_BODY_B = -0.031       # dessous commun (garde-main + boîtier)
-Z_ARCH_T = 0.100        # sommet de la poignée de transport
-Z_OPTIC_T = 0.094       # sommet du bloc optique
+Z_HG_T = 0.036          # dessus du garde-main (base du rail)
+Z_RC_T = 0.024          # dessus du boîtier, sous la fenêtre de poignée
+Z_RAIL_T = 0.061        # dessus du rail haut
+Z_BODY_B = -0.031       # dessous commun
 
-HW_HG = 0.029           # demi-largeur garde-main (58 mm)
-HW_RC = 0.031           # demi-largeur boîtier (62 mm)
-CH = 0.0022             # chanfrein : la clé du rendu hard-surface
+HW_HG = 0.0305          # demi-largeur garde-main (61 mm)
+HW_RC = 0.0295          # demi-largeur boîtier (59 mm)
+CH_HG = 0.0080          # chanfreins larges : c'est ce qui fait lire la finesse
+CH_RC = 0.0075
+
+
+def rail(y0: float, y1: float, z_base: float, teeth: int = 20,
+         width: float = 0.0210, height: float = 0.0125) -> trimesh.Trimesh:
+    """Rail Picatinny cranté posé à `z_base`, de y0 (arrière) à y1 (avant)."""
+    r = gr.picatinny_rail(length=abs(y1 - y0), width=width,
+                          height=height, teeth=teeth)
+    mk.place(r, 0.0, (y0 + y1) / 2.0, z_base)
+    return r
 
 
 def build() -> mk.Builder:
-    """G36E — une pièce = un bloc extrudé, cotes mesurées sur la photo."""
+    """G36 — la référence est la version à rails intégrés, chargeur fumé."""
     b = mk.Builder("g36_rifle")
 
     # ================================================================== #
-    # 1. GARDE-MAIN — plus haut que le boîtier (marche mesurée de 5 mm)
+    # 1. GARDE-MAIN — nez biseauté puis bloc à dessus plat
     # ================================================================== #
     hg_side = [
-        (0.318, Z_HG_T), (0.318, -0.022), (0.306, Z_BODY_B),
-        (Y_HG_R, Z_BODY_B), (Y_HG_R, Z_HG_T),
+        (0.322, -0.010), (0.312, 0.024), (0.300, Z_HG_T), (Y_HG_R, Z_HG_T),
+        (Y_HG_R, Z_BODY_B), (0.300, Z_BODY_B), (0.318, -0.024),
     ]
-    hg = shell(hg_side, HW_HG, (Z_HG_T + Z_BODY_B) / 2, (Z_HG_T - Z_BODY_B) / 2,
-               CH, Y_HG_R, Y_HG_F)
-    # 6 lumières oblongues par flanc (20-32 % de la longueur), fraisées à 5 mm
+    hg = shell(hg_side, HW_HG, (Z_HG_T + Z_BODY_B) / 2,
+               (Z_HG_T - Z_BODY_B) / 2, CH_HG, Y_HG_R, Y_HG_F)
+
+    # deux rangées d'ouïes traversantes, comme sur la référence
     vents = []
-    for k in range(6):
-        yy = 0.286 - 0.0225 * k
-        for sx in (-1, 1):
-            v = mk.box(0.012, 0.0105, 0.0140)
-            mk.place(v, sx * (HW_HG - 0.0030), yy, 0.0090)
+    for k in range(8):                       # rangée haute : petits trous ronds
+        yy = 0.292 - 0.0180 * k
+        for _sx in (-1, 1):
+            v = mk.cylinder(0.0042, 0.075, sections=14)
+            mk.rot_y(v, 90.0)
+            mk.place(v, -(HW_HG + 0.010), yy, 0.0125)
             vents.append(v)
-    hg = mk.difference(hg, vents)
-    b.add(hg, MAT_POLY, name="handguard")
-    core = mk.box(2 * (HW_HG - 0.010), 0.190, 0.0300)
-    mk.place(core, 0.0, 0.238, 0.001)
-    b.add(core, MAT_POLY_DK, name="handguard_core")
+    for k in range(6):                       # rangée basse : lumières oblongues
+        yy = 0.288 - 0.0235 * k
+        for _sx in (-1, 1):
+            v = mk.box(0.075, 0.0165, 0.0085)
+            mk.place(v, -(HW_HG + 0.010), yy, -0.0055)
+            vents.append(v)
+    b.add(mk.difference(hg, vents), MAT_POLY, name="handguard")
+    b.add(rail(0.150, 0.298, Z_HG_T, teeth=19), MAT_POLY_DK, name="handguard_rail")
+    side_rail = gr.picatinny_rail(length=0.130, width=0.0165, height=0.0090, teeth=9)
+    mk.rot_y(side_rail, -90.0)
+    mk.place(side_rail, -(HW_HG + 0.0045), 0.222, -0.0180)
+    b.add(side_rail, MAT_POLY_DK, name="handguard_rail_side")
 
     # ================================================================== #
-    # 2. BOÎTIER — dessus 5 mm plus bas que le garde-main
+    # 2. BOÎTIER
     # ================================================================== #
     rc_side = [
-        (Y_HG_R, Z_RC_T), (Y_HG_R, Z_BODY_B),
-        (-0.220, Z_BODY_B), (-0.232, -0.020), (Y_RECV_R, -0.004), (Y_RECV_R, Z_RC_T),
+        (Y_HG_R, Z_RC_T), (Y_HG_R, Z_BODY_B), (-0.232, Z_BODY_B),
+        (Y_RECV_R, -0.020), (Y_RECV_R, Z_RC_T),
     ]
-    rc = shell(rc_side, HW_RC, (Z_RC_T + Z_BODY_B) / 2, (Z_RC_T - Z_BODY_B) / 2,
-               CH, Y_RECV_R, Y_HG_R)
-    b.add(rc, MAT_POLY, name="receiver")
+    b.add(shell(rc_side, HW_RC, (Z_RC_T + Z_BODY_B) / 2,
+                (Z_RC_T - Z_BODY_B) / 2, CH_RC, Y_RECV_R, Y_HG_R),
+          MAT_POLY, name="receiver")
 
     # ================================================================== #
-    # 3. POIGNÉE DE TRANSPORT — fenêtre mesurée 181 × 54 mm
+    # 3. POIGNÉE DE TRANSPORT : pilier avant + poutre + bloc arrière
+    #    fenêtre mesurée 208 × 32 mm (y +79 → -129, z +24 → +56)
     # ================================================================== #
-    handle_outer = [
-        (Y_HG_R, Z_RC_T), (Y_HG_R, 0.056), (0.056, Z_ARCH_T),
-        (-0.097, Z_ARCH_T), (-0.097, 0.086), (0.070, 0.086), (0.108, Z_RC_T),
-    ]
-    b.add(prism_x(handle_outer, -0.0090, 0.0090), MAT_POLY, name="carry_handle")
+    bridge = prism_x([(0.104, Z_RC_T), (0.104, Z_RAIL_T), (-0.247, Z_RAIL_T),
+                      (-0.260, 0.053), (-0.260, Z_RC_T)], -0.0135, 0.0135)
+    window = prism_x([(0.079, Z_RC_T - 0.004), (0.079, 0.0560),
+                      (-0.129, 0.0560), (-0.129, Z_RC_T - 0.004)],
+                     -0.040, 0.040)
+    b.add(mk.difference(bridge, [window]), MAT_POLY, name="carry_handle")
+    b.add(rail(-0.244, 0.100, Z_RAIL_T, teeth=22), MAT_POLY_DK, name="receiver_rail")
+
+    # hausse avant repliée sur le rail
+    post = mk.box(0.0075, 0.0075, 0.0210)
+    mk.place(post, 0.0, 0.056, Z_RAIL_T + 0.0125)
+    b.add(post, MAT_STEEL, name="front_sight_post")
 
     # ================================================================== #
-    # 4. BLOC OPTIQUE — 68 mm de haut, sommet 6 mm sous l'arche
+    # 4. BLOC ARRIÈRE (logement de la culasse) + œilleton
     # ================================================================== #
-    optic_side = [
-        (-0.097, Z_RC_T), (-0.097, Z_OPTIC_T), (-0.196, Z_OPTIC_T),
-        (-0.210, 0.087), (-0.224, 0.048), (Y_RECV_R, 0.041), (Y_RECV_R, Z_RC_T),
-    ]
-    b.add(shell(optic_side, 0.0190, (Z_OPTIC_T + Z_RC_T) / 2,
-                (Z_OPTIC_T - Z_RC_T) / 2, CH, Y_RECV_R, -0.097),
-          MAT_POLY, name="optic_housing")
-    # lentille frontale encastrée + oculaire + tourelle
-    ob = mk.cylinder(0.0142, 0.0030, sections=30)
-    mk.rot_x(ob, -90.0)
-    mk.place(ob, 0.0, -0.0975, 0.0655)
-    b.add(ob, MAT_POLY_DK, name="optic_objective_ring")
-    lens = mk.cylinder(0.0118, 0.0026, sections=30)
-    mk.rot_x(lens, -90.0)
-    mk.place(lens, 0.0, -0.0995, 0.0655)
-    b.add(lens, MAT_GLASS, name="optic_lens")
-    eye = mk.cylinder(0.0128, 0.0032, sections=28)
-    mk.rot_x(eye, -90.0)
-    mk.place(eye, 0.0, -0.2210, 0.0655)
-    b.add(eye, MAT_POLY_DK, name="optic_ocular")
-    dot = mk.cylinder(0.0018, 0.0012, sections=16)
-    mk.rot_x(dot, -90.0)
-    mk.place(dot, 0.0, -0.2190, 0.0655)
-    b.add(dot, MAT_RED, name="optic_reticle")
-    kt = mk.cylinder(0.0078, 0.0070, sections=22)
-    mk.place(kt, 0.0, -0.150, Z_OPTIC_T)
-    b.add(kt, MAT_BLACK, name="optic_knob_top")
-    ks = mk.cylinder(0.0074, 0.0062, sections=22)
-    mk.rot_y(ks, 90.0)
-    mk.place(ks, 0.0195, -0.150, 0.0660)
-    b.add(ks, MAT_BLACK, name="optic_knob_side")
+    b.add(prism_x([(-0.244, Z_RAIL_T), (-0.244, 0.052), (-0.262, 0.040),
+                   (-0.262, Z_RAIL_T)], -0.0120, 0.0120),
+          MAT_POLY, name="rear_sight_block")
 
     # ================================================================== #
-    # 5. CROSSE SQUELETTE — fenêtre mesurée (y -325..-444, z +13..-40)
+    # 5. CROSSE — cadre, fenêtre mesurée 144 × 29 mm, talon à -113
     # ================================================================== #
     stock_side = [
-        (Y_RECV_R, 0.041), (-0.253, 0.034), (-0.281, 0.025), (-0.394, 0.024),
-        (-0.437, 0.024), (-0.480, 0.025), (Y_BUTT, -0.001),
-        (Y_BUTT, -0.127), (-0.482, -0.127), (-0.465, -0.120), (-0.451, -0.104),
-        (-0.437, -0.076), (-0.423, -0.062), (-0.409, -0.053), (-0.380, -0.044),
-        (-0.352, -0.039), (-0.324, -0.037), (-0.290, -0.033), (Y_RECV_R, Z_BODY_B),
+        (Y_RECV_R, 0.028), (-0.290, 0.024), (-0.362, 0.024), (-0.430, 0.026),
+        (-0.470, 0.028), (-0.492, 0.022), (Y_BUTT, -0.012),
+        (Y_BUTT, -0.055), (-0.495, -0.084), (-0.489, -0.109), (-0.478, -0.113),
+        (-0.463, -0.109), (-0.423, -0.070), (-0.343, -0.040), (-0.310, -0.035),
+        (-0.272, -0.035), (Y_RECV_R, Z_BODY_B),
     ]
-    # Fenêtre : le cadre garde 22 mm de matière partout (crosse squelette)
-    void = [(-0.275, 0.0140), (-0.442, 0.0060), (-0.442, -0.0340), (-0.290, -0.0020)]
-    stock = prism_x(stock_side, -0.0190, 0.0190)
-    void3 = prism_x(void, -0.030, 0.030)
-    b.add(mk.difference(stock, [void3]), MAT_BLACK, name="stock_frame")
+    stock = prism_x(stock_side, -0.0150, 0.0150)
+    win = prism_x([(-0.321, 0.0120), (-0.465, 0.0120), (-0.465, -0.0170),
+                   (-0.321, -0.0170)], -0.040, 0.040)
+    b.add(mk.difference(stock, [win]), MAT_POLY, name="stock_frame")
 
-    butt = prism_x([(-0.481, 0.024), (Y_BUTT, 0.024), (Y_BUTT, -0.127),
-                    (-0.481, -0.127)], -0.0200, 0.0200)
-    b.add(butt, MAT_RUBBER, name="butt_pad")
+    # talon : plaque ajourée d'échelles triangulaires (détail de la référence)
+    butt = prism_x([(-0.484, 0.034), (Y_BUTT, 0.006), (Y_BUTT, -0.058),
+                    (-0.484, -0.108)], -0.0165, 0.0165)
+    ladder = []
+    for k in range(6):
+        zc = 0.018 - 0.0235 * k
+        t = mk.cylinder(0.0068, 0.012, sections=3)
+        mk.rot_y(t, 90.0)
+        mk.place(t, -0.0175, -0.4975, zc)
+        ladder.append(t)
+    b.add(mk.difference(butt, ladder), MAT_POLY, name="butt_pad")
 
     # ================================================================== #
-    # 6. POIGNÉE PISTOLET — 60 mm de large, bas à -141 mm
+    # 6. POIGNÉE PISTOLET — inclinée, bas à -150
     # ================================================================== #
-    g_top = np.array([0.0, -0.173, Z_BODY_B + 0.006])
-    g_bot = np.array([0.0, -0.200, -0.141])
+    g_top = np.array([0.0, -0.204, Z_BODY_B + 0.004])
+    g_bot = np.array([0.0, -0.262, -0.150])
     axis = g_bot - g_top
     au = axis / np.linalg.norm(axis)
     rings = []
     for i in range(9):
         t = i / 8.0
-        c = g_top + axis * t + np.array([0.0, 0.0045 * math.sin(math.pi * t), 0.0])
-        rings.append(ring_ch(c, axis, 0.0168 - 0.0016 * t,
-                             0.0232 - 0.0052 * t * t, 0.0030))
-    rings.append(ring_ch(g_bot + au * 0.006, axis, 0.0150, 0.0172, 0.0028))
+        c = g_top + axis * t + np.array([0.0, 0.0050 * math.sin(math.pi * t), 0.0])
+        rings.append(ring_ch(c, axis, 0.0150 - 0.0012 * t,
+                             0.0225 - 0.0040 * t * t, 0.0035))
+    rings.append(ring_ch(g_bot + au * 0.006, axis, 0.0138, 0.0165, 0.0032))
     b.add(mk.loft(rings, caps=True), MAT_BLACK, name="pistol_grip")
 
     # ================================================================== #
-    # 7. PONTET + DÉTENTE (bas mesuré à -78 mm)
+    # 7. PONTET AJOURÉ + DÉTENTE
     # ================================================================== #
-    guard_out = [(-0.098, Z_BODY_B), (-0.098, -0.052), (-0.110, -0.072),
-                 (-0.135, -0.080), (-0.154, -0.076), (-0.168, -0.058),
-                 (-0.168, Z_BODY_B)]
-    guard_in = [(-0.106, -0.038), (-0.160, -0.038), (-0.160, -0.062),
-                (-0.120, -0.068)]
-    guard = prism_x(guard_out, -0.0055, 0.0055)
-    b.add(mk.difference(guard, [prism_x(guard_in, -0.020, 0.020)]),
-          MAT_BLACK, name="trigger_guard")
-    b.add(prism_x([(-0.150, Z_BODY_B), (-0.142, Z_BODY_B), (-0.144, -0.050),
-                   (-0.153, -0.054)], -0.0026, 0.0026), MAT_BRIGHT, name="trigger")
+    guard_out = [(-0.098, Z_BODY_B), (-0.098, -0.050), (-0.110, -0.070),
+                 (-0.135, -0.078), (-0.158, -0.074), (-0.172, -0.056),
+                 (-0.172, Z_BODY_B)]
+    guard_in = [(-0.107, -0.036), (-0.164, -0.036), (-0.164, -0.060),
+                (-0.120, -0.066)]
+    g = prism_x(guard_out, -0.0050, 0.0050)
+    b.add(mk.difference(g, [prism_x(guard_in, -0.020, 0.020)]),
+          MAT_POLY, name="trigger_guard")
+    b.add(prism_x([(-0.152, Z_BODY_B), (-0.144, Z_BODY_B), (-0.146, -0.048),
+                   (-0.155, -0.052)], -0.0026, 0.0026), MAT_BRIGHT, name="trigger")
 
     # ================================================================== #
-    # 8. CHARGEUR — 95 mm avant-arrière, bas à -194 mm
+    # 8. CHARGEUR — bas à -197, cintré vers l'arrière
     # ================================================================== #
     mag_side = [
-        (0.002, Z_BODY_B), (-0.078, Z_BODY_B), (-0.078, -0.110),
-        (-0.070, -0.170), (-0.062, -0.194), (-0.002, -0.178), (0.001, -0.100),
+        (-0.021, Z_BODY_B), (-0.105, Z_BODY_B), (-0.104, -0.090),
+        (-0.098, -0.150), (-0.092, -0.197), (-0.048, -0.197),
+        (-0.042, -0.140), (-0.030, -0.080),
     ]
-    b.add(shell(mag_side, 0.0152, -0.100, 0.0900, 0.0022, -0.081, 0.006),
-          MAT_MAG, name="magazine")
-    well = prism_x([(0.010, Z_BODY_B), (-0.098, Z_BODY_B), (-0.096, -0.062),
-                    (0.008, -0.062)], -0.0235, 0.0235)
-    b.add(well, MAT_POLY, name="magwell")
-    # trous témoins + nervures
-    holes = []
-    for k in range(5):
-        zz = -0.062 - 0.0245 * k
-        for sx in (-1, 1):
-            h = mk.cylinder(0.0032, 0.0022, sections=14)
-            mk.rot_y(h, 90.0)
-            mk.place(h, sx * 0.0140, -0.026, zz)
-            holes.append(h)
-    b.add(mk.union(holes), MAT_BLACK, name="mag_witness_holes")
+    b.add(prism_x(mag_side, -0.0126, 0.0126), MAT_MAG, name="magazine")
+    # nervures transversales du chargeur fumé
     ribs = []
-    for k in range(4):
-        zz = -0.060 - 0.032 * k
-        rib = mk.box(0.0330, 0.0900, 0.0030)
-        mk.place(rib, 0.0, -0.026, zz)
-        ribs.append(rib)
-    b.add(mk.intersection(mk.union(ribs),
-                          prism_x(mag_side, -0.0168, 0.0168)), MAT_BLACK, name="mag_ribs")
-
-    # ================================================================== #
-    # 9. CANON — Ø20, cache-flammes Ø23, hausse repliée
-    # ================================================================== #
-    barrel = mk.cylinder(0.0100, 0.134, sections=26)
-    mk.rot_x(barrel, -90.0)
-    mk.place(barrel, 0.0, Y_HG_F, 0.0)
-    b.add(barrel, MAT_STEEL, name="barrel")
-
-    sight = prism_x([(0.296, 0.011), (0.296, 0.028), (0.310, 0.031), (0.318, 0.024)],
-                    -0.0090, 0.0090)
-    b.add(sight, MAT_STEEL, name="front_sight_folded")
-
-    fh = mk.tube(0.0118, 0.0084, 0.054, sections=30)
-    mk.rot_x(fh, -90.0)
-    mk.place(fh, 0.0, Y_FH_R, 0.0)
-    slots = []
     for k in range(6):
-        c = mk.box(0.0028, 0.020, 0.030)
-        mk.rot_x(c, -75.0 + 30.0 * k)
-        mk.place(c, 0.0, Y_FH_R + 0.028, 0.0)
-        slots.append(c)
-    b.add(mk.difference(fh, slots), MAT_STEEL, name="flash_hider")
+        zz = -0.052 - 0.0230 * k
+        rb = mk.box(0.0270, 0.070, 0.0022)
+        mk.place(rb, 0.0, -0.062, zz)
+        ribs.append(rb)
+    b.add(mk.intersection(mk.union(ribs),
+                          prism_x(mag_side, -0.0129, 0.0129)),
+          MAT_MAG_R, name="mag_ribs")
+    well = prism_x([(0.036, Z_BODY_B), (-0.096, Z_BODY_B), (-0.096, -0.058),
+                    (0.036, -0.058)], -0.0205, 0.0205)
+    b.add(well, MAT_POLY, name="magwell")
 
-    # bague de grenadière sous le garde-main
+    # ================================================================== #
+    # 9. CANON + FREIN DE BOUCHE
+    # ================================================================== #
+    barrel = mk.cylinder(0.0086, 0.132, sections=24)
+    mk.rot_x(barrel, -90.0)
+    mk.place(barrel, 0.0, Y_BARREL_R, 0.0)
+    b.add(barrel, MAT_STEEL, name="barrel")
+    collar = mk.cylinder(0.0112, 0.012, sections=24)
+    mk.rot_x(collar, -90.0)
+    mk.place(collar, 0.0, 0.430, 0.0)
+    b.add(collar, MAT_STEEL, name="barrel_collar")
+
+    brake = mk.cylinder(0.0112, 0.050, sections=24)
+    mk.rot_x(brake, -90.0)
+    mk.place(brake, 0.0, Y_BRAKE_R, 0.0)
+    slots = []
+    for k in range(3):                       # 3 paires de fentes latérales
+        for sign in (-1, 1):
+            sl = mk.box(0.020, 0.0068, 0.0130)
+            mk.place(sl, sign * 0.0080, 0.458 + 0.0135 * k, 0.0)
+            slots.append(sl)
+    for updown in (1, -1):                   # 2 fentes sur le dessus/dessous
+        sl = mk.box(0.028, 0.0060, 0.0130)
+        mk.place(sl, 0.0, 0.472, updown * 0.0080)
+        slots.append(sl)
+    bore = mk.cylinder(0.0040, 0.075, sections=18)
+    mk.rot_x(bore, -90.0)
+    mk.place(bore, 0.0, 0.438, 0.0)
+    slots.append(bore)
+    b.add(mk.difference(brake, slots), MAT_STEEL, name="muzzle_brake")
+
+    # ================================================================== #
+    # 10. MÉCANIQUE DE SURFACE
+    # ================================================================== #
+    # disque de charnière de crosse (le gros bouton rond de la référence)
+    disc = mk.cylinder(0.0145, 0.0100, sections=26)
+    mk.rot_y(disc, 90.0)
+    mk.place(disc, -(HW_RC - 0.0010), Y_RECV_R + 0.014, -0.006)
+    b.add(disc, MAT_POLY_DK, name="stock_hinge_disc")
+
+    # sélecteur : levier + disque
+    for side, tag in ((1, "right"), (-1, "left")):
+        s = mk.cylinder(0.0072, 0.0075, sections=20)
+        mk.rot_y(s, 90.0)
+        mk.place(s, side * (HW_RC - 0.0010), -0.150, -0.010)
+        b.add(s, MAT_POLY_DK, name=f"selector_{tag}")
+        lev = prism_x([(-0.152, -0.014), (-0.152, -0.006), (-0.178, -0.020),
+                       (-0.176, -0.028)], side * HW_RC - 0.0030, side * HW_RC + 0.0030)
+        b.add(lev, MAT_BLACK, name=f"selector_lever_{tag}")
+
+    # fenêtre d'éjection + déflecteur
+    port = mk.box(0.0060, 0.058, 0.020)
+    mk.place(port, HW_RC - 0.0018, 0.020, -0.006)
+    b.add(port, MAT_STEEL_DK, name="ejection_port")
+    b.add(prism_x([(-0.010, -0.006), (-0.010, 0.014), (-0.040, 0.020),
+                   (-0.044, -0.002)], HW_RC - 0.0030, HW_RC + 0.0040),
+          MAT_POLY, name="case_deflector")
+
+    # poignée d'armement latérale
+    b.add(prism_x([(0.052, 0.006), (0.052, 0.020), (0.090, 0.024), (0.096, 0.004)],
+                  0.0270, 0.0400), MAT_STEEL, name="charging_handle")
+
+    # goupilles traversantes
+    pins = []
+    for yy in (-0.222, -0.104, 0.086):
+        p = mk.cylinder(0.0034, 2 * HW_RC + 0.002, sections=14)
+        mk.rot_y(p, 90.0)
+        mk.place(p, -(HW_RC + 0.001), yy, -0.004)
+        pins.append(p)
+    b.add(mk.union(pins), MAT_STEEL, name="receiver_pins")
+
+    # grenadière avant sous le garde-main
     loop = mk.tube(0.0050, 0.0030, 0.0075, sections=20)
     mk.rot_y(loop, 90.0)
     mk.place(loop, -0.0038, 0.286, -0.036)
     b.add(loop, MAT_STEEL_DK, name="sling_loop_front")
 
     # ================================================================== #
-    # 10. MÉCANIQUE
-    # ================================================================== #
-    b.add(prism_x([(0.068, Z_RC_T - 0.004), (0.068, Z_RC_T + 0.010),
-                   (0.104, Z_RC_T + 0.013), (0.110, Z_RC_T - 0.002)],
-                  -0.0075, 0.0075), MAT_STEEL_DK, name="charging_handle")
-    port = mk.box(0.0050, 0.060, 0.024)
-    mk.place(port, HW_RC - 0.0015, 0.010, -0.002)
-    b.add(port, MAT_STEEL_DK, name="ejection_port")
-    for side, tag in ((1, "right"), (-1, "left")):
-        sel = mk.cylinder(0.0075, 0.0080, sections=20)
-        mk.rot_y(sel, 90.0)
-        mk.place(sel, side * HW_RC, -0.150, -0.010)
-        b.add(sel, MAT_BLACK, name=f"selector_{tag}")
-        lev = prism_x([(-0.152, -0.016), (-0.152, -0.008), (-0.176, -0.022),
-                       (-0.174, -0.030)], side * HW_RC - 0.0030, side * HW_RC + 0.0030)
-        b.add(lev, MAT_BLACK, name=f"selector_lever_{tag}")
-    pins = []
-    for yy in (-0.198, -0.104, 0.104):
-        p = mk.cylinder(0.0036, 2 * HW_RC + 0.002, sections=14)
-        mk.rot_y(p, 90.0)
-        mk.place(p, -HW_RC - 0.001, yy, -0.004)
-        pins.append(p)
-    b.add(mk.union(pins), MAT_STEEL, name="receiver_pins")
-    hinge = mk.cylinder(0.0052, 2 * 0.0190 + 0.004, sections=20)
-    mk.rot_y(hinge, 90.0)
-    mk.place(hinge, -0.0210, Y_RECV_R, 0.012)
-    b.add(hinge, MAT_STEEL, name="stock_hinge")
-    # plaque de couche : grenadière
-    b.add(prism_x([(-0.492, -0.052), (-0.500, -0.040), (-0.500, -0.030),
-                   (-0.492, -0.028)], -0.0035, 0.0035), MAT_STEEL_DK, name="sling_loop_rear")
-
-    # ================================================================== #
     # 11. SOCKETS
     # ================================================================== #
     b.def_socket("SOCKET_muzzle", pos=(0.0, Y_MUZZLE, 0.0))
-    b.def_socket("SOCKET_grip", pos=(0.0, -0.200, -0.105))
-    b.def_socket("SOCKET_optic", pos=(0.0, -0.150, Z_OPTIC_T))
-    b.def_socket("SOCKET_eject", pos=(HW_RC, 0.010, 0.006))
-    b.def_socket("SOCKET_mag", pos=(0.0, -0.040, -0.170))
-    b.def_socket("SOCKET_rail_top", pos=(0.0, -0.040, Z_ARCH_T))
-    b.def_socket("SOCKET_rail_bottom", pos=(0.0, 0.240, -0.031))
-    b.def_socket("SOCKET_stock", pos=(0.0, Y_RECV_R, 0.012))
+    b.def_socket("SOCKET_grip", pos=(0.0, -0.240, -0.110))
+    b.def_socket("SOCKET_optic", pos=(0.0, -0.180, Z_RAIL_T))
+    b.def_socket("SOCKET_eject", pos=(HW_RC, 0.020, -0.006))
+    b.def_socket("SOCKET_mag", pos=(0.0, -0.030, -0.180))
+    b.def_socket("SOCKET_rail_top", pos=(0.0, -0.060, Z_RAIL_T + 0.0125))
+    b.def_socket("SOCKET_rail_bottom", pos=(0.0, 0.222, -0.026))
+    b.def_socket("SOCKET_stock", pos=(0.0, Y_RECV_R, -0.006))
     return b
 
 
