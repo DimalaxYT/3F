@@ -262,6 +262,21 @@ def build() -> mk.Builder:
     # réduit à un pont de 2,5 mm qui forme le toit.
     b.add(rail(0.112, 0.315, Z_HG_T, teeth=18, height=Z_HG_RAIL_T - Z_HG_T),
           MAT_POLY_DK, name="handguard_rail")
+
+    # Rail INFÉRIEUR court, sous l'avant du garde-main (relevé sur la photo :
+    # dents de z -27,8 à -30,9, pas de 11 mm, de y +250 à +305). Il manquait
+    # complètement et c'est une des signatures visuelles du G36 à rails.
+    # Construit à la main : un rail Picatinny retourné verrait ses dents vers
+    # le haut, il faut donc la semelle puis les dents vers le BAS.
+    under_parts = [prism_x([(0.2480, -0.0272), (0.2480, -0.0300),
+                            (0.3070, -0.0300), (0.3070, -0.0272)],
+                           -HW_HG * 0.72, HW_HG * 0.72)]
+    for k in range(5):
+        yc = 0.3020 - 0.0110 * k
+        under_parts.append(prism_x([(yc - 0.0040, -0.0300), (yc - 0.0040, -0.0316),
+                                    (yc + 0.0040, -0.0316), (yc + 0.0040, -0.0300)],
+                                   -HW_HG * 0.66, HW_HG * 0.66))
+    b.add(mk.union(under_parts), MAT_POLY_DK, name="handguard_rail_low")
     top_rail = rail(-0.244, 0.090, Z_RC_T, teeth=30, height=Z_RAIL_T - Z_RC_T)
     # découpe du rail au-dessus de la fenêtre : on enlève TOUT ce qui est
     # sous +25,2 mm sur la plage de la fenêtre (les dents descendent à +25,
@@ -304,7 +319,32 @@ def build() -> mk.Builder:
                     (-0.3350, -0.0175), (-0.3220, -0.0115), (-0.3220, 0.0020),
                     (-0.3450, 0.0085), (-0.4580, 0.0085), (-0.4640, 0.0040)],
                    -0.040, 0.040)
-    b.add(mk.difference(stock, [swin]), MAT_POLY, name="stock_frame")
+    # Trous de grenadière relevés sur la photo (3 ouvertures de 6 x 8 mm à
+    # y -447/-456/-457, z -47/-47/-56) + la petite goupille de z -90.
+    sling_holes = []
+    for yh, zh in ((-0.4470, -0.0470), (-0.4560, -0.0470), (-0.4570, -0.0560)):
+        hh = mk.cylinder(0.0034, 0.060, sections=16)
+        mk.rot_y(hh, 90.0)
+        mk.place(hh, -0.030, yh, zh)
+        sling_holes.append(hh)
+    pin_h = mk.cylinder(0.0016, 0.060, sections=12)
+    mk.rot_y(pin_h, 90.0)
+    mk.place(pin_h, -0.030, -0.4836, -0.0900)
+    sling_holes.append(pin_h)
+
+    # Treillis du talon : 10 losanges en CREUX (pas de 11,3 mm), mesurés à
+    # y -470..-490. Ce sont des poches borgnes, pas des jours — sur la photo
+    # elles restent sombres alors que le fond est clair.
+    lattice = []
+    for k in range(10):
+        zc = 0.0020 - 0.0113 * k
+        r = 0.0044
+        dia = [( -0.4836, zc + r), (-0.4836 + r * 1.25, zc),
+               (-0.4836, zc - r), (-0.4836 - r * 1.25, zc)]
+        for x0, x1 in ((-0.0195, -0.0128), (0.0128, 0.0195)):
+            lattice.append(prism_x(dia, x0, x1))
+    b.add(mk.difference(stock, sling_holes + lattice + [swin]),
+          MAT_POLY, name="stock_frame")
 
     # ================================================================== #
     # 3. PLAQUE DE COUCHE — échelles triangulaires de la référence
@@ -316,14 +356,8 @@ def build() -> mk.Builder:
                     (-0.4985, -0.0660), (-0.4970, -0.0790), (-0.4950, -0.0890),
                     (-0.4930, -0.0985), (-0.4900, -0.1055), (-0.4865, -0.1130)],
                    -0.0165, 0.0165)
-    ladder = []
-    for k in range(7):
-        zc = 0.024 - 0.0190 * k
-        t = mk.cylinder(0.0040, 0.030, sections=12)
-        mk.rot_y(t, 90.0)
-        mk.place(t, -0.0225, -0.4935, zc)
-        ladder.append(t)
-    b.add(mk.difference(butt, ladder), MAT_POLY, name="butt_pad")
+    # le treillis est taillé dans la crosse, pas dans la plaque
+    b.add(butt, MAT_POLY, name="butt_pad")
 
     # ================================================================== #
     # 4. CHARGEUR — banane mesurée : -33 en haut, pointe à -197
@@ -479,8 +513,29 @@ def build() -> mk.Builder:
     # grenadière avant
     loop = mk.tube(0.0048, 0.0028, 0.0070, sections=20)
     mk.rot_y(loop, 90.0)
-    mk.place(loop, -0.0036, 0.336, -0.014)
+    mk.place(loop, -0.0036, 0.330, -0.011)
     b.add(loop, MAT_STEEL_DK, name="sling_loop_front")
+
+    # Collier de canon : la bague de 24 mm qui serre le canon devant le
+    # garde-main (mesurée à y +0,310, épaisseur 12 mm).
+    clamp = mk.cylinder(0.0120, 0.0120, sections=26)
+    mk.rot_x(clamp, 90.0)
+    mk.place(clamp, 0.0, 0.3100, 0.0)
+    b.add(clamp, MAT_STEEL, name="barrel_clamp")
+
+    # Boulon / douille QD du flanc avant du garde-main (rond de 7 mm cerclé
+    # d'une cuvette, à y +245, z -16 sur la photo).
+    for sx in (-1.0, 1.0):
+        qd = mk.cylinder(0.0070, 0.0050, sections=22)
+        mk.rot_y(qd, 90.0)
+        mk.place(qd, sx * (HW_HG - 0.0012), 0.2450, -0.0160)
+        b.add(qd, MAT_STEEL_DK, name=f"qd_socket_{'l' if sx < 0 else 'r'}")
+        cup = mk.cylinder(0.0105, 0.0022, sections=26)
+        mk.rot_y(cup, 90.0)
+        mk.place(cup, sx * (HW_HG + 0.0004), 0.2450, -0.0160)
+        b.add(mk.difference(cup, [mk.place(mk.rot_y(mk.cylinder(0.0072, 0.010, sections=22), 90.0),
+                                           sx * (HW_HG + 0.0004), 0.2450, -0.0160)]),
+              MAT_POLY_DK, name=f"qd_cup_{'l' if sx < 0 else 'r'}")
 
     # Anneau arrière, sur la joue du talon de crosse (la photo le montre à
     # y -0,470, z -0,045). Le support traverse la crosse : on le perce d'un
@@ -501,7 +556,7 @@ def build() -> mk.Builder:
     # ajoute le support percé dans le nez du garde-main.
     sad2 = mk.cylinder(0.0060, 0.0062, sections=20)
     mk.rot_y(sad2, 90.0)
-    mk.place(sad2, -0.0040, 0.3360, -0.0140)
+    mk.place(sad2, -0.0040, 0.3300, -0.0110)
     b.add(sad2, MAT_STEEL_DK, name="sling_mount_front")
 
     # ================================================================== #

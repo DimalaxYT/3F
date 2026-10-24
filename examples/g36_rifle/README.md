@@ -161,3 +161,32 @@ Les marquages **F / E / S** du boîtier ont été modélisés puis **retirés** 
 2 mm de haut, ils sont dévorés par la résolution de l'atlas UV (mesuré : 3 × 3
 texels). Sur un vrai pipeline ils appartiennent à un décalque séparé, pas à la
 géométrie ni à l'atlas commun.
+
+## Détails de la passe suivante
+
+Relevés un par un sur des zooms de la photo, pas devinés :
+
+- **rail inférieur court** sous l'avant du garde-main — dents de z −27,8 à −30,9,
+  pas de 11 mm, de y +250 à +305. Il manquait complètement, et c'est une des
+  signatures visuelles du G36 à rails. Construit à la main : un Picatinny
+  « retourné » verrait ses dents vers le haut.
+- **treillis du talon** : 10 losanges en creux (pas de 11,3 mm) sur les deux
+  joues, y −470…−490. Ce sont des **poches borgnes**, pas des jours — sur la
+  photo elles restent sombres alors que le fond est clair. Première tentative à
+  2,6 mm de profondeur : le motif disparaissait sous l'ombrage, ramené à 1,2 mm.
+- **3 trous de grenadière** traversants dans la crosse (6 × 8 mm) + la petite
+  goupille de z −90, aux positions mesurées.
+- **douille QD** de 14 mm sur les deux flancs du garde-main (boulon cerclé d'une
+  cuvette), à y +245, z −16.
+- **collier de canon** de 24 mm à y +310.
+- **grenadière avant** replacée à y +330 : je l'avais d'abord déplacée à +350,
+  soit 20 mm trop en avant, en lisant mal l'échelle du zoom.
+
+La plaque de couche a été **simplifiée** : les cylindres à 3 sections qui
+figuraient les « échelles » lisaient comme des dents de peigne et bavaient à
+l'export. Le treillis mesuré est maintenant taillé dans la crosse, là où il est
+vraiment.
+
+Vérifications : 36 pièces · 6 300 tris · watertight · IoU **0,9288** ·
+erreur de contour **1,5 mm / 1,5 mm** · LOD0 **6 324** / 4 276 / 2 794 ·
+1 draw call · 6 UCX · 11 sockets · portes **24/24** · pytest **70 passed**.
