@@ -9,7 +9,10 @@ const GLB = {
   0: BASE + 'g36_rifle_game.glb',
   1: BASE + 'g36_rifle_LOD1.glb',
   2: BASE + 'g36_rifle_LOD2.glb',
+  // maillage haute densité (1,6 M de faces) : chargé à la demande, 50 Mo
+  h: BASE + 'hero/g36_rifle_hero.glb',
 };
+const LABELS = { 0: 'LOD0', 1: 'LOD1', 2: 'LOD2', h: 'HERO' };
 const COLLIDERS = BASE + 'g36_rifle_colliders.glb';
 const MANIFEST = BASE + 'game_manifest.json';
 
@@ -107,7 +110,11 @@ const loadGLB = (url) =>
   new Promise((res, rej) => loader.load(url, res, undefined, rej));
 
 async function showLod(n) {
-  if (!lodCache.has(n)) lodCache.set(n, (await loadGLB(GLB[n])).scene);
+  if (!lodCache.has(n)) {
+    if (n === 'h') $('loader').classList.remove('gone');
+    lodCache.set(n, (await loadGLB(GLB[n])).scene);
+    if (n === 'h') $('loader').classList.add('gone');
+  }
   if (modelRoot) root.remove(modelRoot);
   modelRoot = lodCache.get(n);
   modelRoot.traverse((o) => {
@@ -123,13 +130,18 @@ async function showLod(n) {
   rebuildEdges();
   updateStats();
   document.querySelectorAll('#lodBtns button')
-    .forEach((b) => b.classList.toggle('on', +b.dataset.lod === n));
+    .forEach((b) => b.classList.toggle('on', b.dataset.lod === String(n)));
 }
 
 /* arêtes franches : la signature du hard-surface, on doit pouvoir les montrer */
 function rebuildEdges() {
   edgeGroup.clear();
   if (!modelRoot || !$('tgEdges').checked) return;
+  // EdgesGeometry sur 1,6 M de triangles bloque le fil principal plusieurs
+  // secondes : sur le hero on se contente des normales lissées.
+  let nTri = 0;
+  modelRoot.traverse((o) => { if (o.isMesh && o.geometry.index) nTri += o.geometry.index.count / 3; });
+  if (nTri > 300000) return;
   scene.updateMatrixWorld(true);
   modelRoot.traverse((o) => {
     if (!o.isMesh) return;
@@ -249,7 +261,8 @@ function updateStats() {
     <dt>Largeur</dt><dd>${mm(size.x)} mm</dd>
     <dt>Triangles</dt><dd>${nf(tris)}</dd>
     <dt>Maillages</dt><dd>${meshes}</dd>`;
-  $('subtitle').textContent = `${mm(len)} mm · ${nf(tris)} tris · LOD${currentLod}`;
+  const tag = currentLod === 'h' ? 'HERO' : `LOD${currentLod}`;
+  $('subtitle').textContent = `${mm(len)} mm · ${nf(tris)} tris · ${tag}`;
   document.title = `G36E — ${mm(len)} mm · ${nf(tris)} tris`;
 }
 
@@ -322,10 +335,10 @@ function buildButtons() {
   }
 
   const lc = $('lodBtns');
-  for (const n of [0, 1, 2]) {
+  for (const n of [0, 1, 2, 'h']) {
     const b = document.createElement('button');
-    b.textContent = `LOD${n}`;
-    b.dataset.lod = n;
+    b.textContent = LABELS[n];
+    b.dataset.lod = String(n);
     b.onclick = () => showLod(n).catch(console.error);
     lc.appendChild(b);
   }

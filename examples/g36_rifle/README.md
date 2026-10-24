@@ -223,3 +223,53 @@ recadré), pas dans la planche à taille normale.
 Vérifications : 36 pièces · 6 312 tris · watertight · IoU **0,9282** ·
 erreur de contour **1,6 mm / 1,5 mm** · LOD0 **6 336** / 4 290 / 2 800 ·
 1 draw call · 6 UCX · 11 sockets · portes **24/24** · pytest **70 passed**.
+
+## Maillage haute densité (hero)
+
+Le GLB de jeu fait 6 336 triangles : c'est la bonne résolution pour du temps
+réel, c'est trop peu pour une image fixe. `build_hero.py` en dérive un maillage
+lourd **dans la fourchette demandée (1 000 000 – 10 000 000 de faces)** :
+
+| | jeu | hero |
+|---|---|---|
+| faces | 6 336 | **1 622 016** |
+| sommets | 4 090 | 874 586 |
+| GLB | 1,9 Mo | 50,6 Mo |
+| watertight (sommets soudés) | oui | oui |
+
+Méthode, dans cet ordre :
+
+1. **subdivision 1→4, quatre passes** (×256) avec interpolation des UV au
+   milieu des arêtes. L'atlas 2048 reste *exactement* le même : aucun
+   redépliage, aucune recuisson, donc aucune dérive de teinte entre les deux
+   versions ;
+2. **lissage Taubin avec arêtes vives épinglées**. On calcule l'angle dièdre de
+   chaque arête ; au-delà de 52° (dents de rail, chants, faces de culasse) les
+   sommets sont figés, en dessous (chanfreins, congés, cylindres) la surface
+   est lissée. Résultat : 59 479 sommets figés sur 810 961 — les congés
+   deviennent de vrais rayons au lieu d'une facette de 45° ;
+3. **normales calculées sur les sommets soudés par position**, puis
+   redistribuées aux copies de couture UV, et exportées (`include_normals`).
+   Sans ça, chaque frontière d'îlot de l'atlas réapparaît en pli sombre.
+
+Deux choses ont dû être corrigées en route, et méritent d'être notées :
+
+- **la carte de normales est retirée du hero.** Elle est cuite en espace tangent
+  sur le maillage à 6 336 triangles ; ses frontières d'îlots portent un saut de
+  trame de tangente. Sur le maillage de jeu, les facettes le masquent ; dès que
+  l'ombrage devient lisse, il ressort en longues coutures sombres en travers
+  des flancs (un filtre médian 5×5 sur la carte ne les enlève pas : ce n'est
+  pas un défaut de bord, c'est une rotation de repère par îlot). À 1,6 M de
+  triangles, la géométrie porte le relief, on ne garde que l'albédo et l'ORM ;
+- **le compte de faces est vérifié par le script** : hors de la fourchette, il
+  sort en code 2. Un `--subdiv 2` (101 376 faces) échoue volontairement, c'est
+  le test du garde-fou.
+
+Pourquoi pas 10 M : au-delà de ~2 M, les faces supplémentaires ne font que
+décrire la même surface — c'est la texture 2048 (≈ 2 mm par texel) qui borne
+la finesse visible. Le budget reste dans la fourchette demandée, sans gonfler
+le fichier à 300 Mo pour du vide.
+
+`hero_compare.png` place les deux maillages côte à côte, mêmes vues, même
+éclairage ; le cadrage serré du bas montre les ouïes et le rail. Dans la
+preview, le bouton **HERO** charge le maillage lourd à la demande (50 Mo).
