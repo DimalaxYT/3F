@@ -203,7 +203,7 @@ recadré), pas dans la planche à taille normale.
   escalier les bords. Passe-bas à `taille/22` + échantillonnage bilinéaire :
   le grain redevient du grain. C'était **la** cause des « coulures » qu'on
   prenait pour de la patine.
-- **Fentes du rail recALÉES SUR LE MIL-STD-1913.** Rail de 9,5 mm, fente de
+- **Fentes du rail RE-CALÉES SUR LE MIL-STD-1913.** Rail de 9,5 mm, fente de
   3,2 mm de profondeur et 5,35 mm de large pour un pas de 10 mm. Au passage,
   un piège : `mk.box` est posé sur `z = 0` et non centré en Z — une fente
   placée à 0,95 H flottait au-dessus du rail et la différence ne retirait
