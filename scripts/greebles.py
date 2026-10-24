@@ -181,13 +181,22 @@ def picatinny_rail(length: float = 0.28, width: float = 0.026,
     mk.rot_x(bar, 90.0)
     mk.place(bar, 0.0, L * 0.5, 0.0)
 
+    # v5.9 — fentes recalées sur le MIL-STD-1913 : rail de 9,5 mm, fente
+    # profonde de 3,2 mm (semelle à 66 % de la hauteur) et large de 5,35 mm
+    # pour un pas de 10 mm (53 %). L'ancienne découpe (semelle à 60 %, fente à
+    # 44 %) était déjà juste ; elle est simplement calée au standard.
+    # ATTENTION : `mk.box` est posé sur `z = 0` (il n'est PAS centré en Z).
+    # Placer la fente à 0,95 H l'envoyait flotter au-dessus du rail : la
+    # différence ne retirait rien et le rail sortait en bande lisse.
     n_t = max(2, int(teeth))
-    slot_len = (L * 0.84 / n_t) * 0.44
+    pitch = L * 0.84 / n_t
+    slot_len = pitch * 0.53
+    slot_floor = H * (1.0 - 3.2 / 9.5)
     cuts = []
     for k in range(n_t):
-        yc = -L * 0.42 + (L * 0.84) * (k + 0.5) / n_t
-        slot = mk.box(W * 1.25, slot_len, H * 0.48)
-        mk.place(slot, 0.0, yc, H * 0.60)
+        yc = -L * 0.42 + pitch * (k + 0.5)
+        slot = mk.box(W * 1.25, slot_len, H * 1.30)
+        mk.place(slot, 0.0, yc, slot_floor)
         cuts.append(slot)
     return mk.difference(bar, cuts)
 
