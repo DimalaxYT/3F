@@ -335,12 +335,16 @@ def build() -> mk.Builder:
     # Treillis du talon : 10 losanges en CREUX (pas de 11,3 mm), mesurés à
     # y -470..-490. Ce sont des poches borgnes, pas des jours — sur la photo
     # elles restent sombres alors que le fond est clair.
+    # Les pointes arrière des losanges dépassaient la face de talon et
+    # mordaient dans la plaque de couche : au rendu rapproché le bord du talon
+    # sortait en dents de scie. Le motif est recentré de 3 mm vers l'avant, ses
+    # pointes s'arrêtent maintenant 0,5 mm avant le bord.
     lattice = []
     for k in range(10):
         zc = 0.0020 - 0.0113 * k
         r = 0.0044
-        dia = [( -0.4836, zc + r), (-0.4836 + r * 1.25, zc),
-               (-0.4836, zc - r), (-0.4836 - r * 1.25, zc)]
+        dia = [( -0.4805, zc + r), (-0.4805 + r * 1.25, zc),
+               (-0.4805, zc - r), (-0.4805 - r * 1.25, zc)]
         for x0, x1 in ((-0.0195, -0.0128), (0.0128, 0.0195)):
             lattice.append(prism_x(dia, x0, x1))
     b.add(mk.difference(stock, sling_holes + lattice + [swin]),
@@ -456,12 +460,34 @@ def build() -> mk.Builder:
     # ================================================================== #
     # 8. MÉCANIQUE DE SURFACE
     # ================================================================== #
-    # hausses repliées : mesurées à +80,6 (avant) et +75,1 (arrière)
-    fsp = prism_x([(0.0640, Z_RAIL_T), (0.0640, 0.0806), (0.0690, 0.0806),
-                   (0.0690, Z_RAIL_T)], -0.0035, 0.0035)
+    # Hausses repliées : sommets mesurés à +80,6 (avant) et +75,1 (arrière).
+    # Elles n'étaient qu'une carte de 7 mm d'épaisseur posée sur le rail : au
+    # rendu rapproché ça lisait comme un onglet de carton, pas comme de la
+    # mécanique. Une hausse réelle = embase + deux oreilles de protection + une
+    # lame fine (avant), un bloc à cran de mire (arrière). Les hauteurs de
+    # silhouette sont conservées au dixième de millimètre.
+    fsp = mk.union([
+        prism_x([(0.0575, Z_RAIL_T), (0.0575, Z_RAIL_T + 0.0040),
+                 (0.0755, Z_RAIL_T + 0.0030), (0.0755, Z_RAIL_T)],
+                -0.0055, 0.0055),
+        prism_x([(0.0620, Z_RAIL_T + 0.0035), (0.0620, 0.0806),
+                 (0.0695, 0.0806), (0.0695, Z_RAIL_T + 0.0035)],
+                -0.0058, -0.0040),
+        prism_x([(0.0620, Z_RAIL_T + 0.0035), (0.0620, 0.0806),
+                 (0.0695, 0.0806), (0.0695, Z_RAIL_T + 0.0035)],
+                0.0040, 0.0058),
+        prism_x([(0.0635, Z_RAIL_T + 0.0035), (0.0635, 0.0800),
+                 (0.0685, 0.0800), (0.0685, Z_RAIL_T + 0.0035)],
+                -0.0016, 0.0016),
+    ])
     b.add(fsp, MAT_STEEL, name="front_sight")
-    rsp = prism_x([(-0.2360, Z_RAIL_T), (-0.2360, 0.0751), (-0.2310, 0.0751),
-                   (-0.2310, Z_RAIL_T)], -0.0035, 0.0035)
+    # cran de mire : bloc de 9 mm de large, entaille en U de 3 mm taillée au
+    # sommet (sur une hausse repliée, c'est ce cran qu'on voit de profil)
+    rsp = prism_x([(-0.2380, Z_RAIL_T), (-0.2380, 0.0751),
+                   (-0.2280, 0.0751), (-0.2280, Z_RAIL_T)], -0.0045, 0.0045)
+    notch = mk.box(0.0030, 0.0045, 0.0042)
+    mk.place(notch, 0.0, -0.2330, 0.0751 - 0.0036)
+    rsp = mk.difference(rsp, [notch])
     b.add(rsp, MAT_STEEL, name="rear_sight")
 
     # disque de charnière de crosse

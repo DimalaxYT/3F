@@ -146,8 +146,15 @@ def _load_material_scan(kind: str) -> np.ndarray | None:
         arr = np.asarray(Image.open(p).convert("RGB"), dtype=np.float32) / 255.0
         # Extrait le grain haute/moyenne fréquence neutre en moyenne (= 1.0) pour moduler n'importe quelle teinte !
         lum = 0.299 * arr[..., 0] + 0.587 * arr[..., 1] + 0.114 * arr[..., 2]
-        low = ndimage.gaussian_filter(lum, sigma=max(arr.shape[:2]) / 9.0, mode="wrap")
-        detail_ratio = np.clip(lum / np.maximum(low, 1e-3), 0.62, 1.42)
+        # v5.9 — le grain doit être du GRAIN. Avec un passe-bas à size/9, le
+        # scan gardait ses taches de quelques centimètres : projetées en
+        # triplanaire sur le garde-main d'un G36 (tuile 19,5 cm), elles
+        # ressortaient en plaques grises molles de 2-3 cm qui se lisaient comme
+        # de la boue, et le rendu rapproché les montrait pixelisées au bord
+        # (échantillonnage au plus proche voisin). Passe-bas à size/22 : on ne
+        # garde que la micro-structure de surface.
+        low = ndimage.gaussian_filter(lum, sigma=max(arr.shape[:2]) / 22.0, mode="wrap")
+        detail_ratio = np.clip(lum / np.maximum(low, 1e-3), 0.72, 1.34)
         _SCAN_CACHE[fname] = detail_ratio.astype(np.float32)
     return _SCAN_CACHE[fname]
 
@@ -164,9 +171,24 @@ def sample_triplanar_grain(pos: np.ndarray, nrm: np.ndarray, kind: str = "metal_
     an /= np.sum(an, axis=1, keepdims=True) + 1e-8
 
     def _fetch(u_coord: np.ndarray, v_coord: np.ndarray) -> np.ndarray:
-        ix = np.mod(np.floor(u_coord / tile_m * w).astype(np.int32), w)
-        iy = np.mod(np.floor(v_coord / tile_m * h).astype(np.int32), h)
-        return scan[iy, ix]
+        # Bilinéaire (v5.9) : l'échantillonnage au plus proche voisin laissait
+        # des bords de tache en escalier sur les surfaces rases, visibles dès
+        # 1400 px de rendu.
+        fu = u_coord / tile_m * w
+        fv = v_coord / tile_m * h
+        i0 = np.floor(fu).astype(np.int64)
+        j0 = np.floor(fv).astype(np.int64)
+        # `scan` est un champ 2D (luminance) : les poids restent des vecteurs
+        # 1D. Les passer en colonne (N,1) face à un échantillon (N,) provoquait
+        # un broadcast (N, N) — 37 TiB demandés au premier essai.
+        tu = (fu - i0).astype(np.float32)
+        tv = (fv - j0).astype(np.float32)
+        i0 %= w
+        j0 %= h
+        i1 = (i0 + 1) % w
+        j1 = (j0 + 1) % h
+        return ((scan[j0, i0] * (1.0 - tu) + scan[j0, i1] * tu) * (1.0 - tv)
+                + (scan[j1, i0] * (1.0 - tu) + scan[j1, i1] * tu) * tv).astype(np.float32)
 
     gx = _fetch(pos[:, 1], pos[:, 2])
     gy = _fetch(pos[:, 0], pos[:, 2])

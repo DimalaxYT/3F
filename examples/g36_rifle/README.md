@@ -187,6 +187,39 @@ figuraient les « échelles » lisaient comme des dents de peigne et bavaient à
 l'export. Le treillis mesuré est maintenant taillé dans la crosse, là où il est
 vraiment.
 
-Vérifications : 36 pièces · 6 300 tris · watertight · IoU **0,9288** ·
-erreur de contour **1,5 mm / 1,5 mm** · LOD0 **6 324** / 4 276 / 2 794 ·
+Vérifications : 36 pièces · 6 300 tris · watertight · IoU **0,9282** ·
+erreur de contour **1,5 mm / 1,5 mm** · LOD0 **6 336** / 4 290 / 2 800 ·
+1 draw call · 6 UCX · 11 sockets · portes **24/24** · pytest **70 passed**.
+
+## Passe de propreté
+
+Quatre défauts vus seulement en regardant le GLB de près (rendu 1400 px,
+recadré), pas dans la planche à taille normale.
+
+- **Le grain triplanaire faisait des taches.** Les scans de matière étaient
+  filtrés avec un passe-bas à `taille/9` : ils gardaient leur marbrures de
+  quelques centimètres, que la projection triplanaire ressortait en plaques
+  molles sur les flancs — et l'échantillonnage au plus proche voisin en
+  escalier les bords. Passe-bas à `taille/22` + échantillonnage bilinéaire :
+  le grain redevient du grain. C'était **la** cause des « coulures » qu'on
+  prenait pour de la patine.
+- **Fentes du rail recALÉES SUR LE MIL-STD-1913.** Rail de 9,5 mm, fente de
+  3,2 mm de profondeur et 5,35 mm de large pour un pas de 10 mm. Au passage,
+  un piège : `mk.box` est posé sur `z = 0` et non centré en Z — une fente
+  placée à 0,95 H flottait au-dessus du rail et la différence ne retirait
+  rien. Les 18 îlots de dents sont maintenant vérifiés au maillage, pas à
+  l'œil.
+- **Bord du talon en dents de scie.** Les pointes arrière des losanges du
+  treillis dépassaient la face du talon de 0,4 mm et mordaient dans la plaque
+  de couche. Motif recentré de 3 mm : les pointes s'arrêtent 0,5 mm avant le
+  bord.
+- **Hausses en carton.** Les mires n'étaient qu'une plaque de 7 mm d'épaisseur
+  plantée sur le rail. Remplacées par de la vraie mécanique : embase chanfrée
+  + deux oreilles de protection + lame fine à l'avant, bloc à cran de mire en
+  U à l'arrière. Sommets de silhouette conservés (+80,6 / +75,1), d'où un IoU
+  qui bouge de 0,0006 — on perd six dix-millièmes de silhouette pour une pièce
+  qui ressemble à quelque chose.
+
+Vérifications : 36 pièces · 6 312 tris · watertight · IoU **0,9282** ·
+erreur de contour **1,6 mm / 1,5 mm** · LOD0 **6 336** / 4 290 / 2 800 ·
 1 draw call · 6 UCX · 11 sockets · portes **24/24** · pytest **70 passed**.
