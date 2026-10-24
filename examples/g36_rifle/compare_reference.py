@@ -53,10 +53,15 @@ def main() -> int:
     rgb[A & B] = (242, 242, 242)
     over = Image.fromarray(rgb)
 
-    # encart 3/4
-    b = mod.build()
-    sc = mod.ground(b).scene()
-    q34 = rn.render_view(sc, -138.0, 18.0, size=760, ssaa=1.4, fov=30.0, post=True)
+    # encart 3/4 — rendu du GLB EXPORTÉ quand il existe : le Builder nu ne
+    # montre ni la patine, ni l'albédo, ni l'ORM.
+    glb = ROOT / "exports" / "g36_rifle" / "g36_rifle_game.glb"
+    if glb.is_file():
+        import trimesh
+        sc = trimesh.load(str(glb), force="scene")
+    else:
+        sc = mod.ground(mod.build()).scene()
+    q34 = rn.render_view(sc, -128.0, 16.0, size=760, ssaa=1.4, fov=27.0, post=True)
     q34.thumbnail((w, 560), Image.LANCZOS)
 
     pad = 14
@@ -74,7 +79,7 @@ def main() -> int:
         sheet.paste(img, (pad, y))
         y += h + pad
 
-    dr.text((pad, y + 4), "MODÈLE — vue 3/4 (contrôle du volume)", fill=(235, 235, 235))
+    dr.text((pad, y + 4), "MODÈLE FINAL — GLB texturé, vue 3/4", fill=(235, 235, 235))
     sheet.paste(q34, (pad, y + 30))
 
     out = HERE / "compare_reference.png"

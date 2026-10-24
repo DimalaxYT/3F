@@ -104,7 +104,18 @@ def classify_material_id(mat_use: mk.Material, part_label: str = "") -> int:
         return MAT_WOOD_FABRIC
     if any(k in nm for k in ("gold", "brass", "bronze", "copper", "menuki", "habaki", "seppa", "tsuba")):
         return MAT_GOLD_BRONZE
-    if float(getattr(mat_use, "metallic", 0.0)) >= 0.72 or any(k in nm for k in ("steel", "chrome", "iron", "alu", "rail", "latch", "bolt", "hinge")):
+    # BUG CORRIGÉ (v5.8) : le mot-clé l'emportait sur la physique. Un rail
+    # Picatinny en POLYMÈRE (`metallic = 0.0`, rough 0.62) partait en
+    # « acier brossé » simplement parce que son nom contient « rail » — le
+    # moteur lui appliquait alors un brossage anisotrope et des éclats d'acier
+    # sur une pièce moulée. Le métal déclaré par le matériau passe d'abord.
+    if float(getattr(mat_use, "metallic", 0.0)) >= 0.72:
+        return MAT_BRUSHED_STEEL
+    if float(getattr(mat_use, "metallic", 0.0)) <= 0.15 and any(
+            k in nm for k in ("polymer", "polyamid", "nylon", "plastic", "resin",
+                              "composite", "cerakote", "mag_", "rail")):
+        return MAT_RUBBER_POLY
+    if any(k in nm for k in ("steel", "chrome", "iron", "alu", "rail", "latch", "bolt", "hinge")):
         return MAT_BRUSHED_STEEL
     if any(k in nm for k in _ARMOR_KEYWORDS):
         return MAT_PAINTED_ARMOR
@@ -371,7 +382,13 @@ def apply_game_weathering(
     g_paint = sample_triplanar_grain(pos, nrm, "metal_painted", tile_m=tile_m)
     g_rub   = sample_triplanar_grain(pos, nrm, "rubber", tile_m=tile_m * 0.45)
     grain = np.where(is_steel | is_gold, g_steel, np.where(is_nonmetal, g_rub, g_paint))
-    col *= np.clip(0.93 + 0.14 * grain[:, None], 0.78, 1.18)
+    # v5.8 — amplitude bornée par famille. Sur un polymère moulé, le grain
+    # triplanaire d'un scan acier projeté sur une grande face plane produit des
+    # TACHES GRISES À BORDS NETS (mesuré : écart-type d'albédo 22 pour une photo
+    # à 17 sur le même flanc). Un polymère reçoit un grain fin, un métal garde
+    # son amplitude.
+    g_amp = np.where(is_nonmetal, 0.055, 0.14)[:, None]
+    col = col * np.clip(0.93 + g_amp * grain[:, None], 0.78, 1.18)
     rough = np.clip(rough * (1.09 - 0.18 * grain), 0.05, 1.0)
 
     # Brossage anisotrope fin sur acier (`MAT_BRUSHED_STEEL`)
@@ -445,6 +462,14 @@ def apply_game_weathering(
     pale_paint = np.clip(col * 1.30 + 0.10, 0.0, 1.0)
     w_st = np.clip((sat_c - 0.30) / 0.35, 0.0, 1.0) ** 1.1
     steel_edge = bare_steel[None, :] * (1.0 - w_st[:, None]) + pale_paint * w_st[:, None]
+    # v5.8 — un acier PHOSPHATÉ (canon, frein de bouche, rails) est noir mat :
+    # lui appliquer l'acier nu à 0.78 le faisait briller comme du chrome poli
+    # (p95 d'albédo mesuré à 138 pour une photo à 75). L'usure d'une pièce
+    # sombre reste sombre : on éclaircit la teinte de base au lieu de la
+    # remplacer par du métal nu.
+    lum_b = col @ np.array([0.2126, 0.7152, 0.0722], dtype=np.float32)
+    dark_metal = np.clip((0.30 - lum_b) / 0.20, 0.0, 1.0)[:, None]
+    steel_edge = steel_edge * (1.0 - dark_metal) + np.clip(col * 1.55 + 0.045, 0.0, 1.0) * dark_metal
     target_edge = np.where(
         is_nonmetal[:, None], scuff_rubber[None, :],
         np.where(is_gold[:, None], bright_gold, steel_edge),
@@ -900,6 +925,8 @@ def bake_high_to_low(
     hp_cache: dict | None = None,
     tex_size: int = 1024,
     weathering: bool = True,
+    dirt_amount: float = 0.36,
+    grime_amount: float = 0.22,
     delight_pass: bool = False,
     decal_strength: float = 0.65,
     glass_only: bool = False,
@@ -1030,8 +1057,15 @@ def bake_high_to_low(
 
     if weathering:
         w_amt = 0.0 if (delight_pass or ai_views) else 0.42
-        d_amt = 0.04 if ai_views else (0.14 if delight_pass else 0.30)
-        g_amt = 0.05 if ai_views else (0.08 if delight_pass else 0.18)
+        # v5.8 — les doses ne sont plus figées : `dirt_amount` / `grime_amount`
+        # sont exposés par `export_game_package`. Un objet de studio (arme,
+        # figurine) ne se salit pas comme une caisse de chantier, et une AO
+        # calculée sur une union CSG produit de GROSSES taches molles : à
+        # dirt 0.30 elles lisaient comme un camouflage sur le garde-main du G36.
+        _d = float(np.clip(dirt_amount, 0.0, 1.0))
+        _g = float(np.clip(grime_amount, 0.0, 1.0))
+        d_amt = 0.04 if ai_views else (0.14 * _d / 0.36 if delight_pass else _d)
+        g_amt = 0.05 if ai_views else (0.08 * _g / 0.22 if delight_pass else _g)
         dec_amt = 0.0 if ai_views else (0.06 if delight_pass else decal_strength)
         col_px, rgh_px, mtl_px, ao_px, hgt_px = apply_game_weathering(
             col_px, rgh_px, mtl_px, ao_px, crv_px,
@@ -1497,6 +1531,8 @@ def export_game_package(
     roblox_scale: str = "studs",
     ai_views: dict[str, str | Path] | None = None,
     joint_tex_size: int | None = None,
+    dirt_amount: float = 0.36,
+    grime_amount: float = 0.22,
 ) -> dict:
     """Pipeline de bout en bout produisant un asset Game-Ready complet (`v5.1`) :
       - Fusionne les Draw Calls statiques opaques + cuit les sous-ensembles articulés en PBR complet,
@@ -1724,6 +1760,7 @@ def export_game_package(
             high_vertex_mat_id=v_mid, ai_views=ai_views, hp_cache=hp_cache,
             tex_size=tex_size, weathering=use_weather,
             delight_pass=bool(delight_pass), decal_strength=decal_strength,
+            dirt_amount=dirt_amount, grime_amount=grime_amount,
             glass_only=bool(all_glass_asset),
             glass_tint=glass_tint_value,
         )

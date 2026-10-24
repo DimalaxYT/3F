@@ -41,20 +41,27 @@ import meshkit as mk  # noqa: E402
 # --------------------------------------------------------------------------- #
 # Matières — relevées sur la photo : polymère anthracite, crosse/grip noirs
 # --------------------------------------------------------------------------- #
-MAT_POLY = mk.Material("g36_polymer", "#191d20", metallic=0.0, roughness=0.58)
-MAT_POLY_DK = mk.Material("g36_polymer_dark", "#101315", metallic=0.0, roughness=0.62)
-MAT_BLACK = mk.Material("g36_black_polymer", "#0c0d0f", metallic=0.0, roughness=0.46)
-MAT_STEEL = mk.Material("g36_phosphated", "#24272b", metallic=1.0, roughness=0.42)
-MAT_STEEL_DK = mk.Material("g36_phosphate_dark", "#121417", metallic=1.0, roughness=0.50)
+# Teintes relevées sur la photo : flanc de boîtier 58-65, dessus 48, rail 82,
+# poignée 62, garde-main 69. L'ancien #191d20 tombait à 28 — deux fois trop
+# sombre, et tout le modèle lisait comme une silhouette noire sans matière.
+MAT_POLY = mk.Material("g36_polymer", "#2b2f32", metallic=0.0, roughness=0.58)
+MAT_POLY_DK = mk.Material("g36_polymer_dark", "#23272a", metallic=0.0, roughness=0.60)
+MAT_BLACK = mk.Material("g36_black_polymer", "#1e2124", metallic=0.0, roughness=0.50)
+MAT_STEEL = mk.Material("g36_phosphated", "#2f3236", metallic=1.0, roughness=0.46)
+MAT_STEEL_DK = mk.Material("g36_phosphate_dark", "#212428", metallic=1.0, roughness=0.52)
 MAT_BRIGHT = mk.Material("g36_bare_steel", "#5c6268", metallic=1.0, roughness=0.25)
 MAT_RUBBER = mk.Material("g36_rubber", "#08090a", metallic=0.0, roughness=0.95)
 # Polymère translucide vert pâle du chargeur réel (la photo le montre presque
 # aussi clair que le fond, c'est ce qui trompait le masque de référence).
-MAT_MAG = mk.Material("g36_mag_translucent", "#a9b8a3", metallic=0.0,
-                      roughness=0.24, opacity=0.62, transmission=0.35)
+# Le chargeur réel est translucide, mais une transmission > 0 le délave contre
+# un fond clair — dans le renderer comme dans three.js, il virait au gris-vert
+# pâle alors que son albédo est bien (73,82,69). On garde donc un polymère
+# vert olive OPAQUE, légèrement plus clair que le reste de l'arme, et les
+# nervures sombres suggèrent la translucidité sans dépendre du fond.
+MAT_MAG = mk.Material("g36_mag_smoke", "#6f7c68", metallic=0.0, roughness=0.33)
 MAT_GLASS = mk.mat.glass("#c8d8dc", opacity=0.20, roughness=0.03)
 MAT_RED = mk.mat.emissive("#ff2010", 2.6)
-MAT_MAG_R = mk.Material("g36_mag_rib", "#87957f", metallic=0.0, roughness=0.34)
+MAT_MAG_R = mk.Material("g36_mag_rib", "#4a5545", metallic=0.0, roughness=0.42)
 # --------------------------------------------------------------------------- #
 # Primitives hard-surface
 # --------------------------------------------------------------------------- #
@@ -264,7 +271,16 @@ def build() -> mk.Builder:
     rail_win = prism_x([(-0.1275, 0.0400), (-0.1275, 0.0536),
                         (0.0745, 0.0536), (0.0745, 0.0400)],
                        -0.060, 0.060)
-    b.add(mk.difference(top_rail, [rail_win]), MAT_POLY_DK,
+    railed = mk.difference(top_rail, [rail_win])
+    # Gravure longitudinale des joues du rail : deux stries de 0,6 mm de
+    # profondeur. À 4 mm du plan de joint elles accrochent la lumière et font
+    # lire la pièce comme une vraie Picatinny usinée plutôt qu'un bloc lisse.
+    grooves = []
+    for gx in (-0.0082, -0.0046, 0.0046, 0.0082):
+        g = mk.box(0.0007, 0.132, 0.0022)
+        mk.place(g, gx, 0.045, 0.0568)
+        grooves.append(g)
+    b.add(mk.difference(railed, grooves), MAT_POLY_DK,
           name="receiver_rail")
 
     # ================================================================== #
@@ -420,15 +436,22 @@ def build() -> mk.Builder:
     mk.place(disc, -(HW_RC - 0.0010), Y_RECV_R + 0.016, -0.004)
     b.add(disc, MAT_POLY_DK, name="stock_hinge_disc")
 
-    # sélecteur ambidextre
+    # Sélecteur ambidextre. Sur la photo il affleure le flanc : un disque de
+    # 15 mm à peine saillant, barré d'un bras coudé. La version précédente
+    # sortait de 6 mm et le pivot de 18 mm de diamètre — en 3/4 ça lisait comme
+    # une excroissance sombre, pas comme un sélecteur.
     for side, tag in ((1, "right"), (-1, "left")):
-        s = mk.cylinder(0.0070, 0.0075, sections=20)
-        mk.rot_y(s, 90.0)
-        mk.place(s, side * (HW_RC - 0.0010), -0.152, -0.008)
-        b.add(s, MAT_POLY_DK, name=f"selector_{tag}")
-        lev = prism_x([(-0.154, -0.012), (-0.154, -0.004), (-0.180, -0.018),
-                       (-0.178, -0.026)], side * HW_RC - 0.0030,
-                      side * HW_RC + 0.0030)
+        base = mk.cylinder(0.0072, 0.0034, sections=20)
+        mk.rot_y(base, 90.0)
+        mk.place(base, side * (HW_RC - 0.0004), -0.1520, -0.0100)
+        b.add(base, MAT_BLACK, name=f"selector_{tag}")
+        piv = mk.cylinder(0.0052, 0.0022, sections=18)
+        mk.rot_y(piv, 90.0)
+        mk.place(piv, side * (HW_RC + 0.0028), -0.1520, -0.0100)
+        b.add(piv, MAT_POLY_DK, name=f"selector_pivot_{tag}")
+        lev = prism_x([(-0.1490, -0.0100), (-0.1500, -0.0170),
+                       (-0.1660, -0.0270), (-0.1672, -0.0205)],
+                      side * (HW_RC + 0.0030), side * (HW_RC + 0.0044))
         b.add(lev, MAT_BLACK, name=f"selector_lever_{tag}")
 
     # fenêtre d'éjection + déflecteur
@@ -458,6 +481,28 @@ def build() -> mk.Builder:
     mk.rot_y(loop, 90.0)
     mk.place(loop, -0.0036, 0.336, -0.014)
     b.add(loop, MAT_STEEL_DK, name="sling_loop_front")
+
+    # Anneau arrière, sur la joue du talon de crosse (la photo le montre à
+    # y -0,470, z -0,045). Le support traverse la crosse : on le perce d'un
+    # vrai trou de 4,6 mm, sinon l'anneau lit comme une rondelle collée.
+    saddle = mk.cylinder(0.0085, 0.0080, sections=24)
+    mk.rot_y(saddle, 90.0)
+    mk.place(saddle, -0.0210, -0.4700, -0.0450)
+    hole = mk.cylinder(0.0046, 0.030, sections=18)
+    mk.rot_y(hole, 90.0)
+    mk.place(hole, -0.0350, -0.4700, -0.0450)
+    b.add(mk.difference(saddle, [hole]), MAT_STEEL_DK, name="sling_mount_rear")
+    ring = mk.tube(0.0068, 0.0026, 0.0030, sections=24)
+    mk.rot_y(ring, 90.0)
+    mk.place(ring, -0.0235, -0.4700, -0.0610)
+    b.add(ring, MAT_STEEL_DK, name="sling_loop_rear")
+
+    # La grenadière avant est elle aussi un anneau, pas un simple fil : on
+    # ajoute le support percé dans le nez du garde-main.
+    sad2 = mk.cylinder(0.0060, 0.0062, sections=20)
+    mk.rot_y(sad2, 90.0)
+    mk.place(sad2, -0.0040, 0.3360, -0.0140)
+    b.add(sad2, MAT_STEEL_DK, name="sling_mount_front")
 
     # ================================================================== #
     # 9. SOCKETS

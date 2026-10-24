@@ -8,8 +8,11 @@ vue de profil photographique. Référence : version à **rails Picatinny intégr
 
 ![Comparaison référence / rendu](compare_reference.png)
 
+![Planche matériaux — GLB texturé](material_sheet.png)
+
 **IoU de silhouette 0,928** · erreur de contour **1,5 mm en haut / 1,4 mm en bas**
 sur une arme de 277 mm de haut — soit 0,5 % de la hauteur.
+**Albédo médian 48,4** pour **51** mesurés sur la photo (écart 5 %).
 
 ## Méthode
 
@@ -125,3 +128,36 @@ Sockets : `muzzle`, `grip`, `optic`, `eject`, `mag`, `rail_top`, `rail_bottom`,
   le cadre ; à fov 14° on ne voit qu'une moitié.
 - Les « facettes diagonales » vues en 3/4 sur le garde-main ne sont **pas** de la
   géométrie : c'est l'ombre du rail projetée sur le flanc.
+
+## Matériaux et textures
+
+Le rendu du `Builder` nu ne dit **rien** des textures : ni la patine, ni
+l'albédo, ni l'ORM. `material_sheet.py` rend donc le **GLB exporté** et mesure
+ses cartes. C'est là que trois défauts sont apparus, invisibles au contrôle de
+silhouette :
+
+| Défaut | Mesure avant | Correction |
+|---|---|---|
+| Rails en **polymère** classés « acier brossé » | brossage anisotrope + éclats d'acier sur une pièce moulée | `classify_material_id` respecte d'abord `metallic` du matériau |
+| Acier **phosphaté** usé à l'acier nu | p95 d'albédo **138** pour une photo à 75 | un métal sombre s'use en s'éclaircissant, pas en virant au chrome |
+| Grain triplanaire sur grande face plane | écart-type d'albédo **22,9** pour 17 en photo | amplitude du grain bornée à 0,055 sur les non-métaux |
+| Crème / crasse d'AO sur l'union CSG | taches molles lisant comme un camouflage | `dirt_amount` / `grime_amount` exposés par export (0,10 / 0,06 ici) |
+| Teintes deux fois trop sombres | `#191d20` = luminance 28 | recalées sur la photo : polymère 58-65, dessus 48, rail 82 |
+| Chargeur qui se délavait | transmission 0,35 + fond clair | polymère **opaque** vert olive ; la translucidité est suggérée par les nervures |
+
+Les cartes sont écrites en 2048² (Unreal : BC / N / N_gl DirectX −Y / ORM ;
+Roblox : ColorMap 1024², Normal, Roughness, Metalness séparées).
+
+## Détails ajoutés sur cette passe
+
+- **sélecteur** affleurant : disque 14 mm + pivot 10 mm + bras coudé. La version
+  précédente sortait de 6 mm et lisait comme une excroissance sombre en 3/4.
+- **anneaux de grenadière** avant et arrière, avec support **percé** d'un vrai
+  trou de 4,6 mm — un anneau non percé lit comme une rondelle collée.
+- **gravure longitudinale du rail** : quatre stries de 0,6 mm sur les joues, ce
+  qui fait lire une Picatinny usinée plutôt qu'un bloc lisse.
+
+Les marquages **F / E / S** du boîtier ont été modélisés puis **retirés** : à
+2 mm de haut, ils sont dévorés par la résolution de l'atlas UV (mesuré : 3 × 3
+texels). Sur un vrai pipeline ils appartiennent à un décalque séparé, pas à la
+géométrie ni à l'atlas commun.
