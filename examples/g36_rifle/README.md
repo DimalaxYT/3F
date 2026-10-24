@@ -46,6 +46,18 @@ Silhouette extraite par seuillage + remplissage des trous intérieurs, échelle
 Validation quantitative : **IoU silhouette 0,79** contre le masque de la photo
 (l'overlay rouge/bleu est régénéré par le harnais décrit plus bas).
 
+## Preview temps réel
+
+```bash
+python3 preview/serve_preview.py --port 8000   # -> http://localhost:8000
+```
+
+Visualiseur WebGL (three.js vendorisé, zéro CDN) : orbite, bascule LOD0/1/2,
+affichage des arêtes franches, des sockets et des colliders UCX. Le mode
+**comparaison** superpose la photo de référence à la silhouette 3D avec un
+séparateur glissant — c'est le contrôle qui manquait à la v1. Voir
+[`preview/README.md`](../../preview/README.md).
+
 ## Lancer la génération
 
 ```bash

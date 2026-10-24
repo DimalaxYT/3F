@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>G36E — preview hard-surface</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="stage">
+  <canvas id="view"></canvas>
+
+  <!-- Comparaison avec la photo de calage -->
+  <div id="compareLayer" class="hidden">
+    <img id="refPhoto" src="assets/reference_cropped.jpg" alt="Photo de référence">
+    <div id="splitHandle"><span></span></div>
+    <div id="compareTagRef">PHOTO</div>
+    <div id="compareTag3d">3D</div>
+  </div>
+
+  <div id="hud">
+    <div id="title">
+      <h1>G36E <span>hard-surface</span></h1>
+      <p id="subtitle">chargement…</p>
+    </div>
+    <div id="hint">clic-glisser : orbite · molette : zoom · <kbd>1</kbd>–<kbd>5</kbd> : vues · <kbd>R</kbd> : reset</div>
+  </div>
+
+  <div id="loader"><div class="ring"></div><p>Chargement du modèle…</p></div>
+</div>
+
+<aside id="panel">
+  <section>
+    <h2>Modèle</h2>
+    <div class="lods" id="lodBtns"></div>
+    <dl id="stats"></dl>
+  </section>
+
+  <section>
+    <h2>Vues</h2>
+    <div class="views" id="viewBtns"></div>
+  </section>
+
+  <section>
+    <h2>Affichage</h2>
+    <label class="sw"><input type="checkbox" id="tgSpin" checked><span></span>Rotation auto</label>
+    <label class="sw"><input type="checkbox" id="tgEdges"><span></span>Arêtes franches</label>
+    <label class="sw"><input type="checkbox" id="tgWire"><span></span>Filaire</label>
+    <label class="sw"><input type="checkbox" id="tgSockets"><span></span>Sockets gameplay</label>
+    <label class="sw"><input type="checkbox" id="tgColliders"><span></span>Colliders UCX</label>
+    <label class="sw"><input type="checkbox" id="tgGrid"><span></span>Sol & grille</label>
+  </section>
+
+  <section>
+    <h2>Comparaison photo</h2>
+    <button id="btnCompare" class="wide">Superposer la photo de référence</button>
+    <div id="compareCtl" class="hidden">
+      <label class="rg"><span>Opacité</span><input type="range" id="rgOpacity" min="0" max="100" value="50"></label>
+      <label class="rg"><span>Découpe</span><input type="range" id="rgSplit" min="0" max="100" value="50"></label>
+      <label class="sw"><input type="checkbox" id="tgBlend"><span></span>Superposition totale</label>
+      <p class="note">La silhouette 3D est cadrée exactement sur la boîte englobante, la photo sur son masque : les deux se superposent au pixel. IoU mesuré au harnais : <b>0,79</b>.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Livraison</h2>
+    <a class="dl" href="/exports/g36_rifle/g36_rifle.zip" download>Télécharger le paquet .zip</a>
+    <a class="dl ghost" href="/examples/g36_rifle/qa_game_sheet.png" target="_blank" rel="noopener">Planche QA</a>
+    <p class="note" id="gatesNote">gates : 24/24 · LOD0 2 860 tris</p>
+  </section>
+</aside>
+
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.min.js" } }
+</script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
